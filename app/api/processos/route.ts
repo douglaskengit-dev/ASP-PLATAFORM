@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
     cadastro_tr_status: p.cadastro_tr?.status || null,
     proposta_aprovada: !!p.proposta_aprovada,
     historico_etapas: p.historico_etapas || [],
+    subetapas: p.subetapas || {},
     criado_por: ehAdmin
       ? { id: p.criador?.id ?? p.criado_por, nome: p.criador?.nome_completo || p.criador?.email || "—" }
       : null,

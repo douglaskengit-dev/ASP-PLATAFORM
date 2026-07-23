@@ -11,3 +11,6 @@ out
 # Arquivos de teste usados durante o desenvolvimento (não fazem parte do sistema)
 teste.pdf
 texto-extraido.txt
+
+# Cache local do Supabase CLI (supabase link/db push)
+supabase/.temp

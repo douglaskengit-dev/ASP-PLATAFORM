@@ -13,6 +13,8 @@ import Modal from "@/app/components/Modal";
 import FormularioOrgao from "@/app/components/FormularioOrgao";
 import AnaliseTRConteudo from "@/app/components/AnaliseTRConteudo";
 import ProcessoTimeline from "@/app/components/ProcessoTimeline";
+import SubetapaRelatorio from "@/app/components/SubetapaRelatorio";
+import { AcaoSubetapa, GRUPO_VAZIO, GrupoSubetapas, etapaTemSubetapas } from "@/lib/processos/subetapas";
 
 interface Etapa { nome: string; tipo: "auto" | "manual" }
 interface Orgao { id: string; razao_social: string; tipo_ente?: string; cidade?: string; uf?: string }
@@ -22,6 +24,7 @@ interface Processo {
   etapa: number; documentos: { oficio?: { nome: string } }; arquivos: string[];
   cadastro_tr_id: string | null; cadastro_tr_status: "em_analise" | "concluida" | null;
   proposta_aprovada: boolean; historico_etapas: HistoricoEtapa[];
+  subetapas: Record<string, GrupoSubetapas>;
   criado_por: { id: string; nome: string } | null;
 }
 function hoje() { return new Date().toISOString().slice(0, 10); }
@@ -197,6 +200,16 @@ function FollowupConteudo() {
     } finally {
       setConfirmando(false);
     }
+  }
+
+  async function executarAcaoSubetapa(id: string, acao: AcaoSubetapa, motivo?: string) {
+    const r = await fetch(`/api/processos/${id}/subetapa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acao, motivo }),
+    });
+    if (!r.ok) alert((await r.json()).erro || "Erro ao atualizar a subetapa.");
+    await carregar();
   }
 
   async function enviarTR(id: string, arquivo: File) {
@@ -529,6 +542,15 @@ function FollowupConteudo() {
                 </button>
                 <button type="button" className="btn-doc" onClick={() => setEtapaPendente(null)}>Cancelar</button>
               </div>
+            )}
+
+            {etapaTemSubetapas(et.nome) && (
+              <SubetapaRelatorio
+                processoId={p.id}
+                grupo={p.subetapas?.[String(p.etapa)] || GRUPO_VAZIO}
+                perfil={perfil}
+                onAcao={executarAcaoSubetapa}
+              />
             )}
 
             {p.historico_etapas?.length > 0 && (

@@ -7,12 +7,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Modal from "./Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { GrupoSubetapas, etapaTemSubetapas } from "@/lib/processos/subetapas";
 
 interface Etapa { nome: string; tipo: "auto" | "manual" }
 interface Processo {
   id: string; titulo: string; etapa: number;
   arquivos: string[]; documentos: { oficio?: unknown };
   atualizado_em: string;
+  subetapas?: Record<string, GrupoSubetapas>;
 }
 
 function fmtData(iso: string) {
@@ -114,7 +116,16 @@ export default function NotificacoesBotao() {
     return [{ p, msg: `Fase atual: ${etapas[p.etapa]?.nome || "-"}`, pronto: false }];
   });
 
-  const total = avisosAutomacao.length + avisosManual.length + solicitacoes.length + feedbacks.length;
+  // Relatórios (macrofases "Relatório"/"Relatório de Limpeza") reprovados na
+  // revisão — precisam ser reenviados.
+  const relatoriosReenvio = ativos.filter((p) => {
+    const nomeEtapa = etapas[p.etapa]?.nome;
+    if (!etapaTemSubetapas(nomeEtapa)) return false;
+    return p.subetapas?.[String(p.etapa)]?.atual === "reenvio_necessario";
+  });
+
+  const total =
+    avisosAutomacao.length + avisosManual.length + solicitacoes.length + feedbacks.length + relatoriosReenvio.length;
 
   return (
     <>
@@ -195,6 +206,22 @@ export default function NotificacoesBotao() {
                     {resolvendo === f.id ? "Salvando..." : "✓ Marcar como resolvido"}
                   </button>
                 </div>
+              ))}
+            </>
+          )}
+          {relatoriosReenvio.length > 0 && (
+            <>
+              <span className="detalhe" style={{ fontWeight: 700, display: "block", margin: "4px 0" }}>🔁 Relatórios com reenvio necessário</span>
+              {relatoriosReenvio.map((p) => (
+                <Link href={`/followup?processo=${p.id}`} className="item notif" key={p.id}
+                  style={{ display: "block", textDecoration: "none", color: "inherit", cursor: "pointer" }}
+                  title="Abrir este processo no Follow-up" onClick={() => setAberto(false)}>
+                  <div>
+                    <strong>{p.titulo}</strong>
+                    <span className="detalhe">Reprovado na revisão — {etapas[p.etapa]?.nome}</span>
+                    <span className="detalhe">Última atualização: {fmtData(p.atualizado_em)}</span>
+                  </div>
+                </Link>
               ))}
             </>
           )}
