@@ -1,13 +1,12 @@
 /**
- * Macrofases do fluxo de projetos públicos (Fluxograma Macro).
+ * Macrofases do fluxo de processos (Fluxograma Macro).
  *
  * tipo "auto": fase coberta pela automação de documentos — avança sozinha
- * conforme os documentos entram (TR → Proposta → Ofício). Não pode ser
- * selecionada manualmente.
- * tipo "manual": fase conduzida fora do sistema (contrato, execução etc.).
+ * conforme os documentos entram. Não pode ser selecionada manualmente.
+ * tipo "manual": fase conduzida pela equipe, avançada manualmente pelo sistema.
  *
- * Ordem do processo de documentos (D14): TR > Proposta > Ofício — o Ofício só
- * é liberado depois que a Proposta é aprovada.
+ * Todas as fases do fluxo atual são manuais — não há automação de documentos
+ * disparando o avanço de etapa.
  */
 export type TipoEtapa = "auto" | "manual";
 
@@ -17,14 +16,14 @@ export interface EtapaFluxo {
 }
 
 export const ETAPAS_FLUXO: EtapaFluxo[] = [
-  { nome: "TR recebido e validado", tipo: "auto" },
-  { nome: "Proposta (elaboração e envio)", tipo: "auto" },
-  { nome: "Proposta aprovada / Ofício emitido", tipo: "auto" },
-  { nome: "Contrato assinado", tipo: "manual" },
-  { nome: "Kick-off realizado", tipo: "manual" },
-  { nome: "Em execução (dados e serviços)", tipo: "manual" },
-  { nome: "Relatório em validação", tipo: "manual" },
-  { nome: "Aprovado / Faturamento", tipo: "manual" },
+  { nome: "Abertura", tipo: "manual" },
+  { nome: "Dados Iniciais do Cliente", tipo: "manual" },
+  { nome: "Agendar visita", tipo: "manual" },
+  { nome: "Coleta de dados de Campo", tipo: "manual" },
+  { nome: "Relatório", tipo: "manual" },
+  { nome: "Agendar execução", tipo: "manual" },
+  { nome: "Relatório de Limpeza", tipo: "manual" },
+  { nome: "Finalizado", tipo: "manual" },
 ];
 
 /** Documentos essenciais anexáveis manualmente ao processo. */
