@@ -28,3 +28,10 @@ export const ETAPAS_FLUXO: EtapaFluxo[] = [
 
 /** Documentos essenciais anexáveis manualmente ao processo. */
 export const DOCS_FOLLOWUP = ["oficio"] as const;
+
+/** A etapa "Coleta de dados de Campo" tem a ferramenta Medidor de Sedimento
+ * disponível (public/ferramentas/medidor-sedimento.html), embutida por
+ * iframe num modal. */
+export function etapaTemMedidorSedimento(nomeEtapa: string | undefined): boolean {
+  return nomeEtapa === "Coleta de dados de Campo";
+}

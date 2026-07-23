@@ -4,7 +4,8 @@ import { baixarArquivo, respostaArquivo, DOCX_MIME } from "@/lib/processos/arqui
 
 export const runtime = "nodejs";
 
-/** Download de um documento do processo: tr | proposta | resumo | oficio.
+/** Download de um documento do processo: tr | proposta | resumo | oficio |
+ * medicao_sedimento.
  * A leitura do registro passa pelo RLS (dono ou admin); o arquivo em si vem
  * do bucket privado via cliente admin. */
 export async function GET(
@@ -54,6 +55,11 @@ export async function GET(
     case "oficio":
       caminho = documentos.oficio?.arquivo;
       nome = documentos.oficio?.nome || "Oficio.docx";
+      break;
+    case "medicao_sedimento":
+      caminho = arquivos.medicao_sedimento;
+      nome = `Medicao de Sedimento - ${p.titulo.slice(0, 60)}.pdf`;
+      mime = "application/pdf";
       break;
     default:
       return NextResponse.json({ erro: "Documento inválido." }, { status: 404 });

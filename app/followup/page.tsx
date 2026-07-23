@@ -15,6 +15,7 @@ import AnaliseTRConteudo from "@/app/components/AnaliseTRConteudo";
 import ProcessoTimeline from "@/app/components/ProcessoTimeline";
 import SubetapaRelatorio from "@/app/components/SubetapaRelatorio";
 import { AcaoSubetapa, GRUPO_VAZIO, GrupoSubetapas, etapaTemSubetapas } from "@/lib/processos/subetapas";
+import { etapaTemMedidorSedimento } from "@/lib/processos/etapas";
 
 interface Etapa { nome: string; tipo: "auto" | "manual" }
 interface Orgao { id: string; razao_social: string; tipo_ente?: string; cidade?: string; uf?: string }
@@ -69,6 +70,10 @@ function FollowupConteudo() {
 
   // D40: "Analisar TR" abre em modal, em vez de navegar para /tr-analise
   const [modalAnaliseTr, setModalAnaliseTr] = useState<{ processoId: string; orgaoId: string } | null>(null);
+
+  // Medidor de Sedimento — ferramenta de campo embutida por iframe
+  const [modalMedidor, setModalMedidor] = useState<string | null>(null);
+  const [enviandoMedicao, setEnviandoMedicao] = useState<string | null>(null);
 
   // D36: editar título do processo
   const [editandoTitulo, setEditandoTitulo] = useState<string | null>(null);
@@ -212,6 +217,21 @@ function FollowupConteudo() {
     await carregar();
   }
 
+  async function enviarMedicao(id: string, arquivo: File) {
+    setEnviandoMedicao(id);
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", arquivo);
+      const r = await fetch(`/api/processos/${id}/medicao`, { method: "POST", body: fd });
+      if (!r.ok) throw new Error((await r.json()).erro || "Erro ao anexar o relatório.");
+      await carregar();
+    } catch (err) {
+      alert(`❌ ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setEnviandoMedicao(null);
+    }
+  }
+
   async function enviarTR(id: string, arquivo: File) {
     const fd = new FormData();
     fd.append("arquivo", arquivo);
@@ -352,6 +372,19 @@ function FollowupConteudo() {
         </Modal>
       )}
 
+      {/* Medidor de Sedimento — ferramenta de campo independente (HTML/JS
+          próprios, cálculo local), embutida por iframe para não conflitar
+          com o CSS/JS do resto do app. */}
+      {modalMedidor && (
+        <Modal titulo="📐 Medidor de Sedimento" onFechar={() => setModalMedidor(null)} largo semPadding>
+          <iframe
+            src="/ferramentas/medidor-sedimento.html"
+            title="Medidor de Sedimento"
+            style={{ width: "100%", height: "80vh", border: "none", display: "block" }}
+          />
+        </Modal>
+      )}
+
       {/* D36: filtros — Órgão, Data (período) e Status (fase) */}
       <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 20 }}>
         <div>
@@ -415,6 +448,7 @@ function FollowupConteudo() {
     const temTR = p.arquivos.includes("tr");
     const temProposta = p.arquivos.includes("proposta");
     const temOficio = !!p.documentos?.oficio;
+    const temMedicao = p.arquivos.includes("medicao_sedimento");
     const finalizado = ehFinalizado(p);
     const destacado = processoAlvo === p.id;
     return (
@@ -551,6 +585,42 @@ function FollowupConteudo() {
                 perfil={perfil}
                 onAcao={executarAcaoSubetapa}
               />
+            )}
+
+            {etapaTemMedidorSedimento(et.nome) && (
+              <div
+                style={{
+                  width: "100%", border: "1px solid var(--borda)", borderRadius: 8,
+                  padding: 10, background: "var(--bg-suave)", display: "flex",
+                  flexDirection: "column", gap: 8,
+                }}
+              >
+                <span className="detalhe" style={{ fontWeight: 700 }}>📐 Medidor de Sedimento</span>
+                <div className="downloads">
+                  <button type="button" className="btn-doc" onClick={() => setModalMedidor(p.id)}
+                    title="Abrir a ferramenta de medição — cálculo local, exporte o PDF ao final">
+                    📐 Abrir ferramenta
+                  </button>
+                  {temMedicao ? (
+                    <>
+                      <a className="btn-dl btn-sec" href={`/api/processos/${p.id}/download/medicao_sedimento`}
+                        title="Baixar o relatório de medição anexado">📎 Relatório anexado</a>
+                      <label className="btn-doc" title="Substituir o relatório anexado por outro PDF">
+                        ↻ Substituir relatório
+                        <input type="file" hidden accept=".pdf"
+                          onChange={(e) => e.target.files?.[0] && enviarMedicao(p.id, e.target.files[0])} />
+                      </label>
+                    </>
+                  ) : (
+                    <label className="btn-doc pendente"
+                      title="Depois de exportar o PDF pela ferramenta, anexe-o aqui">
+                      {enviandoMedicao === p.id ? "Enviando..." : "＋ Anexar relatório (PDF)"}
+                      <input type="file" hidden accept=".pdf" disabled={enviandoMedicao === p.id}
+                        onChange={(e) => e.target.files?.[0] && enviarMedicao(p.id, e.target.files[0])} />
+                    </label>
+                  )}
+                </div>
+              </div>
             )}
 
             {p.historico_etapas?.length > 0 && (

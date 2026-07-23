@@ -16,6 +16,8 @@ export default function Modal({
   onFechar,
   children,
   zIndex = 100,
+  largo = false,
+  semPadding = false,
 }: {
   titulo: string;
   onFechar: () => void;
@@ -24,6 +26,12 @@ export default function Modal({
    * disparado de dentro do modal "Abrir novo processo") sem que os dois
    * fundos escurecidos se somem de forma confusa. */
   zIndex?: number;
+  /** Modal mais largo — usado para conteúdo que precisa de mais espaço
+   * (ex.: ferramentas embutidas por iframe). */
+  largo?: boolean;
+  /** Remove o padding interno — usado quando o filho (ex.: iframe) já
+   * preenche a área sozinho, sem margem em volta. */
+  semPadding?: boolean;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -61,7 +69,7 @@ export default function Modal({
           color: "var(--texto)",
           borderRadius: 12,
           width: "100%",
-          maxWidth: 720,
+          maxWidth: largo ? 1120 : 720,
           maxHeight: "calc(100vh - 80px)",
           display: "flex",
           flexDirection: "column",
@@ -77,6 +85,7 @@ export default function Modal({
             borderBottom: "1px solid var(--borda)",
             background: "var(--escuro)",
             borderRadius: "12px 12px 0 0",
+            flexShrink: 0,
           }}
         >
           <strong style={{ color: "var(--primaria)", fontSize: 16 }}>{titulo}</strong>
@@ -98,7 +107,7 @@ export default function Modal({
             ✕
           </button>
         </div>
-        <div style={{ padding: 20, overflowY: "auto" }}>{children}</div>
+        <div style={{ padding: semPadding ? 0 : 20, overflowY: "auto", flex: 1, minHeight: 0 }}>{children}</div>
       </div>
     </div>
   );
