@@ -1,13 +1,13 @@
 :root {
-  --primaria: #2b5578;      /* azul-marinho da nova marca */
-  --primaria-claro: #e8eef3;
-  --verde-fia: var(--primaria);        /* telas herdadas re-tematizadas */
+  --primaria: #1b4a9c;
+  --primaria-claro: #e9eff7;
+  --acento: #e8c51f;
+  --acento-escuro: #c9a913;
+  --verde-fia: var(--primaria);
   --verde-claro: var(--primaria-claro);
   --cinza: #64748b;
   --borda: #d7dee5;
-  --escuro: #14283b;        /* azul-marinho escuro da marca — navbar e header (fixo, não muda com o tema) */
-
-  /* D22: variáveis de tema — modo claro (padrão) */
+  --escuro: #123761;
   --bg: #f4f6f8;
   --bg-card: #ffffff;
   --bg-suave: #f8fafb;
@@ -18,9 +18,13 @@
 }
 
 [data-theme="dark"] {
-  --primaria-claro: #1c2f3f;
+  --primaria: #4a86d6;
+  --primaria-claro: #16283d;
+  --acento: #e8c51f;
+  --acento-escuro: #c9a913;
   --cinza: #94a3b8;
   --borda: #2c3e4f;
+  --escuro: #0e2440;
   --bg: #0d1620;
   --bg-card: #16232e;
   --bg-suave: #18242f;

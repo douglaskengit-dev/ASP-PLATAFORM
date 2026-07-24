@@ -29,9 +29,9 @@ export const metadata: Metadata = {
   title: "Gerador de Propostas — DT PORTIFOLIO",
   description: "Follow-up, análise de TR e geração de propostas e ofícios",
   icons: {
-    icon: "/logo.svg",
-    shortcut: "/logo.svg",
-    apple: "/logo.svg",
+    icon: "/assets/logo-asp.svg",
+    shortcut: "/assets/logo-asp.svg",
+    apple: "/assets/logo-asp.svg",
   },
 };
 
