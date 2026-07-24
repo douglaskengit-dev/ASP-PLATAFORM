@@ -45,7 +45,7 @@ function LoginForm() {
         <ThemeToggle variante="auto" />
       </div>
       <div className="card-login">
-        <img src="/logo.svg" alt="Logo" className="logo" />
+        <img src="/assets/logo-asp.svg" alt="Logo" className="logo" />
         <h1>Gerador de Propostas</h1>
         <p className="sub">Acesse com seu e-mail e senha</p>
         <form onSubmit={entrar}>

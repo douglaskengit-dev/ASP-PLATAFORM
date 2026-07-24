@@ -20,7 +20,7 @@ export default function PaginaInicial() {
   return (
     <main className="landing">
       <div className="landing-conteudo">
-        <Image src="/logo-light.svg" alt="Logo" width={72} height={72}
+        <Image src="/assets/logo-asp.svg" alt="Logo" width={72} height={72}
           style={{ borderRadius: 14 }} priority />
 
         <span className="landing-marca">DT PORTIFOLIO</span>
