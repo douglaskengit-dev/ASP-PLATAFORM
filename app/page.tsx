@@ -23,15 +23,15 @@ export default function PaginaInicial() {
         <Image src="/assets/logo-asp.svg" alt="Logo" width={72} height={72}
           style={{ borderRadius: 14 }} priority />
 
-        <span className="landing-marca">DT PORTIFOLIO</span>
+        <span className="landing-marca">ASP</span>
 
         <h1 className="landing-titulo">
-          Somos especialistas em<br />impulsionar negócios!
+          Soluções em inspeção<br />robótica industrial
         </h1>
 
         <p className="landing-sub">
-          Sistema interno do time — propostas, follow-up de processos,
-          análise de TR com IA e dashboard.
+          Sistema interno — follow-up de processos e dashboard.
+
         </p>
 
         {logado ? (
@@ -46,7 +46,7 @@ export default function PaginaInicial() {
       </div>
 
       <footer className="landing-rodape">
-        uso interno · © {new Date().getFullYear()} DT PORTIFOLIO
+        uso interno · © {new Date().getFullYear()} ASP
       </footer>
     </main>
   );

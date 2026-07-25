@@ -26,8 +26,8 @@ const antonio = Antonio({
 });
 
 export const metadata: Metadata = {
-  title: "Gerador de Propostas — DT PORTIFOLIO",
-  description: "Follow-up, análise de TR e geração de propostas e ofícios",
+  title: "Plataforma ASP",
+  description: "Sistema interno — follow-up de processos e dashboard.",
   icons: {
     icon: "/assets/logo-asp.svg",
     shortcut: "/assets/logo-asp.svg",

@@ -46,7 +46,7 @@ function LoginForm() {
       </div>
       <div className="card-login">
         <img src="/assets/logo-asp.svg" alt="Logo" className="logo" />
-        <h1>Gerador de Propostas</h1>
+        <h1>Plataforma ASP</h1>
         <p className="sub">Acesse com seu e-mail e senha</p>
         <form onSubmit={entrar}>
           <input
