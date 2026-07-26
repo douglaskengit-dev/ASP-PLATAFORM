@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarEmail } from "@/lib/email";
+import { emailAgendamentoHtml } from "@/lib/email-templates";
 import { gerarIcsAgendamento } from "@/lib/ics";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://asp-plataform.vercel.app";
 
 export const runtime = "nodejs";
 
@@ -85,48 +88,52 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdmin();
     const { data: insp } = await admin
       .from("gp_inspecoes")
-      .select("identificacao, projeto:gp_projetos(codigo_projeto, pedido_compra)")
+      .select("identificacao, projeto:gp_projetos(codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(razao_social))")
       .eq("id", body.inspecaoId)
       .single();
     const ident = insp?.identificacao || "Inspeção";
     const projeto: any = insp?.projeto;
     const projLabel = projeto?.codigo_projeto || projeto?.pedido_compra || "";
-    const quando = `${fmtData(body.dataVisita)}${body.hora ? " " + body.hora : ""}`;
-    const titulo = `Inspeção agendada — ${ident}`;
-    const mensagem = `${tipo === "execucao" ? "Execução" : "Inspeção"} de ${ident}${projLabel ? ` (${projLabel})` : ""} agendada para ${quando}.`;
+    const endereco = projeto?.endereco || "";
+    const clienteNome = projeto?.cliente?.razao_social || "";
+    const tipoLabel = tipo === "execucao" ? "Execução" : "Inspeção";
+    const quando = `${fmtData(body.dataVisita)}${body.hora ? " às " + body.hora : ""}`;
+    const titulo = `${tipoLabel} agendada — ${ident}${projLabel ? ` (${projLabel})` : ""}`;
+    const mensagem = `${tipoLabel} de ${ident}${projLabel ? ` (${projLabel})` : ""} agendada para ${quando}.`;
     const link = `/inspecoes/${body.inspecaoId}`;
 
     await admin.from("gp_notificacoes").insert(
       equipe.map((m) => ({
-        usuario_id: m.id,
-        tipo: "agendamento",
-        titulo,
-        mensagem,
-        link,
-        inspecao_id: body.inspecaoId,
-        criado_por: profile.id,
+        usuario_id: m.id, tipo: "agendamento", titulo, mensagem, link,
+        inspecao_id: body.inspecaoId, criado_por: profile.id,
       }))
     );
 
-    // E-mail com convite de calendário (.ics) — no-op enquanto o provedor
-    // (RESEND_API_KEY) não estiver configurado.
-    const { data: perfis } = await admin.from("gp_profiles").select("email").in("id", equipe.map((m) => m.id));
-    const emails = (perfis || []).map((p: any) => p.email).filter(Boolean);
+    // Destinatários: equipe (para) + Gerência/Comercial em cópia.
+    const { data: eqPerfis } = await admin.from("gp_profiles").select("email").in("id", equipe.map((m) => m.id));
+    const paraEmails = (eqPerfis || []).map((p: any) => p.email).filter(Boolean);
+    const { data: gestores } = await admin.from("gp_profiles").select("email").in("perfil", ["gerencia", "comercial"]).eq("ativo", true);
+    const ccEmails = (gestores || []).map((p: any) => p.email).filter(Boolean);
+
+    const html = emailAgendamentoHtml({
+      tipoLabel, ident, cliente: clienteNome, projeto: projLabel, endereco, quando,
+      equipe: equipe.map((m) => m.nome),
+      equipamentos: body.equipamentos || [],
+      checklist: body.checklist || [],
+      link: `${APP_URL}${link}`,
+    });
     const ics = gerarIcsAgendamento({
       uid: `${data.id}@asp-plataforma`,
-      titulo,
-      descricao: mensagem,
-      local: projLabel || undefined,
-      data: body.dataVisita,
-      hora: body.hora,
+      titulo, descricao: mensagem,
+      local: endereco || projLabel || undefined,
+      data: body.dataVisita, hora: body.hora,
       organizador: process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
-      participantes: emails,
+      participantes: paraEmails,
     });
     await enviarEmail(
-      emails,
-      titulo,
-      `<p>${mensagem}</p><p>O convite em anexo pode ser adicionado à agenda do seu celular.</p>`,
-      [{ filename: "inspecao.ics", content: ics, contentType: "text/calendar" }]
+      paraEmails, titulo, html,
+      [{ filename: "inspecao.ics", content: ics, contentType: "text/calendar" }],
+      { cc: ccEmails }
     );
   }
 

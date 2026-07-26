@@ -18,16 +18,19 @@ export async function enviarEmail(
   para: string[],
   assunto: string,
   html: string,
-  anexos?: AnexoEmail[]
+  anexos?: AnexoEmail[],
+  opcoes?: { cc?: string[] }
 ): Promise<{ ok: boolean; ignorado?: boolean; erro?: string }> {
   const apiKey = process.env.RESEND_API_KEY;
   const remetente = process.env.EMAIL_REMETENTE || "ASP <onboarding@resend.dev>";
   const destinatarios = para.filter(Boolean);
+  const copia = (opcoes?.cc || []).filter((e) => e && !destinatarios.includes(e));
   if (!apiKey || destinatarios.length === 0) {
     return { ok: true, ignorado: true };
   }
   try {
     const body: Record<string, unknown> = { from: remetente, to: destinatarios, subject: assunto, html };
+    if (copia.length > 0) body.cc = copia;
     if (anexos && anexos.length > 0) {
       body.attachments = anexos.map((a) => ({
         filename: a.filename,
