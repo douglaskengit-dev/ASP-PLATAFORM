@@ -19,7 +19,10 @@ export default function FormularioOrgao({
   onSucesso: (orgao: OrgaoComAcoes) => void;
   onCancelar?: () => void;
 }) {
-  const [tipoEnte, setTipoEnte] = useState<TipoEnte>("Município");
+  // Cliente industrial não tem "tipo de ente" (conceito de órgão público). A
+  // coluna gp_orgaos.tipo_ente é NOT NULL, então mantemos um valor padrão fixo
+  // no backend sem expor o campo na UI de Clientes.
+  const tipoEnte: TipoEnte = "Município";
   const [razaoSocial, setRazaoSocial] = useState("");
   const [cnpj, setCnpj] = useState("");
   const [cidade, setCidade] = useState("");
@@ -79,18 +82,11 @@ export default function FormularioOrgao({
     <div>
       <div className="grid">
         <div className="field">
-          <label>Tipo do ente *</label>
-          <select value={tipoEnte} onChange={(e) => setTipoEnte(e.target.value as TipoEnte)}>
-            <option value="Município">Município</option>
-            <option value="Estado">Estado</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Razão social *</label>
+          <label>Razão social / Nome *</label>
           <input
             value={razaoSocial}
             onChange={(e) => setRazaoSocial(e.target.value)}
-            placeholder="Ex.: Município de São Roque"
+            placeholder="Ex.: Refinaria Industrial S/A"
           />
         </div>
         <div className="field">
@@ -122,8 +118,7 @@ export default function FormularioOrgao({
 
       <h3 style={{ marginTop: 16, marginBottom: 4, fontSize: 15 }}>Contatos (opcional)</h3>
       <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 0 }}>
-        Podem ser preenchidos agora ou depois, mas serão exigidos ao analisar um TR ou gerar uma proposta
-        para este órgão.
+        Responsáveis do cliente. Podem ser preenchidos agora ou depois.
       </p>
 
       {contatos.map((c, idx) => (
@@ -178,7 +173,7 @@ export default function FormularioOrgao({
 
       <div className="actions" style={{ marginTop: 16 }}>
         <button className="btn" onClick={cadastrarOrgao} disabled={salvando}>
-          {salvando ? "Salvando..." : "Cadastrar órgão"}
+          {salvando ? "Salvando..." : "Cadastrar cliente"}
         </button>
         {onCancelar && (
           <button type="button" className="btn secondary" onClick={onCancelar} disabled={salvando}>

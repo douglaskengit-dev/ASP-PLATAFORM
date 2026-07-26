@@ -6,7 +6,7 @@ export default function HistoricoPage() {
   return (
     <main>
       <header className="topo">
-        <h1>Histórico de análises de TR</h1>
+        <h1>Projetos em Aberto</h1>
       </header>
 
       <div className="page">

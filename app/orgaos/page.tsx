@@ -6,8 +6,8 @@ export default function OrgaosPage() {
   return (
     <main>
       <header className="topo">
-        <h1>Órgãos</h1>
-        <p>Cadastro central de municípios e estados atendidos</p>
+        <h1>Clientes</h1>
+        <p>Cadastro central de clientes atendidos</p>
       </header>
 
       <div className="page">

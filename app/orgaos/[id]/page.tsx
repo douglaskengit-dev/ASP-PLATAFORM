@@ -5,7 +5,15 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Contato, NovoContatoInput, OrgaoComContatos, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
-import AcaoProcessoCard, { AcaoProcesso } from "@/app/components/AcaoProcessoCard";
+import { ULTIMA_FASE } from "@/lib/asp/fases";
+
+interface ProjetoCliente {
+  id: string;
+  codigo_projeto: string | null;
+  pedido_compra: string | null;
+  cliente: { id: string } | null;
+  inspecoes: { id: string; fase: number }[];
+}
 
 function novoContatoVazio(): NovoContatoInput {
   return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
@@ -17,9 +25,7 @@ export default function OrgaoDetalhePage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [orgao, setOrgao] = useState<OrgaoComContatos | null>(null);
-  const [processos, setProcessos] = useState<AcaoProcesso[]>([]);
-  // D43/D48: admin troca para qualquer fase; editor só avança; visualizador não troca
-  const [perfil, setPerfil] = useState<"admin" | "editor" | "visualizador">("visualizador");
+  const [projetos, setProjetos] = useState<ProjetoCliente[]>([]);
 
   const [editando, setEditando] = useState(false);
   const [tipoEnte, setTipoEnte] = useState<TipoEnte>("Município");
@@ -40,17 +46,22 @@ export default function OrgaoDetalhePage() {
     try {
       const resp = await fetch(`/api/orgaos/${params.id}`);
       const dados = await resp.json();
-      if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao carregar o órgão.");
+      if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao carregar o cliente.");
       setOrgao(dados.orgao);
-      setProcessos(dados.processos || []);
-      setPerfil(dados.perfil === "admin" || dados.perfil === "editor" ? dados.perfil : "visualizador");
       setTipoEnte(dados.orgao.tipo_ente);
       setRazaoSocial(dados.orgao.razao_social);
       setCnpj(mascaraCnpj(dados.orgao.cnpj || ""));
       setCidade(dados.orgao.cidade);
       setUf(dados.orgao.uf);
+
+      // Projetos deste cliente (novo fluxo)
+      const rp = await fetch("/api/projetos");
+      if (rp.ok) {
+        const dp = await rp.json();
+        setProjetos((dp.projetos || []).filter((p: ProjetoCliente) => p.cliente?.id === params.id));
+      }
     } catch (err: any) {
-      setErro(err.message || "Erro ao carregar o órgão.");
+      setErro(err.message || "Erro ao carregar o cliente.");
     } finally {
       setCarregando(false);
     }
@@ -127,8 +138,8 @@ export default function OrgaoDetalhePage() {
     return (
       <main>
         <div className="page">
-          <p className="msg erro">{erro || "Órgão não encontrado."}</p>
-          <Link href="/orgaos">← voltar aos órgãos</Link>
+          <p className="msg erro">{erro || "Cliente não encontrado."}</p>
+          <Link href="/orgaos">← voltar aos clientes</Link>
         </div>
       </main>
     );
@@ -140,17 +151,17 @@ export default function OrgaoDetalhePage() {
         <h1>
           {orgao.razao_social} — {orgao.cidade}/{orgao.uf}
         </h1>
-        <p>{orgao.tipo_ente}</p>
+        <p>Cliente</p>
       </header>
 
       <div className="page">
         <p style={{ marginBottom: 20 }}>
-          <Link href="/orgaos">← voltar aos órgãos</Link>
+          <Link href="/orgaos">← voltar aos clientes</Link>
         </p>
 
         <section className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2>Dados do órgão</h2>
+            <h2>Dados do cliente</h2>
             <button className="btn secondary" onClick={() => setEditando((v) => !v)}>
               {editando ? "Cancelar" : "Editar cadastro"}
             </button>
@@ -158,8 +169,6 @@ export default function OrgaoDetalhePage() {
 
           {!editando ? (
             <p>
-              <strong>Tipo:</strong> {orgao.tipo_ente}
-              <br />
               <strong>Razão social:</strong> {orgao.razao_social}
               <br />
               <strong>CNPJ:</strong> {mascaraCnpj(orgao.cnpj)}
@@ -172,14 +181,7 @@ export default function OrgaoDetalhePage() {
             <div style={{ borderTop: "1px solid #d8dee3", marginTop: 12, paddingTop: 12 }}>
               <div className="grid">
                 <div className="field">
-                  <label>Tipo do ente *</label>
-                  <select value={tipoEnte} onChange={(e) => setTipoEnte(e.target.value as TipoEnte)}>
-                    <option value="Município">Município</option>
-                    <option value="Estado">Estado</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Razão social *</label>
+                  <label>Razão social / Nome *</label>
                   <input value={razaoSocial} onChange={(e) => setRazaoSocial(e.target.value)} />
                 </div>
                 <div className="field">
@@ -296,19 +298,32 @@ export default function OrgaoDetalhePage() {
 
         <section className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2>Ações ({processos.length})</h2>
-            <Link href="/followup" className="btn secondary" style={{ display: "inline-block", textDecoration: "none" }}>
-              + Abrir processo no Follow-up
+            <h2>Projetos deste cliente ({projetos.length})</h2>
+            <Link href="/projetos" className="btn secondary" style={{ display: "inline-block", textDecoration: "none" }}>
+              + Novo projeto
             </Link>
           </div>
 
-          {processos.length === 0 ? (
-            <p style={{ color: "var(--cinza)", fontSize: 13 }}>Nenhum processo aberto para este órgão ainda.</p>
+          {projetos.length === 0 ? (
+            <p style={{ color: "var(--cinza)", fontSize: 13 }}>Nenhum projeto aberto para este cliente ainda.</p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-              {processos.map((p) => (
-                <AcaoProcessoCard key={p.id} processo={p} orgaoId={orgao.id} perfil={perfil} onAtualizado={carregar} />
-              ))}
+              {projetos.map((p) => {
+                const fases = p.inspecoes.map((i) => i.fase);
+                const media = fases.length ? fases.reduce((a, b) => a + b, 0) / fases.length : 1;
+                const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
+                return (
+                  <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
+                    <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                      <strong style={{ fontSize: 13 }}>{p.codigo_projeto || p.pedido_compra || "Projeto"}</strong>
+                      <span className="detalhe" style={{ margin: 0 }}>{p.inspecoes.length} inspeç{p.inspecoes.length === 1 ? "ão" : "ões"} · {pct}%</span>
+                    </div>
+                    <div className="fu-progresso" style={{ marginTop: 8 }}>
+                      <div className="fu-barra" style={{ width: `${pct}%` }} />
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>

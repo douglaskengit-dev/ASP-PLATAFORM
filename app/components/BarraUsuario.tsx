@@ -145,10 +145,10 @@ export default function BarraUsuario() {
           </nav>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <button onClick={() => setModalAberto("orgaos")} title="Órgãos cadastrados" style={linkEstilo()}>
-            Órgãos
+          <button onClick={() => setModalAberto("orgaos")} title="Clientes cadastrados" style={linkEstilo()}>
+            Clientes
           </button>
-          <button onClick={() => setModalAberto("historico")} title="Histórico de análises de TR" style={linkEstilo()}>
+          <button onClick={() => setModalAberto("historico")} title="Projetos em aberto" style={linkEstilo()}>
             Histórico
           </button>
           {ehAdmin && (
@@ -211,12 +211,12 @@ export default function BarraUsuario() {
       </div>
 
       {modalAberto === "orgaos" && (
-        <Modal titulo="Órgãos" onFechar={() => setModalAberto(null)}>
+        <Modal titulo="Clientes" onFechar={() => setModalAberto(null)}>
           <OrgaosConteudo />
         </Modal>
       )}
       {modalAberto === "historico" && (
-        <Modal titulo="Histórico" onFechar={() => setModalAberto(null)}>
+        <Modal titulo="Projetos em Aberto" onFechar={() => setModalAberto(null)}>
           <HistoricoConteudo />
         </Modal>
       )}

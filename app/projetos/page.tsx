@@ -231,7 +231,7 @@ export default function ProjetosPage() {
           </div>
 
           {cadastrarOrgao && (
-            <Modal titulo="Cadastrar órgão / cliente" zIndex={200} onFechar={() => setCadastrarOrgao(false)}>
+            <Modal titulo="Cadastrar cliente" zIndex={200} onFechar={() => setCadastrarOrgao(false)}>
               <FormularioOrgao
                 onCancelar={() => setCadastrarOrgao(false)}
                 onSucesso={(orgao) => {
