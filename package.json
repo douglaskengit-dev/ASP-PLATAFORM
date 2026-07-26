@@ -9,21 +9,22 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
+    "@react-pdf/renderer": "^4.5.1",
+    "@supabase/ssr": "^0.12.1",
+    "@supabase/supabase-js": "^2.110.3",
+    "docx": "^9.0.2",
+    "mammoth": "^1.8.0",
     "next": "14.2.35",
+    "pdf-parse": "^2.4.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "docx": "^9.0.2",
-    "@supabase/supabase-js": "^2.110.3",
-    "@supabase/ssr": "^0.12.1",
-    "@anthropic-ai/sdk": "^0.111.0",
-    "pdf-parse": "^2.4.5",
-    "@react-pdf/renderer": "^4.5.1",
-    "mammoth": "^1.8.0"
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0"
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.4"
   }
 }
