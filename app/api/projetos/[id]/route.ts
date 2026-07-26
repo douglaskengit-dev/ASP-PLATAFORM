@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
 
@@ -54,6 +56,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const body = await req.json();
+
+  // Restaurar da lixeira (mesma permissão de excluir).
+  if (body.restaurar) {
+    if (!podeExcluirProjeto(profile)) {
+      return NextResponse.json({ erro: "Sem permissão para restaurar." }, { status: 403 });
+    }
+    const { error } = await getSupabaseAdmin()
+      .from("gp_projetos")
+      .update({ excluido_em: null, excluido_por: null, atualizado_em: new Date().toISOString() })
+      .eq("id", params.id);
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
   const patch: Record<string, unknown> = { atualizado_em: new Date().toISOString() };
   for (const [campo, coluna] of [
     ["clienteId", "cliente_id"],
@@ -69,4 +85,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { data, error } = await supabase.from("gp_projetos").update(patch).eq("id", params.id).select("*").single();
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, projeto: data });
+}
+
+/** Exclusão do projeto. Padrão = lixeira (soft): marca excluido_em e o projeto
+ * fica recuperável por 30 dias. ?definitivo=1 apaga de vez. Permissão:
+ * Comercial/Gerência/Admin ou Função Coordenador. */
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  const profile = await getProfileAtual();
+  if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
+  if (!podeExcluirProjeto(profile)) {
+    return NextResponse.json({ erro: "Você não tem permissão para excluir projetos." }, { status: 403 });
+  }
+
+  const admin = getSupabaseAdmin();
+  const definitivo = req.nextUrl.searchParams.get("definitivo") === "1";
+  if (definitivo) {
+    const { error } = await admin.from("gp_projetos").delete().eq("id", params.id);
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, definitivo: true });
+  }
+
+  const { error } = await admin
+    .from("gp_projetos")
+    .update({ excluido_em: new Date().toISOString(), excluido_por: profile.id })
+    .eq("id", params.id);
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, lixeira: true });
 }

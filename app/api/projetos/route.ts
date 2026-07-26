@@ -1,30 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
 
 const PERFIS_ESCRITA = ["admin", "comercial", "gerencia"];
+const DIAS_LIXEIRA = 30;
 
-/** Lista projetos com o cliente (órgão) e a contagem de inspeções. */
-export async function GET() {
+/** Lista projetos com o cliente e a contagem de inspeções.
+ * ?lixeira=1 lista os excluídos (recuperáveis). Faz limpeza preguiçosa dos
+ * que passaram de 30 dias na lixeira. */
+export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
+  const lixeira = req.nextUrl.searchParams.get("lixeira") === "1";
+
+  // Limpeza preguiçosa: apaga de vez o que passou de 30 dias na lixeira.
+  const corte = new Date(Date.now() - DIAS_LIXEIRA * 86400000).toISOString();
+  await getSupabaseAdmin().from("gp_projetos").delete().lt("excluido_em", corte);
 
   const supabase = getSupabaseRouteClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("gp_projetos")
     .select("*, cliente:gp_orgaos(id, razao_social, cidade, uf), inspecoes:gp_inspecoes(id, fase)")
-    .order("criado_em", { ascending: false });
+    .order(lixeira ? "excluido_em" : "criado_em", { ascending: false });
+  query = lixeira ? query.not("excluido_em", "is", null) : query.is("excluido_em", null);
 
+  const { data, error } = await query;
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
-  const projetos = (data || []).map((p: any) => ({
-    ...p,
-    inspecoes_total: (p.inspecoes || []).length,
-  }));
-  return NextResponse.json({ ok: true, projetos });
+  const projetos = (data || []).map((p: any) => ({ ...p, inspecoes_total: (p.inspecoes || []).length }));
+  return NextResponse.json({ ok: true, projetos, podeExcluir: podeExcluirProjeto(profile), diasLixeira: DIAS_LIXEIRA });
 }
 
 interface NovoProjetoBody {

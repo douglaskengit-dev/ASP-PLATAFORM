@@ -62,7 +62,7 @@ function LoginForm() {
             autoFocus
             required
           />
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative", marginTop: 20 }}>
             <input
               type={mostrarSenha ? "text" : "password"}
               placeholder="Senha"
@@ -70,7 +70,7 @@ function LoginForm() {
               onChange={(e) => setSenha(e.target.value)}
               autoComplete="current-password"
               required
-              style={{ paddingRight: 44 }}
+              style={{ margin: 0, paddingRight: 46 }}
             />
             <button
               type="button"
@@ -78,8 +78,9 @@ function LoginForm() {
               title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
               aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
               style={{
-                position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-                background: "none", border: "none", cursor: "pointer", fontSize: 16, padding: 4, lineHeight: 1,
+                position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                width: "auto", minWidth: 0, margin: 0, padding: "4px 8px",
+                background: "none", border: "none", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "var(--cinza)",
               }}
             >
               {mostrarSenha ? "🙈" : "👁️"}

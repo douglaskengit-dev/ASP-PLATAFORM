@@ -4,9 +4,11 @@
  * Criar inspeção nasce na fase 2 (Agendamento). Ver COWORK-ASP.md §2. */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Modal from "@/app/components/Modal";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { descreverAcaoFase, tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
+import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 
 interface Cliente {
   id: string;
@@ -48,7 +50,10 @@ function proximaData(ins: Inspecao): string | null {
 
 export default function ProjetoDetalhePage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const id = params.id;
+  const [podeExcluir, setPodeExcluir] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
   const [projeto, setProjeto] = useState<Projeto | null>(null);
   const [inspecoes, setInspecoes] = useState<Inspecao[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -83,8 +88,29 @@ export default function ProjetoDetalhePage() {
 
   useEffect(() => {
     carregar();
+    const supabase = getSupabaseBrowserClient();
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return;
+      const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao").eq("id", data.user.id).single();
+      setPodeExcluir(podeExcluirProjeto(p));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function excluirProjeto() {
+    if (!confirm("Enviar este projeto para a lixeira? Ele fica recuperável por 30 dias e depois é apagado de vez.")) return;
+    setExcluindo(true);
+    try {
+      const r = await fetch(`/api/projetos/${id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) { setErro(d.erro || "Falha ao excluir."); return; }
+      router.push("/projetos");
+    } catch {
+      setErro("Falha de rede ao excluir.");
+    } finally {
+      setExcluindo(false);
+    }
+  }
 
   async function criarInspecao() {
     setErro(null);
@@ -166,7 +192,14 @@ export default function ProjetoDetalhePage() {
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <h2 style={{ marginTop: 0, marginBottom: 0 }}>{projeto.codigo_projeto || projeto.pedido_compra || "Projeto"}</h2>
-          <button className="btn-azul btn-sec" onClick={abrirEdicao}>✎ Editar projeto</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-azul btn-sec" onClick={abrirEdicao}>✎ Editar projeto</button>
+            {podeExcluir && (
+              <button className="btn-azul" style={{ background: "#dc2626" }} onClick={excluirProjeto} disabled={excluindo}>
+                {excluindo ? "Excluindo…" : "🗑 Excluir"}
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 14 }}>
           <Campo rotulo="Cliente" valor={projeto.cliente?.razao_social} />

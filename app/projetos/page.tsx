@@ -66,19 +66,34 @@ export default function ProjetosPage() {
   const [form, setForm] = useState(FORM_VAZIO);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [verLixeira, setVerLixeira] = useState(false);
+  const [podeExcluir, setPodeExcluir] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/projetos")
+  function carregar(lixeira: boolean) {
+    setCarregando(true);
+    fetch(`/api/projetos${lixeira ? "?lixeira=1" : ""}`)
       .then(async (r) => {
-        if (r.status === 401) {
-          window.location.href = "/login";
-          return;
-        }
+        if (r.status === 401) { window.location.href = "/login"; return; }
         const d = await r.json();
         setProjetos((d.projetos || []).map((p: Projeto) => ({ ...p, inspecoes: p.inspecoes || [] })));
+        setPodeExcluir(!!d.podeExcluir);
       })
       .finally(() => setCarregando(false));
-  }, []);
+  }
+
+  useEffect(() => { carregar(verLixeira); }, [verLixeira]);
+
+  async function restaurar(pid: string) {
+    const r = await fetch(`/api/projetos/${pid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurar: true }) });
+    if (!r.ok) { setErro((await r.json()).erro || "Falha ao restaurar."); return; }
+    carregar(true);
+  }
+  async function excluirDefinitivo(pid: string) {
+    if (!confirm("Excluir DEFINITIVAMENTE este projeto? Não há como recuperar.")) return;
+    const r = await fetch(`/api/projetos/${pid}?definitivo=1`, { method: "DELETE" });
+    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir."); return; }
+    carregar(true);
+  }
 
   function abrirModal() {
     setForm(FORM_VAZIO);
@@ -123,16 +138,38 @@ export default function ProjetosPage() {
   return (
     <div className="page-larga">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <TituloPagina titulo="Projetos" subtitulo="Cada projeto corresponde a um pedido de compra e reúne as inspeções (tanques/pontos)." />
-        <button className="btn-azul" onClick={abrirModal}>
-          + Novo projeto
-        </button>
+        <TituloPagina titulo={verLixeira ? "Projetos — Lixeira" : "Projetos"} subtitulo={verLixeira ? "Excluídos recentemente. Podem ser restaurados por 30 dias; depois são apagados de vez." : "Cada projeto corresponde a um pedido de compra e reúne as inspeções (tanques/pontos)."} />
+        <div style={{ display: "flex", gap: 8 }}>
+          {podeExcluir && (
+            <button className="btn-azul btn-sec" onClick={() => setVerLixeira((v) => !v)}>
+              {verLixeira ? "← Voltar aos projetos" : "🗑 Lixeira"}
+            </button>
+          )}
+          {!verLixeira && <button className="btn-azul" onClick={abrirModal}>+ Novo projeto</button>}
+        </div>
       </div>
+
+      {erro && <p className="erro-texto">{erro}</p>}
 
       {carregando ? (
         <p className="vazio">Carregando projetos…</p>
       ) : projetos.length === 0 ? (
-        <p className="vazio">Nenhum projeto ainda. Clique em “+ Novo projeto” para abrir o primeiro.</p>
+        <p className="vazio">{verLixeira ? "A lixeira está vazia." : "Nenhum projeto ainda. Clique em “+ Novo projeto” para abrir o primeiro."}</p>
+      ) : verLixeira ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {projetos.map((p) => (
+            <div key={p.id} className="item" style={{ justifyContent: "space-between" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ color: "var(--texto)" }}>{p.codigo_projeto || p.pedido_compra || "Projeto sem código"}</strong>
+                <span className="detalhe">{p.cliente?.razao_social || "Cliente não informado"}</span>
+              </div>
+              <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <button className="btn-dl btn-sec" onClick={() => restaurar(p.id)}>↩ Restaurar</button>
+                <button className="btn-dl" style={{ background: "#dc2626" }} onClick={() => excluirDefinitivo(p.id)}>Excluir definitivamente</button>
+              </span>
+            </div>
+          ))}
+        </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {projetos.map((p) => {
