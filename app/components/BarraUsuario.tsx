@@ -78,6 +78,7 @@ export default function BarraUsuario() {
 
   const abas = [
     { href: "/dashboard", rotulo: "Dashboard" },
+    { href: "/projetos", rotulo: "Projetos" },
     { href: "/followup", rotulo: "Follow-up" },
     { href: "/arquivos", rotulo: "Arquivos" },
   ];

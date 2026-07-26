@@ -1,0 +1,44 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { PRIMEIRA_FASE_INSPECAO } from "@/lib/asp/fases";
+
+export const runtime = "nodejs";
+
+interface NovaInspecaoBody {
+  projetoId: string;
+  identificacao: string;
+  ferramentaColeta?: string;
+}
+
+/** Cria uma inspeção dentro de um projeto (ex.: "Tanque TQ-01").
+ * Nasce na fase 2 (Agendamento). */
+export async function POST(req: NextRequest) {
+  const profile = await getProfileAtual();
+  if (!profile) {
+    return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
+  }
+  if (!["admin", "comercial", "gerencia"].includes(profile.perfil)) {
+    return NextResponse.json({ erro: "Sem permissão para criar inspeções." }, { status: 403 });
+  }
+
+  const body = (await req.json()) as NovaInspecaoBody;
+  if (!body.projetoId || !body.identificacao?.trim()) {
+    return NextResponse.json({ erro: "Projeto e identificação são obrigatórios." }, { status: 400 });
+  }
+
+  const supabase = getSupabaseRouteClient();
+  const { data, error } = await supabase
+    .from("gp_inspecoes")
+    .insert({
+      projeto_id: body.projetoId,
+      identificacao: body.identificacao.trim(),
+      fase: PRIMEIRA_FASE_INSPECAO,
+      ferramenta_coleta: body.ferramentaColeta?.trim() || "sedimento",
+      criado_por: profile.id,
+    })
+    .select("*")
+    .single();
+
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, inspecao: data });
+}
