@@ -57,6 +57,11 @@ export default function ProjetoDetalhePage() {
   const [identificacao, setIdentificacao] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // Edição do projeto
+  const [modalEdit, setModalEdit] = useState(false);
+  const [orgaos, setOrgaos] = useState<{ id: string; razao_social: string }[]>([]);
+  const [edForm, setEdForm] = useState({ clienteId: "", codigoProjeto: "", pedidoCompra: "", endereco: "", responsavelProjeto: "" });
+  const [salvandoEdit, setSalvandoEdit] = useState(false);
 
   function carregar() {
     fetch(`/api/projetos/${id}`)
@@ -109,6 +114,40 @@ export default function ProjetoDetalhePage() {
     }
   }
 
+  function abrirEdicao() {
+    if (!projeto) return;
+    setEdForm({
+      clienteId: projeto.cliente?.id || "",
+      codigoProjeto: projeto.codigo_projeto || "",
+      pedidoCompra: projeto.pedido_compra || "",
+      endereco: projeto.endereco || "",
+      responsavelProjeto: projeto.responsavel_projeto || "",
+    });
+    setErro(null);
+    setModalEdit(true);
+    fetch("/api/orgaos").then((r) => r.json()).then((d) => setOrgaos(d.orgaos || [])).catch(() => {});
+  }
+
+  async function salvarEdicao() {
+    setErro(null);
+    setSalvandoEdit(true);
+    try {
+      const r = await fetch(`/api/projetos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(edForm),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErro(d.erro || "Falha ao salvar o projeto."); return; }
+      setModalEdit(false);
+      carregar();
+    } catch {
+      setErro("Falha de rede ao salvar.");
+    } finally {
+      setSalvandoEdit(false);
+    }
+  }
+
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
   if (naoEncontrado || !projeto)
     return (
@@ -125,8 +164,11 @@ export default function ProjetoDetalhePage() {
       </Link>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h2 style={{ marginTop: 0 }}>{projeto.codigo_projeto || projeto.pedido_compra || "Projeto"}</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <h2 style={{ marginTop: 0, marginBottom: 0 }}>{projeto.codigo_projeto || projeto.pedido_compra || "Projeto"}</h2>
+          <button className="btn-azul btn-sec" onClick={abrirEdicao}>✎ Editar projeto</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 14 }}>
           <Campo rotulo="Cliente" valor={projeto.cliente?.razao_social} />
           <Campo
             rotulo="Local"
@@ -175,6 +217,43 @@ export default function ProjetoDetalhePage() {
             );
           })}
         </div>
+      )}
+
+      {modalEdit && (
+        <Modal titulo="Editar projeto" onFechar={() => setModalEdit(false)}>
+          <div className="form-projeto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Cliente</label>
+              <select value={edForm.clienteId} onChange={(e) => setEdForm((f) => ({ ...f, clienteId: e.target.value }))}>
+                <option value="">— Selecione o cliente —</option>
+                {orgaos.map((o) => <option key={o.id} value={o.id}>{o.razao_social}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Código do projeto</label>
+                <input value={edForm.codigoProjeto} onChange={(e) => setEdForm((f) => ({ ...f, codigoProjeto: e.target.value }))} />
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Pedido de compra</label>
+                <input value={edForm.pedidoCompra} onChange={(e) => setEdForm((f) => ({ ...f, pedidoCompra: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Endereço da obra</label>
+              <input value={edForm.endereco} onChange={(e) => setEdForm((f) => ({ ...f, endereco: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Responsável</label>
+              <input value={edForm.responsavelProjeto} onChange={(e) => setEdForm((f) => ({ ...f, responsavelProjeto: e.target.value }))} />
+            </div>
+            {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="btn-azul btn-sec" onClick={() => setModalEdit(false)} disabled={salvandoEdit}>Cancelar</button>
+              <button className="btn-azul" onClick={salvarEdicao} disabled={salvandoEdit}>{salvandoEdit ? "Salvando…" : "Salvar alterações"}</button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {modalAberto && (

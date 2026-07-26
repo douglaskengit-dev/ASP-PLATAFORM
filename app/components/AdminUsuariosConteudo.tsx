@@ -142,6 +142,44 @@ export default function AdminUsuariosConteudo() {
     }
   }
 
+  async function salvarNome(id: string, nome: string) {
+    setErro(null);
+    setMensagem(null);
+    try {
+      const resp = await fetch(`/api/admin/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nomeCompleto: nome.trim() || null }),
+      });
+      const dados = await resp.json();
+      if (!resp.ok) throw new Error(dados.erro || "Falha ao salvar o nome.");
+      setUsuarios((prev) => prev.map((u) => (u.id === id ? { ...u, nome_completo: nome.trim() || null } : u)));
+      setMensagem("Nome atualizado.");
+    } catch (err: any) {
+      setErro(err.message || "Erro ao salvar o nome.");
+    }
+  }
+
+  async function redefinirSenha(id: string, email: string) {
+    const nova = window.prompt(`Nova senha para ${email} (mín. 6 caracteres):`);
+    if (nova === null) return;
+    if (nova.trim().length < 6) { setErro("A senha deve ter ao menos 6 caracteres."); return; }
+    setErro(null);
+    setMensagem(null);
+    try {
+      const resp = await fetch(`/api/admin/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senha: nova.trim() }),
+      });
+      const dados = await resp.json();
+      if (!resp.ok) throw new Error(dados.erro || "Falha ao redefinir a senha.");
+      setMensagem(`Senha de ${email} redefinida. Repasse ao usuário.`);
+    } catch (err: any) {
+      setErro(err.message || "Erro ao redefinir a senha.");
+    }
+  }
+
   async function atualizarUsuario(id: string, campos: Partial<Profile>) {
     setErro(null);
     try {
@@ -259,6 +297,12 @@ export default function AdminUsuariosConteudo() {
             </div>
             <div className="grid" style={{ marginTop: 8 }}>
               <div className="field">
+                <label>Nome completo</label>
+                <input defaultValue={u.nome_completo || ""} placeholder="Nome do usuário"
+                  onBlur={(e) => { if ((e.target.value.trim() || null) !== (u.nome_completo || null)) salvarNome(u.id, e.target.value); }} />
+                <small>Salva ao sair do campo.</small>
+              </div>
+              <div className="field">
                 <label>Área / Acesso</label>
                 <select value={u.perfil} onChange={(e) => atualizarUsuario(u.id, { perfil: e.target.value })}>
                   {PERFIS_ACESSO.map((p) => <option key={p.valor} value={p.valor}>{p.rotulo}</option>)}
@@ -273,15 +317,14 @@ export default function AdminUsuariosConteudo() {
                 </select>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 20, marginTop: 8 }}>
+            <div style={{ display: "flex", gap: 20, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={u.ativo}
-                  onChange={(e) => atualizarUsuario(u.id, { ativo: e.target.checked })}
-                />
+                <input type="checkbox" checked={u.ativo} onChange={(e) => atualizarUsuario(u.id, { ativo: e.target.checked })} />
                 Ativo
               </label>
+              <button type="button" className="btn-doc" onClick={() => redefinirSenha(u.id, u.email)}>
+                🔑 Redefinir senha
+              </button>
             </div>
           </div>
         ))}

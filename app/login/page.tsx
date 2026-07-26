@@ -10,6 +10,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [entrando, setEntrando] = useState(false);
   const [erro, setErro] = useState<string | null>(
     searchParams.get("erro") === "inativo"
@@ -61,14 +62,29 @@ function LoginForm() {
             autoFocus
             required
           />
-          <input
-            type="password"
-            placeholder="Senha"
-            value={senha}
-            onChange={(e) => setSenha(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
+          <div style={{ position: "relative" }}>
+            <input
+              type={mostrarSenha ? "text" : "password"}
+              placeholder="Senha"
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              autoComplete="current-password"
+              required
+              style={{ paddingRight: 44 }}
+            />
+            <button
+              type="button"
+              onClick={() => setMostrarSenha((v) => !v)}
+              title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+              aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+              style={{
+                position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+                background: "none", border: "none", cursor: "pointer", fontSize: 16, padding: 4, lineHeight: 1,
+              }}
+            >
+              {mostrarSenha ? "🙈" : "👁️"}
+            </button>
+          </div>
           <button type="submit" disabled={entrando}>
             {entrando ? "Entrando..." : "Entrar"}
           </button>
