@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data: inspecoes } = await supabase
     .from("gp_inspecoes")
-    .select("*")
+    .select("*, agendamentos:gp_agendamentos(data_visita, hora, tipo)")
     .eq("projeto_id", params.id)
     .order("criado_em", { ascending: true });
 

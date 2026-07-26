@@ -37,11 +37,13 @@ interface Historico {
 }
 interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string }
 interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null }
+interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
-  id: string; tipo: string; data_visita: string | null;
-  equipe: string[]; equipamentos: string[]; checklist: { item: string; ok?: boolean }[];
+  id: string; tipo: string; data_visita: string | null; hora: string | null;
+  equipe: MembroEquipe[]; equipamentos: string[]; checklist: { item: string; ok?: boolean }[];
   criado_em: string;
 }
+interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null }
 
 // Fase 1 é nível-projeto (abertura); as demais correm na inspeção.
 const TODAS_FASES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -90,12 +92,16 @@ export default function InspecaoDetalhePage() {
   const relatorioInputRef = useRef<HTMLInputElement>(null);
   // Agendamento
   const [modalAgenda, setModalAgenda] = useState(false);
+  const [agendaEditando, setAgendaEditando] = useState<string | null>(null);
   const [agData, setAgData] = useState("");
-  const [agEquipe, setAgEquipe] = useState("");
-  const [agEquip, setAgEquip] = useState("");
+  const [agHora, setAgHora] = useState("");
+  const [agEquipeIds, setAgEquipeIds] = useState<string[]>([]);
+  const [agEquipamentos, setAgEquipamentos] = useState<string[]>([]);
+  const [agEquipInput, setAgEquipInput] = useState("");
   const [agChecklist, setAgChecklist] = useState<{ item: string; ok: boolean }[]>([]);
   const [agNovoItem, setAgNovoItem] = useState("");
   const [salvandoAgenda, setSalvandoAgenda] = useState(false);
+  const [usuarios, setUsuarios] = useState<UsuarioOpcao[]>([]);
 
   const carregar = useCallback(() => {
     fetch(`/api/inspecoes/${id}`)
@@ -120,6 +126,7 @@ export default function InspecaoDetalhePage() {
       const { data: p } = await supabase.from("gp_profiles").select("perfil").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
     });
+    fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
   }, [carregar]);
 
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
@@ -247,40 +254,65 @@ export default function InspecaoDetalhePage() {
   }
 
   function abrirAgenda() {
-    setAgData("");
-    setAgEquipe("");
-    setAgEquip("");
+    setAgendaEditando(null);
+    setAgData(""); setAgHora("");
+    setAgEquipeIds([]); setAgEquipamentos([]); setAgEquipInput("");
     setAgChecklist(CHECKLIST_PADRAO.map((item) => ({ item, ok: false })));
     setAgNovoItem("");
     setErro(null);
     setModalAgenda(true);
   }
 
-  async function salvarAgenda() {
-    setSalvandoAgenda(true);
+  function abrirAgendaEdicao(a: Agendamento) {
+    setAgendaEditando(a.id);
+    setAgData(a.data_visita || ""); setAgHora(a.hora || "");
+    setAgEquipeIds((a.equipe || []).map((m) => m.id));
+    setAgEquipamentos(a.equipamentos || []);
+    setAgEquipInput("");
+    setAgChecklist((a.checklist || []).map((c) => ({ item: c.item, ok: !!c.ok })));
+    setAgNovoItem("");
     setErro(null);
+    setModalAgenda(true);
+  }
+
+  async function removerAgenda(a: Agendamento) {
+    if (!confirm("Excluir este agendamento?")) return;
+    const r = await fetch(`/api/agendamentos/${a.id}`, { method: "DELETE" });
+    if (!r.ok) { const d = await r.json(); setErro(d.erro || "Falha ao excluir."); return; }
+    carregar();
+  }
+
+  async function salvarAgenda() {
+    setErro(null);
+    if (!agData) { setErro("Informe a data da visita."); return; }
+    setSalvandoAgenda(true);
     try {
-      const r = await fetch("/api/agendamentos", {
-        method: "POST",
+      const equipe = usuarios.filter((u) => agEquipeIds.includes(u.id)).map((u) => ({ id: u.id, nome: u.nome }));
+      const payload = { dataVisita: agData, hora: agHora || undefined, equipe, equipamentos: agEquipamentos, checklist: agChecklist };
+      const r = await fetch(agendaEditando ? `/api/agendamentos/${agendaEditando}` : "/api/agendamentos", {
+        method: agendaEditando ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          inspecaoId: id,
-          tipo: bloco,
-          dataVisita: agData || undefined,
-          equipe: agEquipe.split(",").map((s) => s.trim()).filter(Boolean),
-          equipamentos: agEquip.split(",").map((s) => s.trim()).filter(Boolean),
-          checklist: agChecklist,
-        }),
+        body: JSON.stringify(agendaEditando ? payload : { inspecaoId: id, tipo: bloco, ...payload }),
       });
       const d = await r.json();
       if (!r.ok) { setErro(d.erro || "Falha ao salvar o agendamento."); return; }
       setModalAgenda(false);
+      setAgendaEditando(null);
       carregar();
     } catch {
       setErro("Falha de rede ao salvar agendamento.");
     } finally {
       setSalvandoAgenda(false);
     }
+  }
+
+  function toggleEquipe(uid: string) {
+    setAgEquipeIds((prev) => prev.includes(uid) ? prev.filter((x) => x !== uid) : [...prev, uid]);
+  }
+  function addEquipamento() {
+    const v = agEquipInput.trim();
+    if (v && !agEquipamentos.includes(v)) setAgEquipamentos((p) => [...p, v]);
+    setAgEquipInput("");
   }
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -419,11 +451,20 @@ export default function InspecaoDetalhePage() {
             <p className="vazio" style={{ margin: "8px 0 0" }}>Nenhum agendamento.</p>
           ) : (
             agendamentos.map((a) => (
-              <div key={a.id} style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12, marginTop: 10 }}>
-                <div style={{ color: "var(--texto)", fontWeight: 600, textTransform: "capitalize" }}>
-                  {a.tipo} {a.data_visita ? `· ${formatarData(a.data_visita)}` : ""}
+              <div key={a.id} style={{ borderLeft: "3px solid var(--primaria)", paddingLeft: 12, marginTop: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <div style={{ color: "var(--texto)", fontWeight: 700 }}>
+                    📅 {a.data_visita ? formatarData(a.data_visita) : "sem data"}{a.hora ? ` às ${a.hora}` : ""}
+                    <span className="detalhe" style={{ margin: "0 0 0 8px", textTransform: "capitalize", fontWeight: 400 }}>({a.tipo})</span>
+                  </div>
+                  {podeAgenda && (
+                    <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button className="fu-icone-btn" title="Editar agendamento" onClick={() => abrirAgendaEdicao(a)}>✎</button>
+                      <button className="fu-icone-btn lixeira" title="Excluir agendamento" onClick={() => removerAgenda(a)}>🗑</button>
+                    </span>
+                  )}
                 </div>
-                {a.equipe?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipe: {a.equipe.join(", ")}</div>}
+                {a.equipe?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipe: {a.equipe.map((m) => m.nome).join(", ")}</div>}
                 {a.equipamentos?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipamentos: {a.equipamentos.join(", ")}</div>}
                 {a.checklist?.length > 0 && (
                   <div className="detalhe" style={{ margin: "2px 0 0" }}>
@@ -513,19 +554,58 @@ export default function InspecaoDetalhePage() {
 
       {/* Modal: agendamento com checklist extensível */}
       {modalAgenda && (
-        <Modal titulo={`Agendar ${bloco}`} onFechar={() => setModalAgenda(false)}>
+        <Modal titulo={agendaEditando ? `Editar agendamento (${bloco})` : `Agendar ${bloco}`} onFechar={() => { setModalAgenda(false); setAgendaEditando(null); }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita</label>
-              <input type="date" style={inputStyle} value={agData} onChange={(e) => setAgData(e.target.value)} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita *</label>
+                <input type="date" style={{ ...inputStyle, borderColor: erro && !agData ? "#dc2626" : "var(--borda)" }} value={agData} onChange={(e) => setAgData(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Hora</label>
+                <input type="time" style={inputStyle} value={agHora} onChange={(e) => setAgHora(e.target.value)} />
+              </div>
             </div>
+
             <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Equipe (separe por vírgula)</label>
-              <input style={inputStyle} value={agEquipe} onChange={(e) => setAgEquipe(e.target.value)} placeholder="ex.: João, Maria" />
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 6 }}>Equipe (usuários notificados)</label>
+              {usuarios.length === 0 ? (
+                <p className="detalhe" style={{ margin: 0 }}>Nenhum usuário disponível.</p>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 150, overflowY: "auto", border: "1px solid var(--borda)", borderRadius: 8, padding: 8 }}>
+                  {usuarios.map((u) => {
+                    const sel = agEquipeIds.includes(u.id);
+                    return (
+                      <button type="button" key={u.id} onClick={() => toggleEquipe(u.id)}
+                        style={{ padding: "5px 10px", borderRadius: 20, fontSize: 13, cursor: "pointer",
+                          border: `1px solid ${sel ? "var(--primaria)" : "var(--borda)"}`,
+                          background: sel ? "var(--primaria)" : "transparent", color: sel ? "#fff" : "var(--texto)" }}>
+                        {sel ? "✓ " : ""}{u.nome}{u.funcao ? ` · ${u.funcao}` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
             <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Equipamentos (separe por vírgula)</label>
-              <input style={inputStyle} value={agEquip} onChange={(e) => setAgEquip(e.target.value)} placeholder="ex.: Medidor, Detector de gases" />
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Equipamentos</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input style={inputStyle} value={agEquipInput} onChange={(e) => setAgEquipInput(e.target.value)}
+                  placeholder="ex.: Detector de gases" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEquipamento(); } }} />
+                <button type="button" className="btn-azul btn-sec" onClick={addEquipamento}>+ Add</button>
+              </div>
+              {agEquipamentos.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {agEquipamentos.map((eq, i) => (
+                    <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 20, background: "var(--bg-suave)", border: "1px solid var(--borda)", fontSize: 13 }}>
+                      {eq}
+                      <button type="button" onClick={() => setAgEquipamentos((p) => p.filter((_, idx) => idx !== i))}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--cinza)", padding: 0, lineHeight: 1 }}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 6 }}>Checklist</label>

@@ -29,6 +29,16 @@ interface Inspecao {
   identificacao: string;
   fase: number;
   ferramenta_coleta: string;
+  agendamentos?: { data_visita: string | null; hora: string | null; tipo: string }[];
+}
+
+function proximaData(ins: Inspecao): string | null {
+  const datas = (ins.agendamentos || []).filter((a) => a.data_visita).sort((a, b) => (a.data_visita! < b.data_visita! ? -1 : 1));
+  if (datas.length === 0) return null;
+  const hoje = new Date().toISOString().slice(0, 10);
+  const futura = datas.find((a) => (a.data_visita || "") >= hoje) || datas[datas.length - 1];
+  const d = new Date(`${futura.data_visita}T00:00:00`).toLocaleDateString("pt-BR");
+  return `${d}${futura.hora ? " às " + futura.hora : ""}`;
 }
 
 export default function ProjetoDetalhePage() {
@@ -139,12 +149,14 @@ export default function ProjetoDetalhePage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {inspecoes.map((i) => {
             const pct = Math.round(((i.fase - 1) / (ULTIMA_FASE - 1)) * 100);
+            const data = proximaData(i);
             return (
               <Link key={i.id} href={`/inspecoes/${i.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
-                <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                   <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
                   <span className="detalhe" style={{ margin: 0 }}>Fase {i.fase} · {tituloFase(i.fase)}</span>
                 </div>
+                {data && <span className="detalhe" style={{ margin: "4px 0 0" }}>📅 Agendada: {data}</span>}
                 <div className="fu-progresso" style={{ marginTop: 10 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
                   <div className="fu-barra" style={{ width: `${pct}%` }} />
                 </div>

@@ -8,6 +8,7 @@ import Link from "next/link";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import HoverCard from "@/app/components/HoverCard";
 import TituloPagina from "@/app/components/TituloPagina";
+import CalendarioAgenda from "@/app/components/CalendarioAgenda";
 import { tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
 
 interface Cliente { id: string; razao_social: string }
@@ -183,6 +184,10 @@ export default function DashboardPage() {
               <BarrasHorizontais dados={porCliente} cor="#0f766e" vazio="Sem projetos."
                 renderPopover={(d) => <span><strong>{d.valor}</strong> projeto(s) de {d.rotulo}.</span>} />
             </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <CalendarioAgenda />
           </div>
 
           <div className="card" style={{ marginTop: 16 }}>
