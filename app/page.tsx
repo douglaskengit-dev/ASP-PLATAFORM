@@ -30,14 +30,14 @@ export default function PaginaInicial() {
         </h1>
 
         <p className="landing-sub">
-          Sistema interno — follow-up de processos e dashboard.
+          Sistema interno — gestão de projetos e inspeções.
 
         </p>
 
         {logado ? (
           <div className="landing-atalhos">
             <Link href="/dashboard" className="landing-cta">Ir para o Dashboard →</Link>
-            <Link href="/followup" className="landing-cta secundario">Ir para o Follow-up →</Link>
+            <Link href="/projetos" className="landing-cta secundario">Ir para Projetos →</Link>
             <Link href="/arquivos" className="landing-cta secundario">Ir para Arquivos →</Link>
           </div>
         ) : (

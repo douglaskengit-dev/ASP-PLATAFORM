@@ -27,7 +27,7 @@ const antonio = Antonio({
 
 export const metadata: Metadata = {
   title: "Plataforma ASP",
-  description: "Sistema interno — follow-up de processos e dashboard.",
+  description: "Sistema interno — gestão de projetos e inspeções.",
   icons: {
     icon: "/assets/logo-asp.svg",
     shortcut: "/assets/logo-asp.svg",
