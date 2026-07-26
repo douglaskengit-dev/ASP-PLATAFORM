@@ -16,7 +16,7 @@ alter table public.gp_profiles
   check (perfil in ('admin', 'comercial', 'operacoes', 'gerencia', 'editor', 'visualizador'));
 
 -- Função auxiliar: perfil do usuário autenticado (ativo). NULL se inativo.
-create or replace function public.gp_perfil_atual()
+create or replace function public.gp_perfil_atual_asp()
 returns text
 language sql
 stable
@@ -144,77 +144,77 @@ alter table public.gp_agendamentos   enable row level security;
 alter table public.gp_fase_historico enable row level security;
 
 -- helper de leitura: qualquer usuário ativo
--- (inline via gp_perfil_atual() is not null)
+-- (inline via gp_perfil_atual_asp() is not null)
 
 -- ---- GP_PROJETOS ----------------------------------------------------------
 drop policy if exists gp_projetos_select on public.gp_projetos;
 create policy gp_projetos_select on public.gp_projetos for select to authenticated
-  using (public.gp_perfil_atual() is not null);
+  using (public.gp_perfil_atual_asp() is not null);
 drop policy if exists gp_projetos_insert on public.gp_projetos;
 create policy gp_projetos_insert on public.gp_projetos for insert to authenticated
-  with check (public.gp_perfil_atual() in ('admin', 'comercial', 'gerencia'));
+  with check (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'gerencia'));
 drop policy if exists gp_projetos_update on public.gp_projetos;
 create policy gp_projetos_update on public.gp_projetos for update to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'comercial', 'gerencia'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'gerencia'));
 drop policy if exists gp_projetos_delete on public.gp_projetos;
 create policy gp_projetos_delete on public.gp_projetos for delete to authenticated
-  using (public.gp_perfil_atual() = 'admin');
+  using (public.gp_perfil_atual_asp() = 'admin');
 
 -- ---- GP_INSPECOES ---------------------------------------------------------
 drop policy if exists gp_inspecoes_select on public.gp_inspecoes;
 create policy gp_inspecoes_select on public.gp_inspecoes for select to authenticated
-  using (public.gp_perfil_atual() is not null);
+  using (public.gp_perfil_atual_asp() is not null);
 drop policy if exists gp_inspecoes_insert on public.gp_inspecoes;
 create policy gp_inspecoes_insert on public.gp_inspecoes for insert to authenticated
-  with check (public.gp_perfil_atual() in ('admin', 'comercial', 'gerencia'));
+  with check (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'gerencia'));
 -- update: comercial/operacoes/gerencia movimentam fases (validação fina na API)
 drop policy if exists gp_inspecoes_update on public.gp_inspecoes;
 create policy gp_inspecoes_update on public.gp_inspecoes for update to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'comercial', 'operacoes', 'gerencia'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'operacoes', 'gerencia'));
 drop policy if exists gp_inspecoes_delete on public.gp_inspecoes;
 create policy gp_inspecoes_delete on public.gp_inspecoes for delete to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'comercial'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'comercial'));
 
 -- ---- GP_COLETAS (Operações) ----------------------------------------------
 drop policy if exists gp_coletas_select on public.gp_coletas;
 create policy gp_coletas_select on public.gp_coletas for select to authenticated
-  using (public.gp_perfil_atual() is not null);
+  using (public.gp_perfil_atual_asp() is not null);
 drop policy if exists gp_coletas_insert on public.gp_coletas;
 create policy gp_coletas_insert on public.gp_coletas for insert to authenticated
-  with check (public.gp_perfil_atual() in ('admin', 'operacoes', 'gerencia'));
+  with check (public.gp_perfil_atual_asp() in ('admin', 'operacoes', 'gerencia'));
 drop policy if exists gp_coletas_update on public.gp_coletas;
 create policy gp_coletas_update on public.gp_coletas for update to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'operacoes', 'gerencia'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'operacoes', 'gerencia'));
 drop policy if exists gp_coletas_delete on public.gp_coletas;
 create policy gp_coletas_delete on public.gp_coletas for delete to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'operacoes'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'operacoes'));
 
 -- ---- GP_RELATORIOS (Operações envia, Gerência aprova) ---------------------
 drop policy if exists gp_relatorios_select on public.gp_relatorios;
 create policy gp_relatorios_select on public.gp_relatorios for select to authenticated
-  using (public.gp_perfil_atual() is not null);
+  using (public.gp_perfil_atual_asp() is not null);
 drop policy if exists gp_relatorios_insert on public.gp_relatorios;
 create policy gp_relatorios_insert on public.gp_relatorios for insert to authenticated
-  with check (public.gp_perfil_atual() in ('admin', 'operacoes', 'gerencia'));
+  with check (public.gp_perfil_atual_asp() in ('admin', 'operacoes', 'gerencia'));
 drop policy if exists gp_relatorios_update on public.gp_relatorios;
 create policy gp_relatorios_update on public.gp_relatorios for update to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'operacoes', 'gerencia'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'operacoes', 'gerencia'));
 
 -- ---- GP_AGENDAMENTOS (Comercial) ------------------------------------------
 drop policy if exists gp_agendamentos_select on public.gp_agendamentos;
 create policy gp_agendamentos_select on public.gp_agendamentos for select to authenticated
-  using (public.gp_perfil_atual() is not null);
+  using (public.gp_perfil_atual_asp() is not null);
 drop policy if exists gp_agendamentos_insert on public.gp_agendamentos;
 create policy gp_agendamentos_insert on public.gp_agendamentos for insert to authenticated
-  with check (public.gp_perfil_atual() in ('admin', 'comercial', 'gerencia'));
+  with check (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'gerencia'));
 drop policy if exists gp_agendamentos_update on public.gp_agendamentos;
 create policy gp_agendamentos_update on public.gp_agendamentos for update to authenticated
-  using (public.gp_perfil_atual() in ('admin', 'comercial', 'gerencia'));
+  using (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'gerencia'));
 
 -- ---- GP_FASE_HISTORICO (append-only) --------------------------------------
 drop policy if exists gp_fase_historico_select on public.gp_fase_historico;
 create policy gp_fase_historico_select on public.gp_fase_historico for select to authenticated
-  using (public.gp_perfil_atual() is not null);
+  using (public.gp_perfil_atual_asp() is not null);
 drop policy if exists gp_fase_historico_insert on public.gp_fase_historico;
 create policy gp_fase_historico_insert on public.gp_fase_historico for insert to authenticated
-  with check (public.gp_perfil_atual() in ('admin', 'comercial', 'operacoes', 'gerencia'));
+  with check (public.gp_perfil_atual_asp() in ('admin', 'comercial', 'operacoes', 'gerencia'));
