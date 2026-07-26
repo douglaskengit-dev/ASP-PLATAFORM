@@ -130,12 +130,13 @@ export async function POST(req: NextRequest) {
       organizador: process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
       participantes: paraEmails,
     });
-    await enviarEmail(
+    const resultadoEmail = await enviarEmail(
       paraEmails, titulo, html,
       [{ filename: "inspecao.ics", content: ics, contentType: "text/calendar" }],
       { cc: ccEmails }
     );
+    return NextResponse.json({ ok: true, agendamento: data, email: { destinatarios: paraEmails.length, ...resultadoEmail } });
   }
 
-  return NextResponse.json({ ok: true, agendamento: data });
+  return NextResponse.json({ ok: true, agendamento: data, email: { destinatarios: 0, ignorado: true, motivo: "nenhum usuário na equipe" } });
 }

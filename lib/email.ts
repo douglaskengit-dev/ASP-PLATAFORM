@@ -43,7 +43,10 @@ export async function enviarEmail(
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!resp.ok) return { ok: false, erro: `HTTP ${resp.status}` };
+    if (!resp.ok) {
+      const texto = await resp.text().catch(() => "");
+      return { ok: false, erro: `HTTP ${resp.status} — ${texto.slice(0, 300)}` };
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, erro: e instanceof Error ? e.message : "falha no envio" };
