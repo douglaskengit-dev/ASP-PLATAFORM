@@ -29,9 +29,9 @@ export const metadata: Metadata = {
   title: "Plataforma ASP",
   description: "Sistema interno — gestão de projetos e inspeções.",
   icons: {
-    icon: "/assets/logo-asp.svg",
-    shortcut: "/assets/logo-asp.svg",
-    apple: "/assets/logo-asp.svg",
+    icon: "/assets/asp-badge.svg",
+    shortcut: "/assets/asp-badge.svg",
+    apple: "/assets/asp-badge.svg",
   },
 };
 

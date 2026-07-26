@@ -4,6 +4,7 @@
  * versionados), agrupados por Projeto → Inspeção, com busca e filtros. */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import TituloPagina from "@/app/components/TituloPagina";
 import { tituloFase } from "@/lib/asp/fases";
 
 interface Coleta { id: string; tipo: string; pdf_path: string | null; criado_em: string }
@@ -85,8 +86,7 @@ export default function ArquivosPage() {
 
   return (
     <div className="page-larga">
-      <h1 style={{ fontSize: 22, margin: "0 0 4px", fontFamily: "var(--fonte-titulo)" }}>Arquivos</h1>
-      <p className="detalhe" style={{ marginBottom: 16 }}>Coletas e relatórios, organizados por projeto e inspeção.</p>
+      <TituloPagina titulo="Arquivos" subtitulo="Coletas e relatórios, organizados por projeto e inspeção." />
 
       <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 20 }}>
         <div style={{ flex: 2, minWidth: 200 }}>

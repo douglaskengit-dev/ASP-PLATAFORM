@@ -20,14 +20,16 @@ export default function PaginaInicial() {
   return (
     <main className="landing">
       <div className="landing-conteudo">
-        <Image src="/assets/logo-asp.svg" alt="Logo" width={72} height={72}
-          style={{ borderRadius: 14 }} priority />
+        <Image src="/assets/asp-badge.svg" alt="ASP" width={80} height={80} priority />
 
         <span className="landing-marca">ASP</span>
 
-        <h1 className="landing-titulo">
-          Soluções em inspeção<br />robótica industrial
-        </h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 18, justifyContent: "center", flexWrap: "wrap" }}>
+          <Image src="/assets/asp-mascote.svg" alt="Mascote ASP" width={92} height={106} priority />
+          <h1 className="landing-titulo" style={{ margin: 0 }}>
+            Soluções em inspeção<br />robótica industrial
+          </h1>
+        </div>
 
         <p className="landing-sub">
           Sistema interno — gestão de projetos e inspeções.

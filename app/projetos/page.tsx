@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import FormularioOrgao from "@/app/components/FormularioOrgao";
+import TituloPagina from "@/app/components/TituloPagina";
 
 interface ClienteResumo {
   id: string;
@@ -121,13 +122,8 @@ export default function ProjetosPage() {
 
   return (
     <div className="page-larga">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "var(--fonte-titulo)", color: "var(--texto)" }}>Projetos</h1>
-          <p className="detalhe" style={{ marginTop: 4 }}>
-            Cada projeto corresponde a um pedido de compra e reúne as inspeções (tanques/pontos).
-          </p>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <TituloPagina titulo="Projetos" subtitulo="Cada projeto corresponde a um pedido de compra e reúne as inspeções (tanques/pontos)." />
         <button className="btn-azul" onClick={abrirModal}>
           + Novo projeto
         </button>

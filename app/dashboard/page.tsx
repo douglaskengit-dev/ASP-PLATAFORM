@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import HoverCard from "@/app/components/HoverCard";
+import TituloPagina from "@/app/components/TituloPagina";
 import { tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
 
 interface Cliente { id: string; razao_social: string }
@@ -112,7 +113,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page-larga">
-      <h1 style={{ margin: "0 0 12px", fontFamily: "var(--fonte-titulo)", color: "var(--texto)" }}>Dashboard</h1>
+      <TituloPagina titulo="Dashboard" subtitulo="Visão geral de projetos e inspeções" />
 
       {/* Filtros */}
       <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 16 }}>

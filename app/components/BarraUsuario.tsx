@@ -106,7 +106,7 @@ export default function BarraUsuario() {
           gap: 16,
           padding: "8px 20px",
           background: "var(--escuro)",
-          borderBottom: "1px solid #2a2620",
+          borderBottom: "3px solid var(--acento)",
           fontSize: 13,
           color: "#c9c4b6",
           position: "sticky",
@@ -115,8 +115,13 @@ export default function BarraUsuario() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Link href="/" title="Voltar à página inicial" style={{ display: "flex", alignItems: "center" }}>
-            <Image src="/assets/logo-asp.svg" alt="Logo" width={34} height={34} style={{ borderRadius: 8 }} />
+          <Link href="/" title="Voltar à página inicial" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+            <Image src="/assets/asp-badge.svg" alt="ASP" width={38} height={38} priority />
+            <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.05, fontFamily: "var(--fonte-titulo)", fontWeight: 800, letterSpacing: "0.14em", color: "#fff", fontSize: 10 }}>
+              <span>ADVANCED</span>
+              <span>SERVICES</span>
+              <span>PROVIDER</span>
+            </span>
           </Link>
           <nav style={{ display: "flex", gap: 4 }}>
             {abas.map((a) => {

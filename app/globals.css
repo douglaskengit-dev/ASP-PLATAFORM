@@ -1,6 +1,7 @@
 :root {
-  --primaria: #1b4a9c;
-  --primaria-claro: #e9eff7;
+  /* Azul da marca ASP (badge/site institucional) — tom vivo. */
+  --primaria: #0f5cad;
+  --primaria-claro: #e8f0fa;
   --acento: #e8c51f;
   --acento-escuro: #c9a913;
   --verde-fia: var(--primaria);

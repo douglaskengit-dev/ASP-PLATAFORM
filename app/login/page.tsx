@@ -45,7 +45,10 @@ function LoginForm() {
         <ThemeToggle variante="auto" />
       </div>
       <div className="card-login">
-        <img src="/assets/logo-asp.svg" alt="Logo" className="logo" />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+          <img src="/assets/asp-badge.svg" alt="ASP" className="logo" style={{ margin: 0 }} />
+          <img src="/assets/asp-mascote.svg" alt="Mascote ASP" style={{ height: 64, width: "auto" }} />
+        </div>
         <h1>Plataforma ASP</h1>
         <p className="sub">Acesse com seu e-mail e senha</p>
         <form onSubmit={entrar}>
