@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarEmail } from "@/lib/email";
+import { gerarIcsAgendamento } from "@/lib/ics";
 
 export const runtime = "nodejs";
 
@@ -107,10 +108,26 @@ export async function POST(req: NextRequest) {
       }))
     );
 
-    // E-mail (no-op enquanto o provedor não estiver configurado).
+    // E-mail com convite de calendário (.ics) — no-op enquanto o provedor
+    // (RESEND_API_KEY) não estiver configurado.
     const { data: perfis } = await admin.from("gp_profiles").select("email").in("id", equipe.map((m) => m.id));
     const emails = (perfis || []).map((p: any) => p.email).filter(Boolean);
-    await enviarEmail(emails, titulo, `<p>${mensagem}</p><p>Abra a inspeção no sistema para ver os detalhes.</p>`);
+    const ics = gerarIcsAgendamento({
+      uid: `${data.id}@asp-plataforma`,
+      titulo,
+      descricao: mensagem,
+      local: projLabel || undefined,
+      data: body.dataVisita,
+      hora: body.hora,
+      organizador: process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
+      participantes: emails,
+    });
+    await enviarEmail(
+      emails,
+      titulo,
+      `<p>${mensagem}</p><p>O convite em anexo pode ser adicionado à agenda do seu celular.</p>`,
+      [{ filename: "inspecao.ics", content: ics, contentType: "text/calendar" }]
+    );
   }
 
   return NextResponse.json({ ok: true, agendamento: data });

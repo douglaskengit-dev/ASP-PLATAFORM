@@ -41,6 +41,22 @@ export function tituloFase(numero: number): string {
   return definicaoFase(numero)?.titulo ?? `Fase ${numero}`;
 }
 
+/** Descrição amigável de uma ação do histórico de fases. */
+export function descreverAcaoFase(acao: string, faseDe: number, fasePara: number): string {
+  switch (acao) {
+    case "avancar":
+      return `Avançou para a fase ${fasePara} — ${tituloFase(fasePara)}`;
+    case "aprovar":
+      return `Aprovou o relatório (fase ${faseDe})`;
+    case "reprovar":
+      return `Reprovou — Ajustar (voltou à fase ${fasePara})`;
+    case "assinar":
+      return "Assinou os participantes";
+    default:
+      return `${acao}: fase ${faseDe} → ${fasePara}`;
+  }
+}
+
 /** Um perfil pode atuar na fase? Gerência e admin atuam em qualquer fase. */
 export function perfilAtuaNaFase(perfil: string | null | undefined, numero: number): boolean {
   if (!perfil) return false;

@@ -9,7 +9,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { acoesDisponiveis, definicaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
+import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 
 interface Projeto {
   id: string;
@@ -33,7 +33,9 @@ interface Historico {
   fase_para: number;
   acao: string;
   motivo: string | null;
+  data_autenticacao: string | null;
   criado_em: string;
+  autor_perfil: { nome_completo: string | null; email: string | null } | null;
 }
 interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string }
 interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null }
@@ -521,11 +523,13 @@ export default function InspecaoDetalhePage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {historico.map((h) => (
               <div key={h.id} style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12 }}>
-                <div style={{ fontSize: 14, color: "var(--texto)" }}>
-                  <strong style={{ textTransform: "capitalize" }}>{h.acao}</strong>{" — "}fase {h.fase_de} → {h.fase_para}
+                <div style={{ fontSize: 14, color: "var(--texto)", fontWeight: 600 }}>
+                  {descreverAcaoFase(h.acao, h.fase_de, h.fase_para)}
                 </div>
                 {h.motivo && <div className="detalhe" style={{ margin: 0 }}>Motivo: {h.motivo}</div>}
-                <div className="detalhe" style={{ margin: 0 }}>{formatar(h.criado_em)}</div>
+                <div className="detalhe" style={{ margin: 0 }}>
+                  Por {h.autor_perfil?.nome_completo || h.autor_perfil?.email || "usuário"} · {formatar(h.data_autenticacao || h.criado_em)}
+                </div>
               </div>
             ))}
           </div>

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import Modal from "@/app/components/Modal";
-import { tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
+import { descreverAcaoFase, tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
 
 interface Cliente {
   id: string;
@@ -30,6 +30,11 @@ interface Inspecao {
   fase: number;
   ferramenta_coleta: string;
   agendamentos?: { data_visita: string | null; hora: string | null; tipo: string }[];
+  ultima_acao?: {
+    acao: string; fase_de: number; fase_para: number;
+    data_autenticacao: string | null; criado_em: string;
+    autor_perfil: { nome_completo: string | null; email: string | null } | null;
+  } | null;
 }
 
 function proximaData(ins: Inspecao): string | null {
@@ -157,6 +162,12 @@ export default function ProjetoDetalhePage() {
                   <span className="detalhe" style={{ margin: 0 }}>Fase {i.fase} · {tituloFase(i.fase)}</span>
                 </div>
                 {data && <span className="detalhe" style={{ margin: "4px 0 0" }}>📅 Agendada: {data}</span>}
+                {i.ultima_acao && (
+                  <span className="detalhe" style={{ margin: "2px 0 0" }}>
+                    🕀 {descreverAcaoFase(i.ultima_acao.acao, i.ultima_acao.fase_de, i.ultima_acao.fase_para)} · por {i.ultima_acao.autor_perfil?.nome_completo || i.ultima_acao.autor_perfil?.email || "usuário"}
+                    {" · "}{formatarDataHora(i.ultima_acao.data_autenticacao || i.ultima_acao.criado_em)}
+                  </span>
+                )}
                 <div className="fu-progresso" style={{ marginTop: 10 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
                   <div className="fu-barra" style={{ width: `${pct}%` }} />
                 </div>
@@ -205,4 +216,9 @@ function formatarData(iso?: string) {
   if (!iso) return undefined;
   const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
   return d.toLocaleDateString("pt-BR");
+}
+
+function formatarDataHora(iso?: string | null) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
