@@ -9,9 +9,11 @@ interface Agendamento {
   id: string;
   tipo: string;
   data_visita: string | null;
+  data_execucao: string | null;
   hora: string | null;
   inspecao: { id: string; identificacao: string; projeto: { codigo_projeto: string | null; pedido_compra: string | null } | null } | null;
 }
+interface Evento { id: string; date: string; kind: "inspecao" | "execucao"; hora: string | null; inspecao: Agendamento["inspecao"] }
 
 const DIAS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -26,10 +28,15 @@ export default function CalendarioAgenda() {
     fetch("/api/agendamentos").then((r) => r.ok ? r.json() : { agendamentos: [] }).then((d) => setAgs(d.agendamentos || [])).catch(() => {});
   }, []);
 
-  // Mapa "YYYY-MM-DD" -> agendamentos do dia.
+  // Cada agendamento vira 1 ou 2 eventos: a visita (por tipo) e, se houver,
+  // a data prevista de execução. Mapa "YYYY-MM-DD" -> eventos do dia.
   const porDia = useMemo(() => {
-    const m = new Map<string, Agendamento[]>();
-    ags.forEach((a) => { if (a.data_visita) { const k = a.data_visita.slice(0, 10); m.set(k, [...(m.get(k) || []), a]); } });
+    const m = new Map<string, Evento[]>();
+    const add = (e: Evento) => { const k = e.date.slice(0, 10); m.set(k, [...(m.get(k) || []), e]); };
+    ags.forEach((a) => {
+      if (a.data_visita) add({ id: a.id + "-v", date: a.data_visita, kind: a.tipo === "execucao" ? "execucao" : "inspecao", hora: a.hora, inspecao: a.inspecao });
+      if (a.data_execucao) add({ id: a.id + "-e", date: a.data_execucao, kind: "execucao", hora: null, inspecao: a.inspecao });
+    });
     return m;
   }, [ags]);
 
@@ -83,9 +90,9 @@ export default function CalendarioAgenda() {
               <div style={{ fontSize: 11, fontWeight: ehHoje ? 800 : 600, color: ehHoje ? "var(--primaria)" : "var(--texto-suave)" }}>{d}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
                 {doDia.slice(0, 3).map((a) => (
-                  <Link key={a.id} href={a.inspecao ? `/inspecoes/${a.inspecao.id}` : "#"} title={`${a.inspecao?.identificacao || ""}${a.hora ? " às " + a.hora : ""}`}
+                  <Link key={a.id} href={a.inspecao ? `/inspecoes/${a.inspecao.id}` : "#"} title={`${a.kind === "execucao" ? "Execução" : "Inspeção"} · ${a.inspecao?.identificacao || ""}${a.hora ? " às " + a.hora : ""}`}
                     style={{ fontSize: 10, textDecoration: "none", color: "#fff", borderRadius: 4, padding: "1px 4px",
-                      background: a.tipo === "execucao" ? "#0f766e" : "var(--primaria)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      background: a.kind === "execucao" ? "#0f766e" : "var(--primaria)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                     {a.hora ? `${a.hora} ` : ""}{a.inspecao?.identificacao || "Inspeção"}
                   </Link>
                 ))}

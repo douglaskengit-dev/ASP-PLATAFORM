@@ -41,7 +41,7 @@ interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any
 interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null }
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
-  id: string; tipo: string; data_visita: string | null; hora: string | null;
+  id: string; tipo: string; data_visita: string | null; data_execucao: string | null; hora: string | null;
   equipe: MembroEquipe[]; equipamentos: string[]; checklist: { item: string; ok?: boolean }[];
   criado_em: string;
 }
@@ -96,6 +96,7 @@ export default function InspecaoDetalhePage() {
   const [modalAgenda, setModalAgenda] = useState(false);
   const [agendaEditando, setAgendaEditando] = useState<string | null>(null);
   const [agData, setAgData] = useState("");
+  const [agDataExec, setAgDataExec] = useState("");
   const [agHora, setAgHora] = useState("");
   const [agEquipeIds, setAgEquipeIds] = useState<string[]>([]);
   const [agEquipamentos, setAgEquipamentos] = useState<string[]>([]);
@@ -257,7 +258,7 @@ export default function InspecaoDetalhePage() {
 
   function abrirAgenda() {
     setAgendaEditando(null);
-    setAgData(""); setAgHora("");
+    setAgData(""); setAgHora(""); setAgDataExec("");
     setAgEquipeIds([]); setAgEquipamentos([]); setAgEquipInput("");
     setAgChecklist(CHECKLIST_PADRAO.map((item) => ({ item, ok: false })));
     setAgNovoItem("");
@@ -267,7 +268,7 @@ export default function InspecaoDetalhePage() {
 
   function abrirAgendaEdicao(a: Agendamento) {
     setAgendaEditando(a.id);
-    setAgData(a.data_visita || ""); setAgHora(a.hora || "");
+    setAgData(a.data_visita || ""); setAgHora(a.hora || ""); setAgDataExec(a.data_execucao || "");
     setAgEquipeIds((a.equipe || []).map((m) => m.id));
     setAgEquipamentos(a.equipamentos || []);
     setAgEquipInput("");
@@ -290,7 +291,7 @@ export default function InspecaoDetalhePage() {
     setSalvandoAgenda(true);
     try {
       const equipe = usuarios.filter((u) => agEquipeIds.includes(u.id)).map((u) => ({ id: u.id, nome: u.nome }));
-      const payload = { dataVisita: agData, hora: agHora || undefined, equipe, equipamentos: agEquipamentos, checklist: agChecklist };
+      const payload = { dataVisita: agData, dataExecucao: agDataExec || undefined, hora: agHora || undefined, equipe, equipamentos: agEquipamentos, checklist: agChecklist };
       const r = await fetch(agendaEditando ? `/api/agendamentos/${agendaEditando}` : "/api/agendamentos", {
         method: agendaEditando ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -466,6 +467,7 @@ export default function InspecaoDetalhePage() {
                     </span>
                   )}
                 </div>
+                {a.data_execucao && <div className="detalhe" style={{ margin: 0 }}>🛠 Execução prevista: {formatarData(a.data_execucao)}</div>}
                 {a.equipe?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipe: {a.equipe.map((m) => m.nome).join(", ")}</div>}
                 {a.equipamentos?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipamentos: {a.equipamentos.join(", ")}</div>}
                 {a.checklist?.length > 0 && (
@@ -569,6 +571,12 @@ export default function InspecaoDetalhePage() {
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Hora</label>
                 <input type="time" style={inputStyle} value={agHora} onChange={(e) => setAgHora(e.target.value)} />
               </div>
+            </div>
+
+            <div>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data prevista de execução</label>
+              <input type="date" style={inputStyle} value={agDataExec} onChange={(e) => setAgDataExec(e.target.value)} />
+              <small style={{ color: "var(--cinza)" }}>Opcional — quando já se sabe a data prevista da execução.</small>
             </div>
 
             <div>

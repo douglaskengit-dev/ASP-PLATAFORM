@@ -16,6 +16,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const body = await req.json();
   const patch: Record<string, unknown> = { atualizado_em: new Date().toISOString() };
   if ("dataVisita" in body) patch.data_visita = body.dataVisita || null;
+  if ("dataExecucao" in body) patch.data_execucao = body.dataExecucao || null;
   if ("hora" in body) patch.hora = body.hora?.trim() || null;
   if ("equipe" in body) patch.equipe = (body.equipe || []).filter((m: any) => m && m.id);
   if ("equipamentos" in body) patch.equipamentos = body.equipamentos || [];

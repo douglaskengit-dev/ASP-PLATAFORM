@@ -16,6 +16,7 @@ interface NovoAgendamentoBody {
   inspecaoId: string;
   tipo?: "inspecao" | "execucao";
   dataVisita?: string;
+  dataExecucao?: string;
   hora?: string;
   equipe?: MembroEquipe[];
   equipamentos?: string[];
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseRouteClient();
   let query = supabase
     .from("gp_agendamentos")
-    .select("id, tipo, data_visita, hora, equipe, equipamentos, checklist, criado_em, inspecao:gp_inspecoes(id, identificacao, projeto:gp_projetos(id, codigo_projeto, pedido_compra))")
+    .select("id, tipo, data_visita, data_execucao, hora, equipe, equipamentos, checklist, criado_em, inspecao:gp_inspecoes(id, identificacao, projeto:gp_projetos(id, codigo_projeto, pedido_compra))")
     .order("data_visita", { ascending: true });
   if (inspecaoId) query = query.eq("inspecao_id", inspecaoId);
   const { data, error } = await query;
@@ -73,6 +74,7 @@ export async function POST(req: NextRequest) {
       inspecao_id: body.inspecaoId,
       tipo,
       data_visita: body.dataVisita,
+      data_execucao: body.dataExecucao || null,
       hora: body.hora?.trim() || null,
       equipe,
       equipamentos: body.equipamentos ?? [],
