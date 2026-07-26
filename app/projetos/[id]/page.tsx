@@ -54,6 +54,8 @@ export default function ProjetoDetalhePage() {
   const id = params.id;
   const [podeExcluir, setPodeExcluir] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
+  const [verLixeiraInsp, setVerLixeiraInsp] = useState(false);
+  const [inspLixeira, setInspLixeira] = useState<Inspecao[]>([]);
   const [projeto, setProjeto] = useState<Projeto | null>(null);
   const [inspecoes, setInspecoes] = useState<Inspecao[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -96,6 +98,28 @@ export default function ProjetoDetalhePage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function excluirInspecao(iid: string) {
+    if (!confirm("Enviar esta inspeção para a lixeira? Recuperável por 30 dias.")) return;
+    const r = await fetch(`/api/inspecoes/${iid}`, { method: "DELETE" });
+    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir inspeção."); return; }
+    carregar();
+  }
+  function abrirLixeiraInsp() {
+    fetch(`/api/inspecoes?projetoId=${id}&lixeira=1`).then((r) => r.json()).then((d) => setInspLixeira(d.inspecoes || [])).catch(() => {});
+    setVerLixeiraInsp(true);
+  }
+  async function restaurarInspecao(iid: string) {
+    const r = await fetch(`/api/inspecoes/${iid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurar: true }) });
+    if (!r.ok) { setErro((await r.json()).erro || "Falha ao restaurar."); return; }
+    abrirLixeiraInsp(); carregar();
+  }
+  async function excluirInspDefinitivo(iid: string) {
+    if (!confirm("Excluir DEFINITIVAMENTE esta inspeção?")) return;
+    const r = await fetch(`/api/inspecoes/${iid}?definitivo=1`, { method: "DELETE" });
+    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir."); return; }
+    abrirLixeiraInsp();
+  }
 
   async function excluirProjeto() {
     if (!confirm("Enviar este projeto para a lixeira? Ele fica recuperável por 30 dias e depois é apagado de vez.")) return;
@@ -214,16 +238,39 @@ export default function ProjetoDetalhePage() {
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "22px 0 12px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "22px 0 12px", gap: 8, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontFamily: "var(--fonte-titulo)", color: "var(--texto)" }}>
-          Inspeções ({inspecoes.length})
+          {verLixeiraInsp ? "Inspeções — Lixeira" : `Inspeções (${inspecoes.length})`}
         </h3>
-        <button className="btn-azul" onClick={() => { setErro(null); setModalAberto(true); }}>
-          + Nova inspeção
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {podeExcluir && (
+            <button className="btn-azul btn-sec" onClick={() => (verLixeiraInsp ? setVerLixeiraInsp(false) : abrirLixeiraInsp())}>
+              {verLixeiraInsp ? "← Voltar" : "🗑 Lixeira"}
+            </button>
+          )}
+          {!verLixeiraInsp && (
+            <button className="btn-azul" onClick={() => { setErro(null); setModalAberto(true); }}>+ Nova inspeção</button>
+          )}
+        </div>
       </div>
 
-      {inspecoes.length === 0 ? (
+      {verLixeiraInsp ? (
+        inspLixeira.length === 0 ? (
+          <p className="vazio">A lixeira de inspeções está vazia.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {inspLixeira.map((i) => (
+              <div key={i.id} className="item" style={{ justifyContent: "space-between" }}>
+                <strong style={{ color: "var(--texto)" }}>{i.identificacao} <span className="detalhe" style={{ fontWeight: 400 }}>· fase {i.fase}</span></strong>
+                <span style={{ display: "flex", gap: 8 }}>
+                  <button className="btn-dl btn-sec" onClick={() => restaurarInspecao(i.id)}>↩ Restaurar</button>
+                  <button className="btn-dl" style={{ background: "#dc2626" }} onClick={() => excluirInspDefinitivo(i.id)}>Excluir definitivamente</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      ) : inspecoes.length === 0 ? (
         <p className="vazio">Nenhuma inspeção. Adicione um tanque/ponto para iniciar o fluxo.</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -231,22 +278,29 @@ export default function ProjetoDetalhePage() {
             const pct = Math.round(((i.fase - 1) / (ULTIMA_FASE - 1)) * 100);
             const data = proximaData(i);
             return (
-              <Link key={i.id} href={`/inspecoes/${i.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
-                <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                  <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
-                  <span className="detalhe" style={{ margin: 0 }}>Fase {i.fase} · {tituloFase(i.fase)}</span>
-                </div>
-                {data && <span className="detalhe" style={{ margin: "4px 0 0" }}>📅 Agendada: {data}</span>}
-                {i.ultima_acao && (
-                  <span className="detalhe" style={{ margin: "2px 0 0" }}>
-                    🕀 {descreverAcaoFase(i.ultima_acao.acao, i.ultima_acao.fase_de, i.ultima_acao.fase_para)} · por {i.ultima_acao.autor_perfil?.nome_completo || i.ultima_acao.autor_perfil?.email || "usuário"}
-                    {" · "}{formatarDataHora(i.ultima_acao.data_autenticacao || i.ultima_acao.criado_em)}
-                  </span>
+              <div key={i.id} style={{ position: "relative" }}>
+                <Link href={`/inspecoes/${i.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
+                  <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, paddingRight: podeExcluir ? 28 : 0 }}>
+                    <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
+                    <span className="detalhe" style={{ margin: 0 }}>Fase {i.fase} · {tituloFase(i.fase)}</span>
+                  </div>
+                  {data && <span className="detalhe" style={{ margin: "4px 0 0" }}>📅 Agendada: {data}</span>}
+                  {i.ultima_acao && (
+                    <span className="detalhe" style={{ margin: "2px 0 0" }}>
+                      🕀 {descreverAcaoFase(i.ultima_acao.acao, i.ultima_acao.fase_de, i.ultima_acao.fase_para)} · por {i.ultima_acao.autor_perfil?.nome_completo || i.ultima_acao.autor_perfil?.email || "usuário"}
+                      {" · "}{formatarDataHora(i.ultima_acao.data_autenticacao || i.ultima_acao.criado_em)}
+                    </span>
+                  )}
+                  <div className="fu-progresso" style={{ marginTop: 10 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
+                    <div className="fu-barra" style={{ width: `${pct}%` }} />
+                  </div>
+                </Link>
+                {podeExcluir && (
+                  <button className="fu-icone-btn lixeira" title="Excluir inspeção (lixeira)"
+                    onClick={() => excluirInspecao(i.id)}
+                    style={{ position: "absolute", top: 12, right: 12 }}>🗑</button>
                 )}
-                <div className="fu-progresso" style={{ marginTop: 10 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
-                  <div className="fu-barra" style={{ width: `${pct}%` }} />
-                </div>
-              </Link>
+              </div>
             );
           })}
         </div>

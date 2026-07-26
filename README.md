@@ -1,179 +1,195 @@
-# DT PORTIFOLIO — Gerador de Propostas e Gestão de Processos
+# ASP — Plataforma de Inspeção e Execução
 
-Sistema web de gestão de processos de propostas para entes públicos: cadastro de
-órgãos (clientes), abertura e acompanhamento de processos por fases (Follow-up),
-análise de Termo de Referência (TR) com IA, geração automática de Proposta +
-Resumo com timbrado FIA, emissão de Ofício, dashboard gerencial e histórico
-auditável — multiusuário, com papéis e permissões.
+Sistema interno da **ASP (Advanced Services Provider / ASP Serviços Industriais)**
+para gestão de **inspeção robótica** e **execução** de serviços em tanques e
+tubulações. Um Projeto (um pedido de compra) reúne várias Inspeções (tanques/
+pontos), e cada inspeção percorre um fluxo de fases simétrico — **Inspeção** e
+**Execução** — com coleta de dados de campo, relatórios versionados, aprovação
+da gerência, agendamento com notificações e histórico auditável.
 
-**Stack:** Next.js 14 (App Router, TypeScript) · Supabase (Postgres + Auth +
-Storage, RLS) · Vercel · OpenAI (análise de TR e geração de proposta) ·
-docx.js / pdf-parse / mammoth.
+**Stack:** Next.js 14 (App Router · TypeScript · React 18) · Supabase (Postgres +
+Auth + Storage, com RLS) · Vercel · Resend (e-mail, opcional) · medidor de
+sedimento embutido (HTML/JS standalone).
 
----
-
-## 1. Implementações
-
-Evolução registrada por decisões numeradas (D1–D51), da migração do modelo
-antigo (senha única, app Vite) para o sistema atual:
-
-* **D1–D14 — Fundação:** migração para Supabase Auth multiusuário com papéis
-  (admin/editor/visualizador) e RLS; cadastro central de Órgãos com contatos;
-  processos do Follow-up com fluxo de documentos TR → Proposta → Ofício.
-* **D18–D29 — Navegação e acompanhamento:** header global com modais (Órgãos,
-  Histórico, Administração, Perfil); timeline vertical de fases na página do
-  órgão; troca de fase manual com data de autenticação e histórico; sino de
-  notificações global; "criado por" visível para admins.
-* **D36–D39 — Follow-up produtivo:** filtros (órgão, período, fase), edição de
-  título/órgão, modais de "Abrir processo" e "Novo órgão" reutilizando o
-  formulário completo; análise de TR automática a partir do arquivo já anexado.
-* **D40–D42 — Análise de TR em modal com rascunho:** a análise abre em modal
-  (sem sair da página) e o resultado da IA é salvo imediatamente como rascunho
-  (`status em_analise`) — fechar/reabrir não perde nada nem repete a IA; botão
-  com 3 estados (Analisar / Pré-análise pronta / Concluída ✓); suporte a TR em
-  PDF **e DOCX**; dashboard sem processos finalizados nas listas.
-* **D43–D48 — Papéis nas fases:** admin muda o processo para **qualquer** fase;
-  editor **avança para a próxima** fase; visualizador só consulta (timeline em
-  dropdown); cards-resumo no topo do Follow-up; tag e seção "✅ Finalizados";
-  Histórico mostra apenas o que o próprio usuário criou.
-* **D49–D51 — Permissões e feedback:** permissões de análises derivadas do
-  perfil; exclusão de análise por editor vira **solicitação aprovada pelo
-  admin**; botão 💬 de erros/sugestões com notificação ao admin; remoção da
-  senha legada do localStorage.
-
-## 2. Funcionalidades
-
-* **Órgãos (clientes):** cadastro completo (tipo de ente, razão social, CNPJ
-  único, cidade/UF, contatos), edição e página de detalhe com os processos do
-  órgão.
-* **Follow-up:** abertura de processos vinculados a um órgão; 8 fases (3
-  automáticas 🤖 guiadas pelos documentos + 5 manuais ✋ com data de
-  autenticação); cards-resumo (Em andamento / Finalizados / Total); filtros;
-  seção separada de finalizados; edição de título/órgão; exclusão.
-* **Análise de TR com IA:** upload de PDF/DOCX (ou uso do TR já anexado ao
-  processo); achados classificados com ciência/comentário obrigatórios;
-  rascunho persistente; relatório final em PDF gravado no Histórico e
-  vinculado ao processo.
-* **Geração de Proposta:** a partir do TR, gera Proposta + Resumo executivo em
-  `.docx` com timbrado FIA; aprovação da proposta libera o Ofício.
-* **Ofício:** emissão vinculada ao processo após aprovação da proposta.
-* **Dashboard:** 8 KPIs, funil por fase, evolução mensal, ranking de órgãos,
-  automática × manual; listas "por fase" e "progresso" (sem finalizados);
-  filtros e drill-down para o Follow-up.
-* **Histórico:** análises de TR e processos criados pelo próprio usuário;
-  detalhe da análise com edição versionada (justificativa obrigatória +
-  histórico de versões).
-* **Notificações (🔔):** pendências de automação e fases manuais; para admins,
-  solicitações de exclusão e feedbacks dos usuários.
-* **Erros e sugestões (💬):** qualquer usuário relata erro ou sugere melhoria;
-  admin recebe, acompanha e marca como resolvido.
-* **Administração de usuários:** criação com senha provisória, papel
-  (admin/editor/visualizador) e ativação/desativação.
-* **Perfil e tema:** edição de nome/e-mail/senha; tema claro/escuro persistente
-  (inclusive no login).
-
-## 3. Camadas de segurança
-
-1. **Autenticação** — Supabase Auth (e-mail/senha); sem sessão, as rotas de API
-   respondem 401 e as páginas redirecionam ao login. Nenhuma senha é gravada
-   no navegador (a chave legada `senha` do modelo antigo é removida
-   automaticamente do localStorage).
-2. **Autorização por papel (RLS + API)** — todas as tabelas `gp_*` têm Row
-   Level Security; as regras valem no banco, não só na interface:
-   * *Admin*: acesso total — muda processos para qualquer fase, edita/exclui
-     análises, aprova exclusões, administra usuários.
-   * *Editor*: cria/edita análises e propostas; só avança processos para a
-     próxima fase; exclusão de análise apenas via solicitação aprovada.
-   * *Visualizador*: somente leitura.
-   * Usuário **inativo** perde o acesso aos dados imediatamente (checagem
-     `p.ativo` nas policies).
-3. **Dupla validação** — as rotas de API revalidam papel e regra de negócio no
-   servidor (ex.: editor tentando pular fase recebe 403), independentemente do
-   que a interface mostra.
-4. **Auditoria** — histórico de fases com data de autenticação e autor; edição
-   de achados versionada com justificativa obrigatória; solicitações de
-   exclusão registram quem pediu, quem decidiu e quando; feedbacks registram
-   autor e página.
-5. **Administração restrita** — rotas `/api/admin/*` exigem perfil admin e usam
-   a service key **apenas no servidor**; chaves sensíveis ficam em variáveis de
-   ambiente da Vercel (nunca no cliente).
+> Produção: `asp-plataform.vercel.app` · Repo: `github.com/douglaskengit-dev/ASP-PLATAFORM`
 
 ---
 
-## 4. Criando novos módulos e funcionalidades (com IA)
+## 1. Funcionalidades
 
-O projeto mantém um **arquivo de contexto** para desenvolvimento assistido por
-IA: [`docs/CONTEXTO.md`](docs/CONTEXTO.md). Ele resume arquitetura, convenções,
-tabelas, papéis e os padrões obrigatórios (modais, RLS, decisões numeradas).
+**Projetos & Inspeções**
+- Abertura de projeto (1 = 1 pedido de compra) com cliente, código, pedido,
+  endereço da obra e responsável. Edição e **exclusão em lixeira** (soft-delete).
+- Inspeções (tanques/pontos) dentro do projeto, cada uma com barra de progresso
+  das fases e status (Em andamento / Aguardando aprovação / Em execução /
+  Encerrado).
 
-### Fluxo recomendado
+**Fluxo de fases (por inspeção)**
+1. Abertura do Projeto (Comercial · nível projeto)
+2. Agendamento de Visita/Inspeção (Comercial)
+3. Coleta de Dados (Operações)
+4. Relatório de Inspeção (Operações)
+5. Aprovação do Relatório de Inspeção (Gerência)
+6. Agendamento de Execução (Comercial)
+7. Execução (Operações)
+8. Relatório de Execução (Operações)
+9. Aprovação do Relatório de Execução (Gerência)
+10. Encerramento
 
-1. **Anexe o contexto:** envie `docs/CONTEXTO.md` junto do pedido (ou peça para
-   o agente lê-lo primeiro).
-2. **Descreva o módulo** com o prompt-modelo abaixo.
-3. **Confirme o plano antes do código:** peça sempre "confirme o que será
-   implementado antes de implementar".
-4. **Valide e publique:** revise o diff, rode `npm run build` local se
-   possível, e faça commit/push (a Vercel publica sozinha).
-5. **Registre a decisão:** toda mudança relevante ganha um número `D<n>`
-   comentado no código e citado no commit.
+Avançar registra **data de autenticação e autor**. Aprovação (fases 5/9) avança;
+reprovação volta uma fase com a tag **"Ajustar"**, exigindo motivo e preservando
+o histórico de versões.
 
-### Prompt-modelo
+**Coleta — Medidor de Sedimento**
+- Ferramenta de campo embutida (cálculo local, exporta PDF). A medição é salva
+  como **Relatório Técnico interno** (JSONB) — reabrível e **editável** — via
+  ponte `postMessage` com o app. Anexo de PDF também suportado. Outras
+  ferramentas (ultrassom, drone, MFL) marcadas como "em desenvolvimento".
 
-```text
-Leia o arquivo docs/CONTEXTO.md antes de começar.
+**Relatórios**
+- Upload **versionado** (PDF/DOCX); ciclo rascunho → em aprovação → aprovado /
+  ajustar / assinado; fila de aprovação da Gerência; download por versão.
 
-Quero criar o módulo/funcionalidade: <nome>
+**Agendamento**
+- Data + hora da visita e **data prevista de execução**; **equipe** por seleção
+  de usuários; equipamentos como chips; checklist extensível (NR-33, NR-10,
+  EPIs, PT…). Editar/excluir. Ao agendar, os envolvidos recebem **notificação
+  in-app** e **e-mail com convite de calendário (.ics)** para a agenda do
+  celular (e-mail via Resend, opcional).
 
-O que ele deve fazer:
-- <comportamento 1>
-- <comportamento 2>
+**Dashboard**
+- KPIs (projetos, inspeções, em andamento, aguardando aprovação, em execução,
+  encerradas, progresso médio) com tooltips; gráficos (inspeções por fase,
+  projetos por cliente); **calendário mensal** com datas de inspeção e execução;
+  filtros por cliente, período e status.
 
-Quem pode usar: <admin / editor / visualizador — o que cada um pode fazer>
+**Clientes** (reutiliza `gp_orgaos`) — cadastro/edição, busca e filtros, e
+lixeira. **Histórico** — projetos em aberto. **Arquivos** — coletas e relatórios
+agrupados por projeto/inspeção, com busca e filtros.
 
-Onde aparece: <página nova ou existente, modal, header, notificações...>
+**Notificações** — sino no header com avisos persistidos (ex.: inspeção
+agendada) e as inspeções paradas numa fase sob responsabilidade do perfil do
+usuário.
 
-Dados: <novas tabelas/colunas necessárias, ou tabelas existentes envolvidas>
+**Administração de usuários** — criar usuários; **Área/Acesso** (Comercial,
+Operações, Gerência, Admin), **Função** (Coordenador, Engenheiro, Técnico),
+editar nome, redefinir senha e ativar/inativar.
 
-Regras de segurança: aplicar RLS no banco seguindo o padrão do CONTEXTO.md
-(admin/editor/visualizador + usuário ativo) e revalidar no servidor.
-
-Confirme comigo o que será implementado antes de escrever código.
-```
+**Identidade visual** — paleta ASP (azul `#0f5cad` / amarelo `#e8c51f`), fonte
+Montserrat, badge + wordmark no header, mascote nos títulos.
 
 ---
 
-## Estrutura do projeto
+## 2. Perfis e permissões
+
+| Área (perfil) | Atua nas fases | Observações |
+|---|---|---|
+| Comercial | 1, 2, 6 | abre projetos e agenda |
+| Operações | 3, 4, 7, 8 | coleta e relatórios |
+| Gerência | 5, 9 (+ todas) | aprova/reprova |
+| Admin | tudo | + administração de usuários |
+
+- **Excluir projeto/inspeção/cliente:** Comercial, Gerência, Admin **ou** quem
+  tem a Função **Coordenador**.
+- Permissões finas ficam nas API routes; o RLS garante o mínimo por perfil.
+  Perfis legados (`editor`/`visualizador`) ainda são aceitos durante a migração.
+
+---
+
+## 3. Modelo de dados (tabelas novas do fluxo ASP)
 
 ```
-app/
-  dashboard/         -> KPIs, gráficos e listas gerenciais
-  followup/          -> processos por fase (núcleo operacional)
-  orgaos/[id]/       -> detalhe do órgão + processos (Ações)
-  historico/         -> análises de TR e processos do usuário
-  tr-analise/        -> análise de TR (também aberta em modal)
-  oficio/            -> emissão de ofício
-  login/, perfil/, arquivos/
-  api/               -> rotas (processos, tr, orgaos, admin, generate...)
-  components/        -> Modal, BarraUsuario, NotificacoesBotao, FeedbackBotao,
-                        AnaliseTRConteudo, ProcessoTimeline, FormularioOrgao...
-lib/                 -> docxBuilder, pdfExtract, etapas do fluxo, tipos, IA
-docs/                -> CONTEXTO.md (contexto p/ IA), PLANO-MIGRACAO.md
-supabase/            -> schema unificado (referência)
+gp_projetos        1 projeto = 1 pedido de compra (cliente → gp_orgaos)
+  └── gp_inspecoes     N por projeto; carregam as fases 2..10
+        ├── gp_coletas       medição (jsonb) + PDF do medidor
+        ├── gp_relatorios    inspeção/execução, versionados
+        ├── gp_agendamentos  data/hora, execução, equipe, checklist (jsonb)
+        └── gp_fase_historico auditoria de fases (ação, autor, data)
+gp_notificacoes    avisos in-app por usuário
+gp_profiles        perfil (área) + funcao
 ```
 
-## Rodar localmente
+Soft-delete (`excluido_em` / `excluido_por`) em `gp_projetos`, `gp_inspecoes` e
+`gp_orgaos` — a exclusão vira **lixeira**, recuperável por **30 dias**, com
+limpeza automática (preguiçosa) depois disso. Storage no bucket privado
+`gp-arquivos` (coletas e relatórios).
+
+> O fluxo antigo (Processos/TR/Proposta/Ofício, tabelas `gp_processos` etc.)
+> permanece no repositório para reaproveitamento, mas fora da navegação.
+
+---
+
+## 4. Setup
+
+Pré-requisitos: Node 18+, um projeto Supabase.
 
 ```bash
 npm install
-npm run dev   # http://localhost:3000
+cp .env.example .env.local   # preencha os valores
+npm run dev                  # http://localhost:3000
 ```
 
-Variáveis necessárias (`.env.local`): `NEXT_PUBLIC_SUPABASE_URL`,
-`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`.
+**Variáveis de ambiente** (`.env.local` e Vercel):
 
-## Publicação
+| Variável | Uso |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | URL do projeto Supabase |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | chave publicável (client) |
+| `SUPABASE_SECRET_KEY` | chave secreta / service_role (só servidor) |
+| `NEXT_PUBLIC_APP_URL` | URL pública do app (links de e-mail) — opcional |
+| `RESEND_API_KEY` | envio de e-mail (opcional; sem ela, e-mail é no-op) |
+| `EMAIL_REMETENTE` | remetente, ex.: `ASP <no-reply@seudominio>` (opcional) |
 
-`git commit` + `git push` na branch principal — a Vercel faz build e publica
-automaticamente.
-# GERADOR-PROPOSTA
+**Migrations:** aplique os arquivos de `supabase/migrations/` no banco (SQL
+Editor do Supabase ou `supabase db push`). Os relevantes ao fluxo ASP:
+
+```
+20260725120000_asp_novo_fluxo_v1.sql              schema + RLS + perfis
+20260727100000_asp_usuario_funcao.sql             coluna funcao
+20260728100000_asp_agendamento_notificacoes.sql   hora + gp_notificacoes
+20260729100000_asp_agendamento_data_execucao.sql  data de execução
+20260730100000_asp_projeto_soft_delete.sql        lixeira de projeto
+20260731100000_asp_soft_delete_inspecao_cliente.sql lixeira de inspeção/cliente
+```
+
+**E-mail (Resend):** crie a conta, verifique um domínio em *Domains* (registros
+SPF/DKIM) e defina `RESEND_API_KEY`/`EMAIL_REMETENTE`. Enquanto não configurado,
+as notificações in-app funcionam normalmente e o e-mail fica desativado.
+
+---
+
+## 5. Estrutura
+
+```
+app/
+  page.tsx                landing pública
+  login/                  autenticação (Supabase)
+  dashboard/              KPIs, gráficos e calendário
+  projetos/               lista, detalhe, edição e lixeira
+  inspecoes/[id]/         fases, coleta, agendamento, relatórios, histórico
+  arquivos/               documentos por projeto/inspeção
+  orgaos/                 clientes (cadastro, edição, lixeira)
+  admin/usuarios/         administração de usuários
+  api/                    route handlers (projetos, inspecoes, coletas,
+                          relatorios, agendamentos, notificacoes, usuarios…)
+  components/             BarraUsuario, Modal, TituloPagina, CalendarioAgenda,
+                          NotificacoesBotao, FormularioOrgao, DashboardCharts…
+lib/
+  asp/fases.ts            modelo de fases e ações
+  asp/permissoes.ts       regras de exclusão
+  supabase/               clients (browser, route, admin/server)
+  email.ts, ics.ts, email-templates.ts
+public/ferramentas/       medidor de sedimento (HTML standalone)
+supabase/migrations/      migrations SQL
+```
+
+---
+
+## 6. Convenções
+
+- Construir e validar **fase a fase**, com deploy incremental na Vercel.
+- Nunca commitar segredos; chaves só via variáveis de ambiente.
+- Rodar `npx tsc --noEmit` (type-check) e, quando possível, `npm run build`
+  antes do push.
+- Storage e operações que ignoram RLS usam o cliente admin (`SUPABASE_SECRET_KEY`),
+  nunca no navegador.

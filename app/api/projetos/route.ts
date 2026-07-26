@@ -25,14 +25,17 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseRouteClient();
   let query = supabase
     .from("gp_projetos")
-    .select("*, cliente:gp_orgaos(id, razao_social, cidade, uf), inspecoes:gp_inspecoes(id, fase)")
+    .select("*, cliente:gp_orgaos(id, razao_social, cidade, uf), inspecoes:gp_inspecoes(id, fase, excluido_em)")
     .order(lixeira ? "excluido_em" : "criado_em", { ascending: false });
   query = lixeira ? query.not("excluido_em", "is", null) : query.is("excluido_em", null);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
-  const projetos = (data || []).map((p: any) => ({ ...p, inspecoes_total: (p.inspecoes || []).length }));
+  const projetos = (data || []).map((p: any) => {
+    const inspecoes = (p.inspecoes || []).filter((i: any) => !i.excluido_em);
+    return { ...p, inspecoes, inspecoes_total: inspecoes.length };
+  });
   return NextResponse.json({ ok: true, projetos, podeExcluir: podeExcluirProjeto(profile), diasLixeira: DIAS_LIXEIRA });
 }
 

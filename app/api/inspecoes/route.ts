@@ -1,13 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { PRIMEIRA_FASE_INSPECAO } from "@/lib/asp/fases";
 
 export const runtime = "nodejs";
+
+const DIAS_LIXEIRA = 30;
 
 interface NovaInspecaoBody {
   projetoId: string;
   identificacao: string;
   ferramentaColeta?: string;
+}
+
+/** Lista inspeções de um projeto. ?lixeira=1 lista as excluídas. Limpeza
+ * preguiçosa das que passaram de 30 dias. */
+export async function GET(req: NextRequest) {
+  const profile = await getProfileAtual();
+  if (!profile) {
+    return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
+  }
+  const projetoId = req.nextUrl.searchParams.get("projetoId");
+  const lixeira = req.nextUrl.searchParams.get("lixeira") === "1";
+  if (!projetoId) return NextResponse.json({ erro: "projetoId é obrigatório." }, { status: 400 });
+
+  const corte = new Date(Date.now() - DIAS_LIXEIRA * 86400000).toISOString();
+  await getSupabaseAdmin().from("gp_inspecoes").delete().lt("excluido_em", corte);
+
+  const supabase = getSupabaseRouteClient();
+  let query = supabase.from("gp_inspecoes").select("*").eq("projeto_id", projetoId).order("criado_em", { ascending: true });
+  query = lixeira ? query.not("excluido_em", "is", null) : query.is("excluido_em", null);
+  const { data, error } = await query;
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, inspecoes: data || [] });
 }
 
 /** Cria uma inspeção dentro de um projeto (ex.: "Tanque TQ-01").

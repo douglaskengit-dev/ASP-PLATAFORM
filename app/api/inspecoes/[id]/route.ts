@@ -1,7 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
+
+/** Restaurar da lixeira: PATCH { restaurar: true }. */
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const profile = await getProfileAtual();
+  if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
+  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Sem permissão." }, { status: 403 });
+  const body = await req.json();
+  if (!body.restaurar) return NextResponse.json({ ok: true });
+  const { error } = await getSupabaseAdmin()
+    .from("gp_inspecoes")
+    .update({ excluido_em: null, excluido_por: null, atualizado_em: new Date().toISOString() })
+    .eq("id", params.id);
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+
+/** Exclusão da inspeção — lixeira (soft) por padrão; ?definitivo=1 apaga. */
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  const profile = await getProfileAtual();
+  if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
+  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir inspeções." }, { status: 403 });
+  const admin = getSupabaseAdmin();
+  if (req.nextUrl.searchParams.get("definitivo") === "1") {
+    const { error } = await admin.from("gp_inspecoes").delete().eq("id", params.id);
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, definitivo: true });
+  }
+  const { error } = await admin
+    .from("gp_inspecoes")
+    .update({ excluido_em: new Date().toISOString(), excluido_por: profile.id })
+    .eq("id", params.id);
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, lixeira: true });
+}
 
 /** Detalhe da inspeção com coletas, agendamentos, relatórios e histórico. */
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {

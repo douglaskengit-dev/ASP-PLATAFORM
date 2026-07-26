@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { contatoValido, NovoContatoInput, orgaoValido, somenteDigitos, TipoEnte } from "@/lib/orgaos/types";
 
 export const runtime = "nodejs";
+
+const DIAS_LIXEIRA = 30;
 
 interface NovoOrgaoBody {
   tipoEnte: TipoEnte;
@@ -27,15 +31,19 @@ export async function GET(req: NextRequest) {
   const tipo = searchParams.get("tipo")?.trim();
   const de = searchParams.get("de")?.trim();
   const ate = searchParams.get("ate")?.trim();
+  const lixeira = searchParams.get("lixeira") === "1";
+
+  // Limpeza preguiçosa dos clientes que passaram de 30 dias na lixeira.
+  const corte = new Date(Date.now() - DIAS_LIXEIRA * 86400000).toISOString();
+  await getSupabaseAdmin().from("gp_orgaos").delete().lt("excluido_em", corte);
 
   const supabase = getSupabaseRouteClient();
-  // D15: cada órgão traz suas "Ações" (processos do Follow-up) para o card —
-  // arquivos/documentos/proposta_aprovada alimentam o progresso por ação.
   let query = supabase
     .from("gp_orgaos")
     .select("*, processos:gp_processos(id, titulo, etapa, arquivos, documentos, proposta_aprovada)")
     .order("razao_social", { ascending: true });
 
+  query = lixeira ? query.not("excluido_em", "is", null) : query.is("excluido_em", null);
   if (q) query = query.ilike("razao_social", `%${q}%`);
   if (tipo) query = query.eq("tipo_ente", tipo);
   if (de) query = query.gte("created_at", `${de}T00:00:00`);
@@ -56,7 +64,7 @@ export async function GET(req: NextRequest) {
     })),
   }));
 
-  return NextResponse.json({ ok: true, orgaos });
+  return NextResponse.json({ ok: true, orgaos, podeExcluir: podeExcluirProjeto(profile) });
 }
 
 /** Cadastra um novo órgão. Tipo do ente, razão social, cidade e UF são

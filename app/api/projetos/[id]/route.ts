@@ -25,6 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     .from("gp_inspecoes")
     .select("*, agendamentos:gp_agendamentos(data_visita, hora, tipo)")
     .eq("projeto_id", params.id)
+    .is("excluido_em", null)
     .order("criado_em", { ascending: true });
 
   const inspecoes = inspecoesRaw || [];

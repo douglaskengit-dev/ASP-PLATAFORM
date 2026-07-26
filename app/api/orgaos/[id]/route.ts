@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { orgaoValido, somenteDigitos, TipoEnte } from "@/lib/orgaos/types";
 
 export const runtime = "nodejs";
@@ -89,7 +91,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
 
-  const body = (await req.json()) as EditarOrgaoBody;
+  const body = (await req.json()) as EditarOrgaoBody & { restaurar?: boolean };
+
+  // Restaurar da lixeira (mesma permissão de excluir).
+  if (body.restaurar) {
+    if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Sem permissão para restaurar." }, { status: 403 });
+    const { error } = await getSupabaseAdmin()
+      .from("gp_orgaos")
+      .update({ excluido_em: null, excluido_por: null, updated_at: new Date().toISOString() })
+      .eq("id", params.id);
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
   const faltando = orgaoValido(body);
   if (faltando.length > 0) {
     return NextResponse.json(
@@ -141,4 +155,23 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   return NextResponse.json({ ok: true, orgao: data });
+}
+
+/** Exclusão do cliente — lixeira (soft) por padrão; ?definitivo=1 apaga. */
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  const profile = await getProfileAtual();
+  if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
+  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir clientes." }, { status: 403 });
+  const admin = getSupabaseAdmin();
+  if (req.nextUrl.searchParams.get("definitivo") === "1") {
+    const { error } = await admin.from("gp_orgaos").delete().eq("id", params.id);
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, definitivo: true });
+  }
+  const { error } = await admin
+    .from("gp_orgaos")
+    .update({ excluido_em: new Date().toISOString(), excluido_por: profile.id })
+    .eq("id", params.id);
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, lixeira: true });
 }
