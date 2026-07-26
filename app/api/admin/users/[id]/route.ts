@@ -17,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
 
   const body = await req.json();
-  const { nomeCompleto, perfil, ativo } = body || {};
+  const { nomeCompleto, perfil, ativo, funcao } = body || {};
 
   const admin = getSupabaseAdmin();
   const { error } = await admin
@@ -26,6 +26,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(nomeCompleto !== undefined ? { nome_completo: nomeCompleto } : {}),
       ...(perfil !== undefined ? { perfil } : {}),
       ...(ativo !== undefined ? { ativo } : {}),
+      ...(funcao !== undefined ? { funcao: funcao || null } : {}),
     })
     .eq("id", params.id);
 

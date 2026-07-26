@@ -35,7 +35,7 @@ interface Historico {
   motivo: string | null;
   criado_em: string;
 }
-interface Coleta { id: string; tipo: string; pdf_path: string | null; criado_em: string }
+interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string }
 interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null }
 interface Agendamento {
   id: string; tipo: string; data_visita: string | null;
@@ -79,6 +79,12 @@ export default function InspecaoDetalhePage() {
   const [modalMedidor, setModalMedidor] = useState(false);
   const [enviandoColeta, setEnviandoColeta] = useState(false);
   const coletaInputRef = useRef<HTMLInputElement>(null);
+  // Medidor: salvar/editar medição (registro editável = Relatório Técnico interno)
+  const medidorRef = useRef<HTMLIFrameElement>(null);
+  const [coletaEditando, setColetaEditando] = useState<string | null>(null);
+  const editandoRef = useRef<string | null>(null);
+  const dadosCarregarRef = useRef<any>(null);
+  const [salvandoMedicao, setSalvandoMedicao] = useState(false);
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
@@ -166,6 +172,58 @@ export default function InspecaoDetalhePage() {
       setEnviandoColeta(false);
       if (coletaInputRef.current) coletaInputRef.current.value = "";
     }
+  }
+
+  // Salva/atualiza a medição (registro editável = Relatório Técnico interno).
+  const salvarMedicao = useCallback(async (dados: any) => {
+    setSalvandoMedicao(true);
+    setErro(null);
+    try {
+      const editId = editandoRef.current;
+      const r = await fetch(editId ? `/api/coletas/${editId}` : "/api/coletas", {
+        method: editId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editId ? { dados } : { inspecaoId: id, tipo: "sedimento", dados }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErro(d.erro || "Falha ao salvar a medição."); return; }
+      setModalMedidor(false);
+      setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
+      carregar();
+    } catch {
+      setErro("Falha de rede ao salvar a medição.");
+    } finally {
+      setSalvandoMedicao(false);
+    }
+  }, [id, carregar]);
+
+  // Ponte com o iframe do medidor: recebe o snapshot ao salvar e envia os
+  // dados salvos ao abrir (asp:ready) para editar.
+  useEffect(() => {
+    function onMsg(ev: MessageEvent) {
+      const msg = (ev.data || {}) as { type?: string; dados?: any };
+      if (msg.type === "asp:ready") {
+        if (dadosCarregarRef.current && medidorRef.current?.contentWindow) {
+          medidorRef.current.contentWindow.postMessage({ type: "asp:load", dados: dadosCarregarRef.current }, "*");
+        }
+      } else if (msg.type === "asp:save") {
+        salvarMedicao(msg.dados);
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [salvarMedicao]);
+
+  function abrirMedidorNovo() {
+    setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
+    setErro(null); setModalMedidor(true);
+  }
+  function abrirMedidorEdicao(c: Coleta) {
+    setColetaEditando(c.id); editandoRef.current = c.id; dadosCarregarRef.current = c.dados || null;
+    setErro(null); setModalMedidor(true);
+  }
+  function pedirSalvarMedicao() {
+    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
   }
 
   async function enviarRelatorio(arquivo: File) {
@@ -313,8 +371,8 @@ export default function InspecaoDetalhePage() {
             <h3 style={{ margin: 0 }}>Coletas ({coletas.length})</h3>
             {podeColeta && (
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn-azul btn-sec" onClick={() => setModalMedidor(true)}>📐 Medidor</button>
-                <button className="btn-azul" onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
+                <button className="btn-azul" onClick={abrirMedidorNovo}>📐 Nova medição</button>
+                <button className="btn-azul btn-sec" onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
                   {enviandoColeta ? "Enviando…" : "Anexar PDF"}
                 </button>
                 <input ref={coletaInputRef} type="file" accept="application/pdf" style={{ display: "none" }}
@@ -322,7 +380,7 @@ export default function InspecaoDetalhePage() {
               </div>
             )}
           </div>
-          <p className="detalhe" style={{ marginTop: 6 }}>Ferramenta ativa: medidor de sedimento (cálculo local, exporta PDF).</p>
+          <p className="detalhe" style={{ marginTop: 6 }}>Medidor de sedimento: a medição vira um Relatório Técnico interno editável.</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             {FERRAMENTAS_FUTURAS.map((f) => (
               <span key={f} className="fu-badge manual" style={{ opacity: 0.75 }}>{f} · em desenvolvimento</span>
@@ -331,14 +389,24 @@ export default function InspecaoDetalhePage() {
           {coletas.length === 0 ? (
             <p className="vazio" style={{ margin: 0 }}>Nenhuma coleta registrada.</p>
           ) : (
-            coletas.map((c) => (
-              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 4 }}>
-                <span className="detalhe" style={{ margin: 0 }}>{c.tipo} · {formatar(c.criado_em)}</span>
-                {c.pdf_path && (
-                  <a className="btn-dl btn-sec" href={`/api/coletas/${c.id}/download`} target="_blank" rel="noopener noreferrer">PDF</a>
-                )}
-              </div>
-            ))
+            coletas.map((c) => {
+              const temMedicao = c.dados && Object.keys(c.dados).length > 0;
+              return (
+                <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6 }}>
+                  <span className="detalhe" style={{ margin: 0 }}>
+                    {temMedicao ? "📋 Relatório Técnico interno" : `📎 ${c.tipo}`} · {formatar(c.criado_em)}
+                  </span>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    {podeColeta && temMedicao && (
+                      <button className="btn-dl btn-sec" onClick={() => abrirMedidorEdicao(c)}>Editar</button>
+                    )}
+                    {c.pdf_path && (
+                      <a className="btn-dl btn-sec" href={`/api/coletas/${c.id}/download`} target="_blank" rel="noopener noreferrer">PDF</a>
+                    )}
+                  </span>
+                </div>
+              );
+            })
           )}
         </div>
 
@@ -425,9 +493,21 @@ export default function InspecaoDetalhePage() {
 
       {/* Modal: medidor de sedimento (ferramenta de campo embutida por iframe) */}
       {modalMedidor && (
-        <Modal titulo="📐 Medidor de Sedimento" onFechar={() => setModalMedidor(false)} largo semPadding>
-          <iframe src="/ferramentas/medidor-sedimento.html" title="Medidor de Sedimento"
-            style={{ width: "100%", height: "80vh", border: "none", display: "block" }} />
+        <Modal titulo={coletaEditando ? "📐 Editar medição" : "📐 Medidor de Sedimento"}
+          onFechar={() => { setModalMedidor(false); setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null; }}
+          largo semPadding>
+          <div style={{ display: "flex", flexDirection: "column", height: "82vh" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--borda)", background: "var(--bg-suave)", flexShrink: 0 }}>
+              <span className="detalhe" style={{ margin: 0 }}>
+                {coletaEditando ? "Editando o registro salvo." : "A medição é salva como Relatório Técnico interno (editável). Use “Exportar em PDF” dentro da ferramenta para o PDF."}
+              </span>
+              <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
+                {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
+              </button>
+            </div>
+            <iframe ref={medidorRef} src="/ferramentas/medidor-sedimento-asp.html" title="Medidor de Sedimento"
+              style={{ flex: 1, width: "100%", border: "none", display: "block" }} />
+          </div>
         </Modal>
       )}
 

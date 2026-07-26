@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
 
   const body = await req.json();
-  const { email, senha, nomeCompleto, perfil } = body || {};
+  const { email, senha, nomeCompleto, perfil, funcao } = body || {};
 
   if (!email || !senha || !perfil) {
     return NextResponse.json({ erro: "E-mail, senha e perfil são obrigatórios." }, { status: 400 });
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
     .update({
       nome_completo: nomeCompleto || null,
       perfil,
+      funcao: funcao || null,
     })
     .eq("id", created.user.id);
 

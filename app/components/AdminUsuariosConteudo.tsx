@@ -9,8 +9,26 @@ interface Profile {
   id: string;
   email: string;
   nome_completo: string | null;
-  perfil: "admin" | "editor" | "visualizador";
+  /** admin/comercial/operacoes/gerencia (novos) ou editor/visualizador (legado). */
+  perfil: string;
+  funcao: string | null;
   ativo: boolean;
+}
+
+/** Perfil = acesso/permissão. A "Área" é derivada dele. */
+const PERFIS_ACESSO = [
+  { valor: "comercial", rotulo: "Comercial" },
+  { valor: "operacoes", rotulo: "Operações" },
+  { valor: "gerencia", rotulo: "Gerência" },
+  { valor: "admin", rotulo: "Administrador (acesso total)" },
+];
+const AREA_POR_PERFIL: Record<string, string> = {
+  comercial: "Comercial", operacoes: "Operação", gerencia: "Gerência", admin: "Administração",
+};
+const FUNCOES = ["Coordenador", "Engenheiro", "Técnico"];
+
+function ehLegado(perfil: string) {
+  return perfil === "editor" || perfil === "visualizador";
 }
 
 export default function AdminUsuariosConteudo() {
@@ -23,7 +41,8 @@ export default function AdminUsuariosConteudo() {
   const [novoEmail, setNovoEmail] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
   const [novoNome, setNovoNome] = useState("");
-  const [novoPerfil, setNovoPerfil] = useState<Profile["perfil"]>("visualizador");
+  const [novoPerfil, setNovoPerfil] = useState("operacoes");
+  const [novaFuncao, setNovaFuncao] = useState("");
   const [criando, setCriando] = useState(false);
 
   // D31: filtros da lista de usuários cadastrados + paginação "ver mais".
@@ -104,6 +123,7 @@ export default function AdminUsuariosConteudo() {
           senha: novaSenha,
           nomeCompleto: novoNome.trim() || null,
           perfil: novoPerfil,
+          funcao: novaFuncao || null,
         }),
       });
       const dados = await resp.json();
@@ -112,7 +132,8 @@ export default function AdminUsuariosConteudo() {
       setNovoEmail("");
       setNovaSenha("");
       setNovoNome("");
-      setNovoPerfil("visualizador");
+      setNovoPerfil("operacoes");
+      setNovaFuncao("");
       carregar();
     } catch (err: any) {
       setErro(err.message || "Erro ao criar usuário.");
@@ -128,8 +149,9 @@ export default function AdminUsuariosConteudo() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          perfil: campos.perfil,
-          ativo: campos.ativo,
+          ...(campos.perfil !== undefined ? { perfil: campos.perfil } : {}),
+          ...(campos.ativo !== undefined ? { ativo: campos.ativo } : {}),
+          ...(campos.funcao !== undefined ? { funcao: campos.funcao } : {}),
         }),
       });
       const dados = await resp.json();
@@ -165,16 +187,22 @@ export default function AdminUsuariosConteudo() {
             <input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
           </div>
           <div className="field">
-            <label>Perfil *</label>
-            <select value={novoPerfil} onChange={(e) => setNovoPerfil(e.target.value as Profile["perfil"])}>
-              <option value="visualizador">Visualizador (só consulta)</option>
-              <option value="editor">Editor (analisa e gera relatórios)</option>
-              <option value="admin">Administrador (acesso total)</option>
+            <label>Área / Acesso *</label>
+            <select value={novoPerfil} onChange={(e) => setNovoPerfil(e.target.value)}>
+              {PERFIS_ACESSO.map((p) => <option key={p.valor} value={p.valor}>{p.rotulo}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Função</label>
+            <select value={novaFuncao} onChange={(e) => setNovaFuncao(e.target.value)}>
+              <option value="">— Selecione —</option>
+              {FUNCOES.map((fn) => <option key={fn} value={fn}>{fn}</option>)}
             </select>
           </div>
         </div>
         <p className="detalhe" style={{ marginTop: 10 }}>
-          Permissões vêm do perfil: Admin edita e exclui tudo; Editor edita e solicita exclusão ao admin; Visualizador só consulta.
+          A <strong>Área</strong> (acesso) define as permissões no fluxo: Comercial (fases 1/2/6), Operações (3/4/7/8),
+          Gerência (aprovações 5/9) e Administrador (tudo). A <strong>Função</strong> é o cargo do colaborador.
         </p>
         <div className="actions">
           <button className="btn" onClick={criarUsuario} disabled={criando}>
@@ -200,12 +228,12 @@ export default function AdminUsuariosConteudo() {
             <input value={filtroEmail} onChange={(e) => setFiltroEmail(e.target.value)} placeholder="Buscar por e-mail" />
           </div>
           <div className="field" style={{ minWidth: 160, marginBottom: 0 }}>
-            <label>Tipo de perfil</label>
+            <label>Área / Acesso</label>
             <select value={filtroPerfil} onChange={(e) => setFiltroPerfil(e.target.value)}>
               <option value="">Todos</option>
-              <option value="visualizador">Visualizador</option>
-              <option value="editor">Editor</option>
-              <option value="admin">Administrador</option>
+              {PERFIS_ACESSO.map((p) => <option key={p.valor} value={p.valor}>{p.rotulo}</option>)}
+              <option value="editor">Editor (legado)</option>
+              <option value="visualizador">Visualizador (legado)</option>
             </select>
           </div>
           {filtrosAtivos && (
@@ -223,18 +251,25 @@ export default function AdminUsuariosConteudo() {
           <div className="item-analise" key={u.id}>
             <div className="item-analise-cabecalho">
               <span className="etapa-badge">{u.email}</span>
-              <span>{u.nome_completo}</span>
+              <span>
+                {u.nome_completo}
+                {u.funcao ? ` · ${u.funcao}` : ""}
+                {AREA_POR_PERFIL[u.perfil] ? ` · ${AREA_POR_PERFIL[u.perfil]}` : ""}
+              </span>
             </div>
             <div className="grid" style={{ marginTop: 8 }}>
               <div className="field">
-                <label>Perfil</label>
-                <select
-                  value={u.perfil}
-                  onChange={(e) => atualizarUsuario(u.id, { perfil: e.target.value as Profile["perfil"] })}
-                >
-                  <option value="visualizador">Visualizador</option>
-                  <option value="editor">Editor</option>
-                  <option value="admin">Administrador</option>
+                <label>Área / Acesso</label>
+                <select value={u.perfil} onChange={(e) => atualizarUsuario(u.id, { perfil: e.target.value })}>
+                  {PERFIS_ACESSO.map((p) => <option key={p.valor} value={p.valor}>{p.rotulo}</option>)}
+                  {ehLegado(u.perfil) && <option value={u.perfil}>{u.perfil} (legado)</option>}
+                </select>
+              </div>
+              <div className="field">
+                <label>Função</label>
+                <select value={u.funcao || ""} onChange={(e) => atualizarUsuario(u.id, { funcao: e.target.value || null })}>
+                  <option value="">— Não definida —</option>
+                  {FUNCOES.map((fn) => <option key={fn} value={fn}>{fn}</option>)}
                 </select>
               </div>
             </div>
