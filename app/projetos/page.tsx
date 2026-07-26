@@ -15,6 +15,7 @@ interface ClienteResumo {
   cidade?: string | null;
   uf?: string | null;
 }
+interface InspecaoResumo { id: string; fase: number }
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
@@ -23,7 +24,20 @@ interface Projeto {
   responsavel_projeto: string | null;
   data_abertura: string;
   cliente: ClienteResumo | null;
+  inspecoes: InspecaoResumo[];
   inspecoes_total: number;
+}
+
+const ULTIMA_FASE = 10;
+
+/** Status do projeto derivado das fases das suas inspeções. */
+function statusProjeto(inspecoes: InspecaoResumo[]): { label: string; cor: string; pct: number } {
+  if (!inspecoes.length) return { label: "Sem inspeções", cor: "#5a6b7b", pct: 0 };
+  const media = inspecoes.reduce((a, i) => a + i.fase, 0) / inspecoes.length;
+  const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
+  if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Encerrado", cor: "#16a34a", pct: 100 };
+  if (inspecoes.some((i) => i.fase === 5 || i.fase === 9)) return { label: "Aguardando aprovação", cor: "#c2410c", pct };
+  return { label: "Em andamento", cor: "var(--primaria)", pct };
 }
 interface Orgao {
   id: string;
@@ -60,7 +74,7 @@ export default function ProjetosPage() {
           return;
         }
         const d = await r.json();
-        setProjetos(d.projetos || []);
+        setProjetos((d.projetos || []).map((p: Projeto) => ({ ...p, inspecoes: p.inspecoes || [] })));
       })
       .finally(() => setCarregando(false));
   }, []);
@@ -125,23 +139,34 @@ export default function ProjetosPage() {
         <p className="vazio">Nenhum projeto ainda. Clique em “+ Novo projeto” para abrir o primeiro.</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {projetos.map((p) => (
-            <Link key={p.id} href={`/projetos/${p.id}`} className="item" style={{ textDecoration: "none", color: "inherit" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <strong style={{ color: "var(--texto)" }}>
-                  {p.codigo_projeto || p.pedido_compra || "Projeto sem código"}
-                </strong>
-                <span className="detalhe">
-                  {p.cliente?.razao_social || "Cliente não informado"}
-                  {p.cliente?.cidade ? ` · ${p.cliente.cidade}${p.cliente.uf ? "/" + p.cliente.uf : ""}` : ""}
-                  {p.pedido_compra && p.codigo_projeto ? ` · Pedido ${p.pedido_compra}` : ""}
-                </span>
+          {projetos.map((p) => {
+            const st = statusProjeto(p.inspecoes);
+            return (
+            <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
+              <div style={{ display: "flex", width: "100%", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ color: "var(--texto)" }}>
+                    {p.codigo_projeto || p.pedido_compra || "Projeto sem código"}
+                  </strong>
+                  <span className="detalhe">
+                    {p.cliente?.razao_social || "Cliente não informado"}
+                    {p.cliente?.cidade ? ` · ${p.cliente.cidade}${p.cliente.uf ? "/" + p.cliente.uf : ""}` : ""}
+                    {p.pedido_compra && p.codigo_projeto ? ` · Pedido ${p.pedido_compra}` : ""}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                  <span className="fu-badge" style={{ background: st.cor, color: "#fff" }}>{st.label}</span>
+                  <span className="detalhe" style={{ margin: 0 }}>
+                    {p.inspecoes_total} inspeç{p.inspecoes_total === 1 ? "ão" : "ões"}
+                  </span>
+                </div>
               </div>
-              <span className="fu-badge manual" style={{ marginLeft: 8 }}>
-                {p.inspecoes_total} inspeç{p.inspecoes_total === 1 ? "ão" : "ões"}
-              </span>
+              <div className="fu-progresso" style={{ marginTop: 10 }} title={`Progresso médio: ${st.pct}%`}>
+                <div className="fu-barra" style={{ width: `${st.pct}%`, background: st.cor }} />
+              </div>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
 
