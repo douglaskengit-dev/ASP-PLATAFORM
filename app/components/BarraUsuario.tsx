@@ -9,6 +9,7 @@ import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
 import NotificacoesBotao from "./NotificacoesBotao";
 import FeedbackBotao from "./FeedbackBotao";
+import SyncStatus from "./SyncStatus";
 import OrgaosConteudo from "./OrgaosConteudo";
 import HistoricoConteudo from "./HistoricoConteudo";
 import PerfilConteudo from "./PerfilConteudo";
@@ -193,6 +194,7 @@ export default function BarraUsuario() {
             </span>
             {nome || email}
           </button>
+          <SyncStatus />
           <FeedbackBotao />
           <NotificacoesBotao />
           <ThemeToggle />

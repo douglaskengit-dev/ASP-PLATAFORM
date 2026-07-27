@@ -10,6 +10,7 @@ import { useParams } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
+import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
 
 interface Projeto {
   id: string;
@@ -142,18 +143,12 @@ export default function InspecaoDetalhePage() {
     setErro(null);
     setProcessando(true);
     try {
-      const r = await fetch(`/api/inspecoes/${id}/fase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acao, motivo: motivoTexto }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setErro(d.erro || "Não foi possível aplicar a ação."); return; }
+      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST", { acao, motivo: motivoTexto }, "Ação de fase");
+      if (res.queued) { setReprovar(null); setMotivo(""); alert("Sem conexão — ação salva offline e aplicada ao reconectar."); return; }
+      if (!res.ok) { setErro(res.data?.erro || "Não foi possível aplicar a ação."); return; }
       setReprovar(null);
       setMotivo("");
       carregar();
-    } catch {
-      setErro("Falha de rede.");
     } finally {
       setProcessando(false);
     }
@@ -168,16 +163,10 @@ export default function InspecaoDetalhePage() {
     setEnviandoColeta(true);
     setErro(null);
     try {
-      const fd = new FormData();
-      fd.append("inspecaoId", id);
-      fd.append("tipo", "sedimento");
-      fd.append("arquivo", arquivo);
-      const r = await fetch("/api/coletas", { method: "POST", body: fd });
-      const d = await r.json();
-      if (!r.ok) { setErro(d.erro || "Falha ao anexar a coleta."); return; }
+      const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento" }, arquivo, "Coleta (PDF)");
+      if (res.queued) { alert("Sem conexão — PDF salvo offline e enviado ao reconectar."); return; }
+      if (!res.ok) { setErro(res.data?.erro || "Falha ao anexar a coleta."); return; }
       carregar();
-    } catch {
-      setErro("Falha de rede ao anexar coleta.");
     } finally {
       setEnviandoColeta(false);
       if (coletaInputRef.current) coletaInputRef.current.value = "";
@@ -190,18 +179,17 @@ export default function InspecaoDetalhePage() {
     setErro(null);
     try {
       const editId = editandoRef.current;
-      const r = await fetch(editId ? `/api/coletas/${editId}` : "/api/coletas", {
-        method: editId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editId ? { dados } : { inspecaoId: id, tipo: "sedimento", dados }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setErro(d.erro || "Falha ao salvar a medição."); return; }
+      const res = await enviarJson(
+        editId ? `/api/coletas/${editId}` : "/api/coletas",
+        editId ? "PATCH" : "POST",
+        editId ? { dados } : { inspecaoId: id, tipo: "sedimento", dados },
+        "Coleta / medição"
+      );
+      if (!res.queued && !res.ok) { setErro(res.data?.erro || "Falha ao salvar a medição."); return; }
       setModalMedidor(false);
       setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
-      carregar();
-    } catch {
-      setErro("Falha de rede ao salvar a medição.");
+      if (res.queued) alert("Sem conexão — medição salva offline e enviada ao reconectar.");
+      else carregar();
     } finally {
       setSalvandoMedicao(false);
     }
@@ -240,16 +228,10 @@ export default function InspecaoDetalhePage() {
     setEnviandoRelatorio(true);
     setErro(null);
     try {
-      const fd = new FormData();
-      fd.append("inspecaoId", id);
-      fd.append("tipo", bloco);
-      fd.append("arquivo", arquivo);
-      const r = await fetch("/api/relatorios", { method: "POST", body: fd });
-      const d = await r.json();
-      if (!r.ok) { setErro(d.erro || "Falha ao enviar o relatório."); return; }
+      const res = await enviarArquivo("/api/relatorios", { inspecaoId: id, tipo: bloco }, arquivo, "Relatório");
+      if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
+      if (!res.ok) { setErro(res.data?.erro || "Falha ao enviar o relatório."); return; }
       carregar();
-    } catch {
-      setErro("Falha de rede ao enviar relatório.");
     } finally {
       setEnviandoRelatorio(false);
       if (relatorioInputRef.current) relatorioInputRef.current.value = "";
@@ -292,18 +274,17 @@ export default function InspecaoDetalhePage() {
     try {
       const equipe = usuarios.filter((u) => agEquipeIds.includes(u.id)).map((u) => ({ id: u.id, nome: u.nome }));
       const payload = { dataVisita: agData, dataExecucao: agDataExec || undefined, hora: agHora || undefined, equipe, equipamentos: agEquipamentos, checklist: agChecklist };
-      const r = await fetch(agendaEditando ? `/api/agendamentos/${agendaEditando}` : "/api/agendamentos", {
-        method: agendaEditando ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(agendaEditando ? payload : { inspecaoId: id, tipo: bloco, ...payload }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setErro(d.erro || "Falha ao salvar o agendamento."); return; }
+      const res = await enviarJson(
+        agendaEditando ? `/api/agendamentos/${agendaEditando}` : "/api/agendamentos",
+        agendaEditando ? "PATCH" : "POST",
+        agendaEditando ? payload : { inspecaoId: id, tipo: bloco, ...payload },
+        "Agendamento"
+      );
+      if (!res.queued && !res.ok) { setErro(res.data?.erro || "Falha ao salvar o agendamento."); return; }
       setModalAgenda(false);
       setAgendaEditando(null);
-      carregar();
-    } catch {
-      setErro("Falha de rede ao salvar agendamento.");
+      if (res.queued) alert("Sem conexão — agendamento salvo offline e enviado ao reconectar.");
+      else carregar();
     } finally {
       setSalvandoAgenda(false);
     }

@@ -1,8 +1,10 @@
-/* ASP PWA — service worker (Fase 0).
- * Objetivo: app instalável e a "casca" abrindo offline, SEM interferir nas
- * escritas (POST/PATCH/DELETE) nem nas rotas /api. A leitura offline de dados
- * (cache de /api) fica para a Fase 1. */
-const CACHE = "asp-v1";
+/* ASP PWA — service worker (Fases 0-1).
+ * - Casca e estáticos: cache para abrir offline.
+ * - GET /api/*: network-first com fallback de cache (leitura offline do que
+ *   já foi carregado). NUNCA intercepta POST/PATCH/DELETE (as escritas offline
+ *   são tratadas pela fila em IndexedDB — lib/pwa). */
+const CACHE = "asp-v2";
+const API_CACHE = "asp-api-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -11,19 +13,33 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE && k !== API_CACHE).map((k) => caches.delete(k)))
+    )
   );
   self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.method !== "GET") return;                 // não toca em POST/PATCH/DELETE
+  if (req.method !== "GET") return;                 // escritas nunca passam por aqui
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;  // só same-origin
-  if (url.pathname.startsWith("/api/")) return;      // API não é cacheada nesta fase
 
-  // Páginas: network-first, com fallback para o cache (ou o dashboard) offline.
+  // Leitura de dados (GET /api): network-first, cache como reserva offline.
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) { const copy = res.clone(); caches.open(API_CACHE).then((c) => c.put(req, copy)); }
+          return res;
+        })
+        .catch(() => caches.match(req).then((m) => m || new Response(JSON.stringify({ ok: false, offline: true }), { headers: { "Content-Type": "application/json" }, status: 503 })))
+    );
+    return;
+  }
+
+  // Páginas: network-first com fallback.
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
@@ -33,7 +49,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Estáticos (_next, ícones, assets): cache-first.
+  // Estáticos: cache-first.
   event.respondWith(
     caches.match(req).then((m) => m || fetch(req).then((res) => {
       const copy = res.clone();
