@@ -1,7 +1,8 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Antonio, Inter, Montserrat } from "next/font/google";
 import BarraUsuario from "./components/BarraUsuario";
+import RegistrarSW from "./components/RegistrarSW";
 
 // D25: tipografia da marca Grupo BRID — títulos/nav em Montserrat (bold,
 // geométrica, igual ao site institucional), corpo de texto em Inter.
@@ -28,11 +29,24 @@ const antonio = Antonio({
 export const metadata: Metadata = {
   title: "Plataforma ASP",
   description: "Sistema interno — gestão de projetos e inspeções.",
+  applicationName: "ASP",
   icons: {
     icon: "/assets/asp-badge.svg",
     shortcut: "/assets/asp-badge.svg",
-    apple: "/assets/asp-badge.svg",
+    apple: "/apple-touch-icon.png",
   },
+  appleWebApp: {
+    capable: true,
+    title: "ASP",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#123761",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 // D22: define o tema (claro/escuro) antes da primeira pintura, lendo a
@@ -54,6 +68,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA }} />
       </head>
       <body className={`${montserrat.variable} ${inter.variable} ${antonio.variable}`}>
+        <RegistrarSW />
         <BarraUsuario />
         {children}
       </body>
