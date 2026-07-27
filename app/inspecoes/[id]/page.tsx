@@ -11,6 +11,7 @@ import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
+import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor } from "@/lib/asp/batimetria";
 
 interface Projeto {
   id: string;
@@ -90,6 +91,14 @@ export default function InspecaoDetalhePage() {
   const editandoRef = useRef<string | null>(null);
   const dadosCarregarRef = useRef<any>(null);
   const [salvandoMedicao, setSalvandoMedicao] = useState(false);
+  // Importação de batimetria (CSV/XLSX no layout da planilha)
+  const [modalImport, setModalImport] = useState(false);
+  const [impDiametro, setImpDiametro] = useState("");
+  const [impAltura, setImpAltura] = useState("");
+  const [impUnidade, setImpUnidade] = useState<"m" | "cm">("m");
+  const [impArquivo, setImpArquivo] = useState<File | null>(null);
+  const [importando, setImportando] = useState(false);
+  const [impErro, setImpErro] = useState<string | null>(null);
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
@@ -222,6 +231,34 @@ export default function InspecaoDetalhePage() {
   }
   function pedirSalvarMedicao() {
     medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
+  }
+
+  function abrirImport() {
+    setImpDiametro(""); setImpAltura(""); setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
+    setModalImport(true);
+  }
+  async function importarBatimetria() {
+    setImpErro(null);
+    if (!impArquivo) { setImpErro("Selecione o arquivo (CSV ou XLSX)."); return; }
+    const diam = parseFloat((impDiametro || "").replace(",", "."));
+    if (!diam || diam <= 0) { setImpErro("Informe o diâmetro do tanque (m)."); return; }
+    setImportando(true);
+    try {
+      const rows = await lerArquivoParaMatriz(impArquivo);
+      const dados = extrairBatimetria(rows);
+      const maxVal = Math.max(0, ...dados.valores.flat().map((v) => (typeof v === "number" ? v : 0)));
+      const alturaInput = parseFloat((impAltura || "").replace(",", "."));
+      const altura = alturaInput > 0 ? alturaInput : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + 0.5);
+      const estado = montarEstadoMedidor(dados, { diametro: diam, altura, unidade: impUnidade });
+      dadosCarregarRef.current = estado;
+      setColetaEditando(null); editandoRef.current = null;
+      setModalImport(false);
+      setModalMedidor(true); // abre o medidor; no asp:ready ele carrega a matriz
+    } catch (e) {
+      setImpErro(e instanceof Error ? e.message : "Falha ao importar o arquivo.");
+    } finally {
+      setImportando(false);
+    }
   }
 
   async function enviarRelatorio(arquivo: File) {
@@ -388,6 +425,7 @@ export default function InspecaoDetalhePage() {
             {podeColeta && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn-azul" onClick={abrirMedidorNovo}>📐 Nova medição</button>
+                <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar batimetria</button>
                 <button className="btn-azul btn-sec" onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
                   {enviandoColeta ? "Enviando…" : "Anexar PDF"}
                 </button>
@@ -518,6 +556,44 @@ export default function InspecaoDetalhePage() {
           </div>
         )}
       </div>
+
+      {/* Modal: importar batimetria (CSV/XLSX no layout da planilha) */}
+      {modalImport && (
+        <Modal titulo="⬆ Importar batimetria" onFechar={() => setModalImport(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Envie a planilha no layout atual (blocos v1..vN com Esquerda/Centro/Direita e a linha “Altura sedimento”).
+              O sistema monta a matriz radial e abre no medidor para você revisar e salvar.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Diâmetro (m) *</label>
+                <input style={inputStyle} value={impDiametro} onChange={(e) => setImpDiametro(e.target.value)} placeholder="ex.: 12" inputMode="decimal" />
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Altura do tanque</label>
+                <input style={inputStyle} value={impAltura} onChange={(e) => setImpAltura(e.target.value)} placeholder="auto (planilha)" inputMode="decimal" />
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Unidade</label>
+                <select style={inputStyle} value={impUnidade} onChange={(e) => setImpUnidade(e.target.value as "m" | "cm")}>
+                  <option value="m">metros</option>
+                  <option value="cm">centímetros</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Arquivo (CSV ou XLSX)</label>
+              <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setImpArquivo(e.target.files?.[0] || null)} />
+            </div>
+            {impErro && <p className="erro-texto" style={{ margin: 0 }}>{impErro}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="btn-azul btn-sec" onClick={() => setModalImport(false)} disabled={importando}>Cancelar</button>
+              <button className="btn-azul" onClick={importarBatimetria} disabled={importando}>{importando ? "Importando…" : "Importar e abrir medidor"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Modal: medidor de sedimento (ferramenta de campo embutida por iframe) */}
       {modalMedidor && (
