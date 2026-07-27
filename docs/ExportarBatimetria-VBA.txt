@@ -1,0 +1,83 @@
+' =====================================================================
+'  ASP — Exportar Batimetria para CSV (para importar no medidor)
+' ---------------------------------------------------------------------
+'  COMO USAR:
+'  1) Abra sua planilha de batimetria no Excel.
+'  2) Alt+F11 (abre o VBA) -> menu Inserir -> Módulo.
+'  3) Cole TODO este código no módulo.
+'  4) Deixe ativa a ABA com os dados (blocos v1, v2, ... com
+'     "Altura sedimento" e Esquerda/Centro/Direita).
+'  5) Rode a macro (F5) ou Alt+F8 -> ExportarBatimetriaCSV.
+'  6) O arquivo "batimetria_ASP.csv" é gerado na MESMA pasta da planilha.
+'  7) No app: inspeção -> Coleta -> "Importar batimetria" -> informe o
+'     DIÂMETRO do tanque -> envie esse CSV.
+'
+'  Observação: exporta a grade inteira da aba (mantém o layout dos
+'  blocos), com separador ";" e decimal com ponto, em UTF-8. A validação
+'  régua x sonar continua na sua planilha.
+' =====================================================================
+Option Explicit
+
+Sub ExportarBatimetriaCSV()
+    Dim ws As Worksheet
+    Dim r As Long, c As Long, lastR As Long, lastC As Long, rr As Long, cc As Long
+    Dim sep As String, linha As String, v As Variant, txt As String
+    Dim stream As Object, caminho As String
+
+    Set ws = ActiveSheet
+    sep = ";"
+
+    ' última linha (pela coluna A) e última coluna (varrendo as primeiras linhas)
+    lastR = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastC = 1
+    For rr = 1 To Application.Min(lastR, 12)
+        cc = ws.Cells(rr, ws.Columns.Count).End(xlToLeft).Column
+        If cc > lastC Then lastC = cc
+    Next rr
+
+    txt = ""
+    For r = 1 To lastR
+        linha = ""
+        For c = 1 To lastC
+            v = ws.Cells(r, c).Value
+            If IsError(v) Then
+                ' célula com erro -> vazio
+            ElseIf IsEmpty(v) Then
+                ' vazio
+            ElseIf VarType(v) = vbString Then
+                ' texto: remove o separador e quebras de linha
+                linha = linha & Replace(Replace(CStr(v), sep, " "), vbLf, " ")
+            ElseIf IsNumeric(v) Then
+                ' número: decimal com ponto, sem separador de milhar
+                linha = linha & Replace(Format(v, "0.####"), ",", ".")
+            Else
+                linha = linha & Replace(Replace(CStr(v), sep, " "), vbLf, " ")
+            End If
+            If c < lastC Then linha = linha & sep
+        Next c
+        txt = txt & linha & vbCrLf
+    Next r
+
+    ' grava em UTF-8
+    caminho = ThisWorkbook.Path & "\batimetria_ASP.csv"
+    On Error GoTo FalhaStream
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 2               ' texto
+    stream.Charset = "utf-8"
+    stream.Open
+    stream.WriteText txt
+    stream.SaveToFile caminho, 2  ' 2 = sobrescreve
+    stream.Close
+
+    MsgBox "CSV gerado com sucesso em:" & vbCrLf & caminho, vbInformation, "ASP — Batimetria"
+    Exit Sub
+
+FalhaStream:
+    ' fallback simples (ANSI) caso o ADODB não esteja disponível
+    Dim fnum As Integer
+    fnum = FreeFile
+    Open caminho For Output As #fnum
+    Print #fnum, txt;
+    Close #fnum
+    MsgBox "CSV gerado (modo simples) em:" & vbCrLf & caminho, vbInformation, "ASP — Batimetria"
+End Sub

@@ -17,6 +17,8 @@ export interface DadosBatimetria {
   /** valores[ponto][lateralGlobal] — lateralGlobal = vetor*3 + (0 esq,1 centro,2 dir) */
   valores: (number | null)[][];
   alturaSugerida: number | null; // "Coluna teórica da água" máxima, se achada
+  invalidos: number;        // leituras marcadas INCORRETO na validação
+  totalValidacao: number;   // total de leituras que têm validação
 }
 
 function paraNumero(v: any): number | null {
@@ -50,7 +52,8 @@ export async function lerArquivoParaMatriz(file: File): Promise<any[][]> {
     return XLSX.utils.sheet_to_json<any[]>(wb.Sheets[nomeAba], { header: 1, defval: null });
   }
   // CSV
-  const txt = await file.text();
+  let txt = await file.text();
+  if (txt.charCodeAt(0) === 0xfeff) txt = txt.slice(1); // remove BOM (UTF-8)
   const sep = txt.includes(";") ? ";" : ",";
   return txt.split(/\r?\n/).map((l) => l.split(sep));
 }
@@ -104,7 +107,20 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
     }
   }
 
-  return { vetores: N, pontos: m, valores, alturaSugerida };
+  // Validação (régua × sonar): conta quantas leituras estão "INCORRETO".
+  let invalidos = 0, totalValidacao = 0;
+  for (let r = 0; r < rows.length; r++) {
+    if (/valida/i.test(texto((rows[r] || [])[primeiroBase + 2]))) {
+      for (const b of blocos) {
+        for (const off of [3, 4, 5]) {
+          const cel = texto((rows[r] || [])[b + off]).toUpperCase();
+          if (cel) { totalValidacao++; if (cel.indexOf("INCORRET") >= 0) invalidos++; }
+        }
+      }
+    }
+  }
+
+  return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
 }
 
 /** Monta o "estado" do medidor (radial) a partir da batimetria + parâmetros.

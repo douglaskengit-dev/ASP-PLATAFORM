@@ -246,14 +246,23 @@ export default function InspecaoDetalhePage() {
     try {
       const rows = await lerArquivoParaMatriz(impArquivo);
       const dados = extrairBatimetria(rows);
+      if (dados.invalidos > 0) {
+        const ok = confirm(`Atenção: ${dados.invalidos} de ${dados.totalValidacao} leituras estão INCORRETO na validação (régua × sonar). Importar mesmo assim?`);
+        if (!ok) { setImportando(false); return; }
+      }
       const maxVal = Math.max(0, ...dados.valores.flat().map((v) => (typeof v === "number" ? v : 0)));
       const alturaInput = parseFloat((impAltura || "").replace(",", "."));
       const altura = alturaInput > 0 ? alturaInput : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + 0.5);
       const estado = montarEstadoMedidor(dados, { diametro: diam, altura, unidade: impUnidade });
-      dadosCarregarRef.current = estado;
-      setColetaEditando(null); editandoRef.current = null;
       setModalImport(false);
-      setModalMedidor(true); // abre o medidor; no asp:ready ele carrega a matriz
+      if (modalMedidor) {
+        // medidor já aberto → carrega direto na ferramenta
+        medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: estado }, "*");
+      } else {
+        dadosCarregarRef.current = estado;
+        setColetaEditando(null); editandoRef.current = null;
+        setModalMedidor(true); // no asp:ready ele carrega a matriz
+      }
     } catch (e) {
       setImpErro(e instanceof Error ? e.message : "Falha ao importar o arquivo.");
     } finally {
@@ -559,7 +568,7 @@ export default function InspecaoDetalhePage() {
 
       {/* Modal: importar batimetria (CSV/XLSX no layout da planilha) */}
       {modalImport && (
-        <Modal titulo="⬆ Importar batimetria" onFechar={() => setModalImport(false)}>
+        <Modal titulo="⬆ Importar batimetria" zIndex={200} onFechar={() => setModalImport(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p className="detalhe" style={{ margin: 0 }}>
               Envie a planilha no layout atual (blocos v1..vN com Esquerda/Centro/Direita e a linha “Altura sedimento”).
@@ -605,9 +614,12 @@ export default function InspecaoDetalhePage() {
               <span className="detalhe" style={{ margin: 0 }}>
                 {coletaEditando ? "Editando o registro salvo." : "A medição é salva como Relatório Técnico interno (editável). Use “Exportar em PDF” dentro da ferramenta para o PDF."}
               </span>
-              <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
-                {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
-              </button>
+              <span style={{ display: "flex", gap: 8 }}>
+                <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar</button>
+                <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
+                  {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
+                </button>
+              </span>
             </div>
             <iframe ref={medidorRef} src="/ferramentas/medidor-sedimento-asp.html" title="Medidor de Sedimento"
               style={{ flex: 1, width: "100%", border: "none", display: "block" }} />
