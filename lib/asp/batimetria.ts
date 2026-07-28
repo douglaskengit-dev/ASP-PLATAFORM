@@ -123,6 +123,52 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
   return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
 }
 
+// ── Entrada manual (mesma matemática da planilha) ──────────────────────────
+// Espessura = (régua + peso) − (sonar + ROV). Padrões: ROV 0,26 e peso 0,15.
+
+export interface GridManual {
+  vetores: number;
+  pontos: number;
+  agua: (number | null)[];         // água teórica por vetor
+  regua: (number | null)[];        // régua medida por ponto
+  sonar: (number | null)[][][];    // [ponto][vetor][lateral 0=esq,1=centro,2=dir]
+}
+
+export function calcularSedimento(
+  sonar: number | null, regua: number | null, rov: number, peso: number
+): number | null {
+  if (sonar == null || regua == null) return null;
+  const real = sonar + rov;
+  return Number(((regua + peso) - real).toFixed(3));
+}
+
+/** Constrói a mesma estrutura DadosBatimetria a partir da digitação manual —
+ * garantindo que import e digitação produzam resultados idênticos. */
+export function montarDadosManuais(g: GridManual, opts: { rov: number; peso: number }): DadosBatimetria {
+  const N = g.vetores, m = g.pontos;
+  const valores: (number | null)[][] = [];
+  let invalidos = 0, totalValidacao = 0;
+  for (let p = 0; p < m; p++) {
+    const row: (number | null)[] = [];
+    for (let v = 0; v < N; v++) {
+      for (let lat = 0; lat < 3; lat++) {
+        const s = g.sonar?.[p]?.[v]?.[lat] ?? null;
+        const reg = g.regua?.[p] ?? null;
+        const sed = calcularSedimento(s, reg, opts.rov, opts.peso);
+        row.push(sed);
+        const agua = g.agua?.[v] ?? null;
+        if (s != null && reg != null && agua != null && sed != null) {
+          totalValidacao++;
+          if (Math.round((sed + s + opts.rov) * 100) !== Math.round(agua * 100)) invalidos++;
+        }
+      }
+    }
+    valores.push(row);
+  }
+  const alturaSugerida = Math.max(0, ...g.agua.map((a) => a ?? 0)) || null;
+  return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
+}
+
 /** Monta o "estado" do medidor (radial) a partir da batimetria + parâmetros.
  * Cada lateral vira um sub-vetor → cols = 3·N. refMode = fundo (espessura). */
 export function montarEstadoMedidor(

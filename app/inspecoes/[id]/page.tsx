@@ -12,6 +12,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor } from "@/lib/asp/batimetria";
+import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 
 interface Projeto {
   id: string;
@@ -99,6 +100,7 @@ export default function InspecaoDetalhePage() {
   const [impArquivo, setImpArquivo] = useState<File | null>(null);
   const [importando, setImportando] = useState(false);
   const [impErro, setImpErro] = useState<string | null>(null);
+  const [modalEntrada, setModalEntrada] = useState(false);
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
@@ -233,6 +235,15 @@ export default function InspecaoDetalhePage() {
     medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
   }
 
+  function carregarNoMedidor(estado: Record<string, unknown>) {
+    if (modalMedidor) {
+      medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: estado }, "*");
+    } else {
+      dadosCarregarRef.current = estado;
+      setColetaEditando(null); editandoRef.current = null;
+      setModalMedidor(true);
+    }
+  }
   function abrirImport() {
     setImpDiametro(""); setImpAltura(""); setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
     setModalImport(true);
@@ -255,14 +266,7 @@ export default function InspecaoDetalhePage() {
       const altura = alturaInput > 0 ? alturaInput : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + 0.5);
       const estado = montarEstadoMedidor(dados, { diametro: diam, altura, unidade: impUnidade });
       setModalImport(false);
-      if (modalMedidor) {
-        // medidor já aberto → carrega direto na ferramenta
-        medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: estado }, "*");
-      } else {
-        dadosCarregarRef.current = estado;
-        setColetaEditando(null); editandoRef.current = null;
-        setModalMedidor(true); // no asp:ready ele carrega a matriz
-      }
+      carregarNoMedidor(estado);
     } catch (e) {
       setImpErro(e instanceof Error ? e.message : "Falha ao importar o arquivo.");
     } finally {
@@ -434,6 +438,7 @@ export default function InspecaoDetalhePage() {
             {podeColeta && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn-azul" onClick={abrirMedidorNovo}>📐 Nova medição</button>
+                <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
                 <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar batimetria</button>
                 <button className="btn-azul btn-sec" onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
                   {enviandoColeta ? "Enviando…" : "Anexar PDF"}
@@ -566,6 +571,14 @@ export default function InspecaoDetalhePage() {
         )}
       </div>
 
+      {/* Modal: digitar batimetria (mesma matemática da importação) */}
+      {modalEntrada && (
+        <EntradaBatimetria
+          onFechar={() => setModalEntrada(false)}
+          onGerar={(estado) => { setModalEntrada(false); carregarNoMedidor(estado); }}
+        />
+      )}
+
       {/* Modal: importar batimetria (CSV/XLSX no layout da planilha) */}
       {modalImport && (
         <Modal titulo="⬆ Importar batimetria" zIndex={200} onFechar={() => setModalImport(false)}>
@@ -615,6 +628,7 @@ export default function InspecaoDetalhePage() {
                 {coletaEditando ? "Editando o registro salvo." : "A medição é salva como Relatório Técnico interno (editável). Use “Exportar em PDF” dentro da ferramenta para o PDF."}
               </span>
               <span style={{ display: "flex", gap: 8 }}>
+                <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar</button>
                 <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar</button>
                 <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
                   {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
