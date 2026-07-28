@@ -33,7 +33,7 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
   const [rov, setRov] = useState("0,26");
   const [peso, setPeso] = useState("0,15");
   const [agua, setAgua] = useState<Record<number, string>>({});
-  const [regua, setRegua] = useState<Record<number, string>>({});
+  const [regua, setRegua] = useState<Record<string, string>>({}); // `${p}_${v}`
   const [sonar, setSonar] = useState<Record<string, string>>({}); // `${p}_${v}_${lat}`
   const [erro, setErro] = useState<string | null>(null);
 
@@ -44,7 +44,9 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
     const g: GridManual = {
       vetores, pontos,
       agua: Array.from({ length: vetores }, (_, v) => num(agua[v])),
-      regua: Array.from({ length: pontos }, (_, p) => num(regua[p])),
+      regua: Array.from({ length: pontos }, (_, p) =>
+        Array.from({ length: vetores }, (_, v) => num(regua[`${p}_${v}`]))
+      ),
       sonar: Array.from({ length: pontos }, (_, p) =>
         Array.from({ length: vetores }, (_, v) =>
           [0, 1, 2].map((lat) => num(sonar[`${p}_${v}_${lat}`]))
@@ -85,16 +87,18 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
           </div>
         </div>
 
-        <p className="detalhe" style={{ margin: 0 }}>Espessura = (régua + peso) − (sonar + ROV). Célula vazia = ponto não medido. E/C/D = Esquerda/Central/Direita.</p>
+        <p className="detalhe" style={{ margin: 0 }}>
+          Espessura = (régua + peso) − (sonar + ROV). Cada vetor tem a própria régua em cada ponto.
+          Célula vazia = ponto não medido. E/C/D = Esquerda/Central/Direita.
+        </p>
 
         <div style={{ overflow: "auto", maxHeight: "50vh", border: "1px solid var(--borda)", borderRadius: 8 }}>
           <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "var(--escuro)", color: "#fff" }}>
                 <th style={{ padding: 6 }}>Ponto</th>
-                <th style={{ padding: 6 }}>Régua</th>
                 {Array.from({ length: vetores }, (_, v) => (
-                  <th key={v} colSpan={3} style={{ padding: 6, borderLeft: "2px solid var(--acento)" }}>
+                  <th key={v} colSpan={4} style={{ padding: 6, borderLeft: "2px solid var(--acento)" }}>
                     <div>v{v + 1}</div>
                     <input placeholder="água" value={agua[v] || ""} onChange={(e) => setAgua((a) => ({ ...a, [v]: e.target.value }))}
                       style={{ ...cellStyle, width: 150, marginTop: 4, background: "#ffffff22", color: "#fff", borderColor: "#ffffff55" }} inputMode="decimal" />
@@ -102,9 +106,9 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
                 ))}
               </tr>
               <tr style={{ position: "sticky", top: 54, background: "var(--bg-suave)" }}>
-                <th></th><th></th>
-                {Array.from({ length: vetores }, (_, v) => lats.map((l, li) => (
-                  <th key={`${v}-${li}`} style={{ padding: 4, fontSize: 11, color: "var(--cinza)", borderLeft: li === 0 ? "2px solid var(--acento)" : undefined }}>{l}</th>
+                <th></th>
+                {Array.from({ length: vetores }, (_, v) => ["Régua", ...lats].map((l, li) => (
+                  <th key={`${v}-${li}`} style={{ padding: 4, fontSize: 11, color: li === 0 ? "var(--texto)" : "var(--cinza)", fontWeight: li === 0 ? 700 : 400, borderLeft: li === 0 ? "2px solid var(--acento)" : undefined }}>{l}</th>
                 )))}
               </tr>
             </thead>
@@ -112,14 +116,17 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
               {Array.from({ length: pontos }, (_, p) => (
                 <tr key={p}>
                   <td style={{ padding: 4, textAlign: "center", fontWeight: 700, color: "var(--texto)" }}>{p}</td>
-                  <td style={{ padding: 2 }}>
-                    <input value={regua[p] || ""} onChange={(e) => setRegua((r) => ({ ...r, [p]: e.target.value }))} style={cellStyle} inputMode="decimal" />
-                  </td>
-                  {Array.from({ length: vetores }, (_, v) => lats.map((_l, lat) => (
-                    <td key={`${v}-${lat}`} style={{ padding: 2, borderLeft: lat === 0 ? "2px solid var(--acento)" : undefined }}>
-                      <input value={sonar[`${p}_${v}_${lat}`] || ""} onChange={(e) => setSonar((s) => ({ ...s, [`${p}_${v}_${lat}`]: e.target.value }))} style={cellStyle} inputMode="decimal" />
-                    </td>
-                  )))}
+                  {Array.from({ length: vetores }, (_, v) => [
+                    <td key={`${v}-r`} style={{ padding: 2, borderLeft: "2px solid var(--acento)" }}>
+                      <input value={regua[`${p}_${v}`] || ""} onChange={(e) => setRegua((r) => ({ ...r, [`${p}_${v}`]: e.target.value }))}
+                        style={{ ...cellStyle, fontWeight: 600 }} inputMode="decimal" />
+                    </td>,
+                    ...lats.map((_l, lat) => (
+                      <td key={`${v}-${lat}`} style={{ padding: 2 }}>
+                        <input value={sonar[`${p}_${v}_${lat}`] || ""} onChange={(e) => setSonar((s) => ({ ...s, [`${p}_${v}_${lat}`]: e.target.value }))} style={cellStyle} inputMode="decimal" />
+                      </td>
+                    )),
+                  ])}
                 </tr>
               ))}
             </tbody>
@@ -129,6 +136,7 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className="detalhe" style={{ margin: 0 }}>
             Validação: {previa.totalValidacao - previa.invalidos}/{previa.totalValidacao} corretas{previa.invalidos > 0 ? ` · ⚠️ ${previa.invalidos} incorretas` : ""}
+            {previa.negativos > 0 ? ` · ⚠️ ${previa.negativos} com espessura negativa (sonar maior que a régua) — ficarão FORA do cálculo` : ""}
           </span>
           <div style={{ display: "flex", gap: 10 }}>
             {erro && <span className="erro-texto" style={{ margin: 0 }}>{erro}</span>}

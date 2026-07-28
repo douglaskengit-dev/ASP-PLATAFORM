@@ -19,6 +19,9 @@ export interface DadosBatimetria {
   alturaSugerida: number | null; // "Coluna teórica da água" máxima, se achada
   invalidos: number;        // leituras marcadas INCORRETO na validação
   totalValidacao: number;   // total de leituras que têm validação
+  /** Leituras com espessura negativa (sonar corrigido > régua corrigida).
+   *  O medidor as trata como inválidas — ficam FORA do cálculo. */
+  negativos: number;
 }
 
 function paraNumero(v: any): number | null {
@@ -82,6 +85,7 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
   const m = linhasPonto.length;
 
   const valores: (number | null)[][] = [];
+  let negativos = 0;
   for (let p = 0; p < m; p++) {
     const r = linhasPonto[p];
     const linha = rows[r] || [];
@@ -92,6 +96,7 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
       rowVals.push(paraNumero(linha[base + 4])); // centro
       rowVals.push(paraNumero(linha[base + 5])); // direita
     }
+    for (const v of rowVals) if (v != null && v < 0) negativos++;
     valores.push(rowVals);
   }
 
@@ -120,7 +125,7 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
     }
   }
 
-  return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
+  return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao, negativos };
 }
 
 /** Gera um MODELO vazio (.xlsx) com N vetores e m pontos, no mesmo layout que
@@ -171,7 +176,10 @@ export interface GridManual {
   vetores: number;
   pontos: number;
   agua: (number | null)[];         // água teórica por vetor
-  regua: (number | null)[];        // régua medida por ponto
+  /** Régua (coluna de água) medida em CADA ponto de CADA vetor: [ponto][vetor].
+   *  Cada vetor é uma passada distinta do ROV, com a própria régua por ponto —
+   *  igual ao layout da planilha (um bloco de régua por v1..vN). */
+  regua: (number | null)[][];
   sonar: (number | null)[][][];    // [ponto][vetor][lateral 0=esq,1=centro,2=dir]
 }
 
@@ -188,15 +196,16 @@ export function calcularSedimento(
 export function montarDadosManuais(g: GridManual, opts: { rov: number; peso: number }): DadosBatimetria {
   const N = g.vetores, m = g.pontos;
   const valores: (number | null)[][] = [];
-  let invalidos = 0, totalValidacao = 0;
+  let invalidos = 0, totalValidacao = 0, negativos = 0;
   for (let p = 0; p < m; p++) {
     const row: (number | null)[] = [];
     for (let v = 0; v < N; v++) {
       for (let lat = 0; lat < 3; lat++) {
         const s = g.sonar?.[p]?.[v]?.[lat] ?? null;
-        const reg = g.regua?.[p] ?? null;
+        const reg = g.regua?.[p]?.[v] ?? null;   // régua do PONTO daquele VETOR
         const sed = calcularSedimento(s, reg, opts.rov, opts.peso);
         row.push(sed);
+        if (sed != null && sed < 0) negativos++;
         const agua = g.agua?.[v] ?? null;
         if (s != null && reg != null && agua != null && sed != null) {
           totalValidacao++;
@@ -207,7 +216,7 @@ export function montarDadosManuais(g: GridManual, opts: { rov: number; peso: num
     valores.push(row);
   }
   const alturaSugerida = Math.max(0, ...g.agua.map((a) => a ?? 0)) || null;
-  return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
+  return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao, negativos };
 }
 
 /** Formato do tanque escolhido na importação. */

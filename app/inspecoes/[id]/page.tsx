@@ -292,8 +292,15 @@ export default function InspecaoDetalhePage() {
     try {
       const rows = await lerArquivoParaMatriz(impArquivo);
       const dados = extrairBatimetria(rows);
+      const alertas: string[] = [];
       if (dados.invalidos > 0) {
-        const ok = confirm(`Atenção: ${dados.invalidos} de ${dados.totalValidacao} leituras estão INCORRETO na validação (régua × sonar). Importar mesmo assim?`);
+        alertas.push(`${dados.invalidos} de ${dados.totalValidacao} leituras estão INCORRETO na validação (régua × sonar).`);
+      }
+      if (dados.negativos > 0) {
+        alertas.push(`${dados.negativos} leitura(s) com espessura negativa (sonar corrigido maior que a régua corrigida) — essas ficarão FORA do cálculo.`);
+      }
+      if (alertas.length > 0) {
+        const ok = confirm(`Atenção:\n\n• ${alertas.join("\n• ")}\n\nImportar mesmo assim?`);
         if (!ok) { setImportando(false); return; }
       }
       const maxVal = Math.max(0, ...dados.valores.flat().map((v) => (typeof v === "number" ? v : 0)));
