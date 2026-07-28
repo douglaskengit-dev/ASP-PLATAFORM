@@ -61,6 +61,9 @@ const FERRAMENTAS_FUTURAS = ["Ultrassom", "Drone", "MFL"];
 // Itens iniciais do checklist de campo (extensível) — COWORK-ASP §3.2.
 const CHECKLIST_PADRAO = ["NR-33 (espaço confinado)", "NR-10 (elétrica)", "EPIs", "Permissão de Trabalho (PT)"];
 
+// Botões compactos da barra de Coletas (cabem melhor no card).
+const btnColeta: React.CSSProperties = { padding: "5px 9px", fontSize: 12, lineHeight: 1.2 };
+
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--borda)",
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
@@ -454,15 +457,15 @@ export default function InspecaoDetalhePage() {
       {/* Coleta (Operações) + Agendamento (Comercial) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginTop: 16 }}>
         <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <h3 style={{ margin: 0 }}>Coletas ({coletas.length})</h3>
             {podeColeta && (
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn-azul" onClick={abrirMedidorNovo}>📐 Nova medição</button>
-                <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
-                <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar batimetria</button>
-                <button className="btn-azul btn-sec" onClick={() => setModalModelo(true)}>⬇ Modelo vazio</button>
-                <button className="btn-azul btn-sec" onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", flex: "1 1 auto" }}>
+                <button className="btn-azul" style={btnColeta} onClick={abrirMedidorNovo}>📐 Nova medição</button>
+                <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
+                <button className="btn-azul btn-sec" style={btnColeta} onClick={abrirImport}>⬆ Importar batimetria</button>
+                <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalModelo(true)}>⬇ Modelo vazio</button>
+                <button className="btn-azul btn-sec" style={btnColeta} onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
                   {enviandoColeta ? "Enviando…" : "Anexar PDF"}
                 </button>
                 <input ref={coletaInputRef} type="file" accept="application/pdf" style={{ display: "none" }}
