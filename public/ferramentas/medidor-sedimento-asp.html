@@ -416,11 +416,13 @@
           <rect x="30" y="40" width="140" height="180" fill="none"/>
           <line x1="30" y1="40" x2="30" y2="220" stroke="var(--line)" stroke-width="1.4"/>
           <line x1="170" y1="40" x2="170" y2="220" stroke="var(--line)" stroke-width="1.4"/>
-          <ellipse cx="100" cy="40" rx="70" ry="14" fill="none" stroke="var(--line)" stroke-width="1.4"/>
+          <ellipse id="elTopEllipse" cx="100" cy="40" rx="70" ry="14" fill="none" stroke="var(--line)" stroke-width="1.4"/>
+          <line id="elTopLine" x1="30" y1="40" x2="170" y2="40" stroke="var(--line)" stroke-width="1.4" style="display:none"/>
 
           <rect id="elSedRect" x="30" y="220" width="140" height="0" fill="var(--sediment)"/>
           <ellipse id="elSedTop" cx="100" cy="220" rx="70" ry="11" fill="var(--sediment-deep)"/>
-          <ellipse cx="100" cy="220" rx="70" ry="14" fill="none" stroke="var(--line)" stroke-width="1.4"/>
+          <ellipse id="elBaseEllipse" cx="100" cy="220" rx="70" ry="14" fill="none" stroke="var(--line)" stroke-width="1.4"/>
+          <line id="elBaseLine" x1="30" y1="220" x2="170" y2="220" stroke="var(--line)" stroke-width="1.4" style="display:none"/>
 
           <line id="elDimSed1" x1="12" y1="220" x2="12" y2="220" stroke="var(--sediment)" stroke-width="1.4"/>
           <text id="elLabelSed" x="6" y="216" fill="var(--sediment)" font-family="IBM Plex Mono" font-size="8" text-anchor="end"></text>
@@ -429,9 +431,11 @@
       <div class="diagram-block">
         <span class="diagram-label">Planta (vista superior)</span>
         <svg id="planSvg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="110" cy="110" r="90" fill="var(--navy)" stroke="var(--line)" stroke-width="1.4"/>
+          <circle id="planCircle" cx="110" cy="110" r="90" fill="var(--navy)" stroke="var(--line)" stroke-width="1.4"/>
+          <path id="planPath" d="" fill="var(--navy)" stroke="var(--line)" stroke-width="1.4" style="display:none"/>
           <line id="planRLine" x1="110" y1="110" x2="200" y2="110" stroke="var(--cyan-dim)" stroke-width="1" stroke-dasharray="3,2"/>
-          <text x="155" y="104" fill="var(--cyan-dim)" font-family="IBM Plex Mono" font-size="9" text-anchor="middle">R</text>
+          <text id="planRLabel" x="155" y="104" fill="var(--cyan-dim)" font-family="IBM Plex Mono" font-size="9" text-anchor="middle">R</text>
+          <g id="planColumns"></g>
           <g id="planPoints"></g>
         </svg>
       </div>
@@ -450,7 +454,7 @@
   <section class="panel">
     <h2 id="section3Title">3 · Matriz de pontos — altura até o sedimento</h2>
     <div id="matrixModeWrap">
-      <p class="hint" id="matrixHint">Cada ponto representa uma sondagem sobre o fundo do tanque. Células hachuradas ficam fora do círculo do tanque e não recebem leitura. Preencha quantos pontos forem medidos em campo — não é necessário preencher todos.</p>
+      <p class="hint" id="matrixHint">Cada ponto representa uma sondagem sobre o fundo do tanque. Células hachuradas ficam fora do contorno do tanque e não recebem leitura. Preencha quantos pontos forem medidos em campo — não é necessário preencher todos.</p>
       <div class="stat-line" id="gridSpacingInfo" style="display:none;"></div>
       <div class="field-row" id="anchorValueFieldWrap" style="display:none;margin-top:0;">
         <div class="field" style="max-width:280px;">
@@ -712,7 +716,7 @@
 
   <details class="methodology">
     <summary>Como o volume é calculado</summary>
-    <p>Para cada ponto válido da matriz (dentro do círculo do tanque), a altura de sedimento é obtida a partir da leitura informada:</p>
+    <p>Para cada ponto válido da matriz (dentro do contorno do tanque), a altura de sedimento é obtida a partir da leitura informada:</p>
     <ul>
       <li><strong>A partir do topo:</strong> altura de sedimento = altura do tanque − medida registrada (sondagem feita do topo até tocar o sedimento).</li>
       <li><strong>Medida direta:</strong> a leitura informada já é a altura do sedimento.</li>
@@ -833,7 +837,10 @@
   function getR(){
     let v = parseFloat(state.dimValue);
     if(isNaN(v) || v<0) v = 0;
-    if(state.inputMode==='diameter') v = v/2;
+    // Polígonos: o valor é SEMPRE a medida total (comprimento/diâmetro) —
+    // o seletor raio/diâmetro vale apenas para o círculo.
+    const circ = (state.formato||'circulo')==='circulo';
+    if(!circ || state.inputMode==='diameter') v = v/2;
     return state.unit==='cm' ? v/100 : v;
   }
   function getH(){
@@ -1079,7 +1086,7 @@
           td.appendChild(input);
         } else {
           td.className = 'outside';
-          td.title = state.gridMode==='radial' ? 'Além do comprimento deste vetor' : 'Fora do círculo do tanque';
+          td.title = state.gridMode==='radial' ? 'Além do comprimento deste vetor' : 'Fora do contorno do tanque';
         }
         tr.appendChild(td);
       }
@@ -1135,6 +1142,15 @@
   }
 
   function updateElevation(H, avgHsed){
+    // Cilíndrico → topo/base em elipse (perspectiva). Prismáticos → linhas retas.
+    (function(){
+      var circ=(state.formato||'circulo')==='circulo';
+      var show=function(id,vis){var el=document.getElementById(id); if(el) el.style.display=vis?'':'none';};
+      show('elTopEllipse', circ); show('elBaseEllipse', circ);
+      show('elTopLine', !circ); show('elBaseLine', !circ);
+      var st=document.getElementById('elSedTop');
+      if(st) st.style.display = circ ? '' : 'none';
+    })();
     const rect = document.getElementById('elSedRect');
     const topEllipse = document.getElementById('elSedTop');
     const labelSed = document.getElementById('elLabelSed');
@@ -1160,19 +1176,74 @@
   function updatePlan(R, positions, cellResults, maxSed){
     const g = document.getElementById('planPoints');
     g.innerHTML = '';
-    const rLine = document.getElementById('planRLine');
-    rLine.setAttribute('x2', R>0 ? 200 : 110);
+    const ns = 'http://www.w3.org/2000/svg';
+    const isCirc = (state.formato||'circulo')==='circulo';
+
+    // Escala: círculo mantém o mapeamento por R; polígonos usam a caixa real
+    // (mesma escala nos dois eixos, para não distorcer a proporção do tanque).
+    let toPx;
+    const verts = isCirc ? null : tankVertices();
+    if(!isCirc && verts && verts.length>=3){
+      const bb = tankBBox();
+      const sc = 90/Math.max(bb.hx, bb.hy || bb.hx);
+      toPx = function(x,y){ return { x:110+(x-bb.cx)*sc, y:110-(y-bb.cy)*sc }; };
+    } else {
+      toPx = function(x,y){ return { x: R>0?110+(x/R)*90:110, y: R>0?110-(y/R)*90:110 }; };
+    }
+
+    // Contorno do tanque + rótulo do raio (só faz sentido no círculo)
+    const pc=document.getElementById('planCircle'), pp=document.getElementById('planPath');
+    const rl=document.getElementById('planRLine'), rlab=document.getElementById('planRLabel');
+    if(!isCirc && verts && verts.length>=3){
+      const d='M'+verts.map(function(v){var p=toPx(v.x,v.y);return p.x.toFixed(1)+','+p.y.toFixed(1);}).join(' L')+' Z';
+      if(pc) pc.style.display='none';
+      if(pp){ pp.setAttribute('d',d); pp.style.display=''; }
+      if(rl) rl.style.display='none';
+      if(rlab) rlab.style.display='none';
+    } else {
+      if(pc) pc.style.display='';
+      if(pp) pp.style.display='none';
+      if(rl){ rl.style.display=''; rl.setAttribute('x2', R>0 ? 200 : 110); }
+      if(rlab) rlab.style.display='';
+    }
+
+    // Colunas internas (obstáculos — apenas visuais)
+    const cg=document.getElementById('planColumns');
+    if(cg){
+      cg.innerHTML='';
+      const kunit=(state.unit==='cm')?0.01:1;
+      const escala = (!isCirc && verts && verts.length>=3)
+        ? 90/Math.max(tankBBox().hx, tankBBox().hy || tankBBox().hx)
+        : (R>0 ? 90/R : 0);
+      (state.colunas||[]).forEach(function(c){
+        const p=toPx(parseFloat(c.x)||0, parseFloat(c.y)||0);
+        const rpx=((parseFloat(c.tam)||0)*kunit/2)*escala;
+        if(!(rpx>0)) return;
+        let el;
+        if(c.forma==='quadrado'){
+          el=document.createElementNS(ns,'rect');
+          el.setAttribute('x',(p.x-rpx).toFixed(1)); el.setAttribute('y',(p.y-rpx).toFixed(1));
+          el.setAttribute('width',(rpx*2).toFixed(1)); el.setAttribute('height',(rpx*2).toFixed(1));
+        } else {
+          el=document.createElementNS(ns,'circle');
+          el.setAttribute('cx',p.x.toFixed(1)); el.setAttribute('cy',p.y.toFixed(1)); el.setAttribute('r',Math.max(1,rpx).toFixed(1));
+        }
+        el.setAttribute('fill','var(--navy-deep)'); el.setAttribute('stroke','var(--line)'); el.setAttribute('stroke-width','1');
+        const t=document.createElementNS(ns,'title'); t.textContent='Coluna interna (obstáculo — sem sedimento)'; el.appendChild(t);
+        cg.appendChild(el);
+      });
+    }
+
     if(!positions || !positions.length) return;
 
     const size = Math.max(5, Math.min(16, 170/Math.max(state.rows, state.cols)));
-    const ns = 'http://www.w3.org/2000/svg';
 
     for(let i=0;i<state.rows;i++){
       for(let j=0;j<state.cols;j++){
         const pos = positions[i][j];
         if(!pos.valid) continue;
-        const px = R>0 ? 110 + (pos.x/R)*90 : 110;
-        const py = R>0 ? 110 - (pos.y/R)*90 : 110;
+        const _p = toPx(pos.x, pos.y);
+        const px = _p.x, py = _p.y;
         const res = cellResults[i][j];
 
         const rect = document.createElementNS(ns,'rect');
@@ -3211,7 +3282,7 @@
       btn.addEventListener('click', function(){
         const delta = parseInt(btn.getAttribute('data-delta'),10);
         let val = state[key] + delta;
-        val = Math.max(2, Math.min(10, val));
+        val = Math.max(2, Math.min(20, val));
         if(val===state[key]) return;
         state[key]=val;
         document.getElementById(span).textContent = val;
@@ -3289,7 +3360,19 @@
   function aspApplyState(saved){
     if(!saved || typeof saved !== 'object') return;
     Object.assign(state, saved);
-    if(!Array.isArray(state.values)) state.values = makeValuesArray(state.rows, state.cols, null);
+    // Normaliza SEMPRE para linhas×colunas: um values salvo com tamanho
+    // diferente (ou vazio) quebraria a renderização da matriz.
+    state.rows = Math.max(1, parseInt(state.rows,10) || 1);
+    state.cols = Math.max(1, parseInt(state.cols,10) || 1);
+    state.values = makeValuesArray(state.rows, state.cols, Array.isArray(state.values) ? state.values : null);
+    // Medições salvas antes do recurso de formato não têm esses campos:
+    // sem o default, o formato do modal anterior "vazaria" para esta.
+    if(saved.formato===undefined) state.formato='circulo';
+    if(saved.largura===undefined) state.largura=null;
+    if(saved.anguloVert===undefined) state.anguloVert=90;
+    if(saved.ngonLados===undefined) state.ngonLados=6;
+    if(saved.vertices===undefined) state.vertices='';
+    if(!Array.isArray(state.colunas)) state.colunas=[];
     var setV = function(id,val){ var el=document.getElementById(id); if(el) el.value = (val==null?'':val); };
     setV('reportDate', state.reportDate); setV('reportResponsavel', state.reportResponsavel); setV('reportLocal', state.reportLocal);
     setV('dimValue', state.dimValue); setV('heightValue', state.height); setV('cleaningPct', state.cleaningPct);
@@ -3301,6 +3384,10 @@
     var setSeg = function(id,val){ var el=document.querySelector('#'+id+' input[value=\"'+val+'\"]'); if(el) el.checked = true; };
     setSeg('unitSeg', state.unit); setSeg('dimSeg', state.inputMode); setSeg('refSeg', state.refMode);
     setSeg('gridModeSeg', state.gridMode); setSeg('batimetriaSeg', state.batimetria); setSeg('extraUnitSeg', state.extraUnit);
+    setV('tqLargura', state.largura); setV('tqAngulo', state.anguloVert);
+    setV('tqLados', state.ngonLados); setV('tqVertices', state.vertices);
+    try { if(typeof atualizarParamsFormato==='function') atualizarParamsFormato(); } catch(e){}
+    try { if(typeof renderColunas==='function') renderColunas(); } catch(e){}
     try { syncFieldLabels(); } catch(e){}
     try { if(typeof onGridModeChange==='function') onGridModeChange(); } catch(e){}
     try { if(typeof onBatimetriaChange==='function') onBatimetriaChange(); } catch(e){}
