@@ -210,25 +210,48 @@ export function montarDadosManuais(g: GridManual, opts: { rov: number; peso: num
   return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
 }
 
-/** Monta o "estado" do medidor (radial) a partir da batimetria + parâmetros.
- * Cada lateral vira um sub-vetor → cols = 3·N. refMode = fundo (espessura). */
+/** Formato do tanque escolhido na importação. */
+export interface FormatoTanque {
+  formato: "circulo" | "quadrado" | "retangulo" | "ngon" | "custom";
+  largura?: number | null;   // retângulo
+  ngonLados?: number | null; // n-ágono
+  vertices?: string;         // personalizado ("x,y; x,y; …")
+}
+
+/** Monta o "estado" do medidor a partir da batimetria + parâmetros.
+ *
+ * Modo VETORES PARALELOS: cada lateral é um sub-vetor independente, então há
+ * 3·N passadas paralelas atravessando o tanque (colunas) e m pontos ao longo
+ * de cada uma (linhas). O medidor distribui os pontos sobre o comprimento útil
+ * de cada passada (a corda do tanque), de modo que TODAS as 3·N·m leituras
+ * importadas entram no cálculo — nada é descartado.
+ *
+ * refMode = fundo (os valores já são espessura de sedimento).
+ */
 export function montarEstadoMedidor(
   dados: DadosBatimetria,
-  opts: { diametro: number; altura: number; unidade?: "m" | "cm" }
+  opts: {
+    diametro: number;              // medida principal (diâmetro / comprimento)
+    altura: number;
+    unidade?: "m" | "cm";
+    tanque?: FormatoTanque;
+  }
 ): Record<string, unknown> {
   const cols = dados.vetores * 3;
   const rows = dados.pontos;
-  // Passo radial ≤ 2 m: distribui os m pontos ao longo do maior vetor (~diâmetro).
-  const passo = Math.min(2, opts.diametro / Math.max(1, rows));
+  const t = opts.tanque;
   return {
     unit: opts.unidade || "m",
     inputMode: "diameter",
     dimValue: opts.diametro,
     height: opts.altura,
     refMode: "bottom",
-    gridMode: "radial",
+    gridMode: "paralelo",
     batimetria: "sim",
-    fanSpacing: Number(passo.toFixed(3)),
+    formato: t?.formato || "circulo",
+    largura: t?.largura ?? null,
+    ngonLados: t?.ngonLados ?? 6,
+    vertices: t?.vertices || "",
     rows,
     cols,
     values: dados.valores,

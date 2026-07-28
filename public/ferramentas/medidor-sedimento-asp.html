@@ -350,6 +350,7 @@
         <label>Formato da matriz</label>
         <div class="segmented" id="gridModeSeg">
           <input type="radio" name="gridmode" id="gridmode-rect" value="rect" checked><label for="gridmode-rect">retangular</label>
+          <input type="radio" name="gridmode" id="gridmode-paralelo" value="paralelo"><label for="gridmode-paralelo">vetores paralelos</label>
           <input type="radio" name="gridmode" id="gridmode-radial" value="radial"><label for="gridmode-radial">leque</label>
         </div>
       </div>
@@ -992,6 +993,51 @@
     }
   }
 
+  // ── Vetores paralelos (transectos) ────────────────────────────────────────
+  // Cada coluna é uma passada do ROV atravessando o tanque; cada linha é um
+  // ponto ao longo dela. O comprimento útil de cada passada é a CORDA do
+  // tanque naquela posição — assim todo ponto importado cai dentro do
+  // contorno (nenhuma leitura é descartada), inclusive em tanque circular,
+  // onde as passadas próximas à parede são naturalmente mais curtas.
+  function spanEmX(x){
+    if((state.formato||'circulo')==='circulo'){
+      const R=getR(); const d=R*R-x*x;
+      if(d<=0) return null;
+      const h=Math.sqrt(d); return {y0:-h, y1:h};
+    }
+    const v=tankVertices(); if(!v||v.length<3) return null;
+    const ys=[];
+    for(let i=0;i<v.length;i++){
+      const A=v[i], B=v[(i+1)%v.length];
+      if((A.x<=x && B.x>=x) || (B.x<=x && A.x>=x)){
+        const dx=B.x-A.x;
+        ys.push(Math.abs(dx)<1e-12 ? A.y : A.y+(B.y-A.y)*((x-A.x)/dx));
+      }
+    }
+    if(ys.length<2) return null;
+    return {y0:Math.min.apply(null,ys), y1:Math.max.apply(null,ys)};
+  }
+  function buildParallelPositions(){
+    const N = state.rows, M = state.cols;
+    const bb = tankBBox();
+    const pts = [];
+    // posição de cada passada no eixo X (centro de faixas iguais)
+    const xs = [];
+    for(let j=0;j<M;j++) xs.push(M>0 ? bb.cx - bb.hx + (j+0.5)*(2*bb.hx/M) : bb.cx);
+    const spans = xs.map(spanEmX);
+    for(let i=0;i<N;i++){
+      const row = [];
+      for(let j=0;j<M;j++){
+        const sp = spans[j];
+        if(!sp){ row.push({row:i,col:j,x:xs[j],y:bb.cy,valid:false}); continue; }
+        const y = sp.y0 + (i+0.5)*((sp.y1-sp.y0)/N);
+        row.push({row:i,col:j,x:xs[j],y:y,valid:true});
+      }
+      pts.push(row);
+    }
+    return pts;
+  }
+
   function buildFanPositions(R){
     const N = state.rows;
     const lineCount = state.cols;
@@ -1019,7 +1065,9 @@
 
   function buildPositions(){
     const R = getR();
-    return state.gridMode==='radial' ? buildFanPositions(R) : buildRectPositions(tankBBox());
+    if(state.gridMode==='radial') return buildFanPositions(R);
+    if(state.gridMode==='paralelo') return buildParallelPositions();
+    return buildRectPositions(tankBBox());
   }
 
   function colHeaderLabel(j){
@@ -1468,7 +1516,7 @@
       ['Necessário batimetria', state.batimetria==='sim' ? 'Sim' : 'Não']
     ];
     if(state.batimetria==='sim'){
-      paramsRows.push(['Formato da matriz', state.gridMode==='radial' ? 'Leque' : 'Retangular']);
+      paramsRows.push(['Formato da matriz', state.gridMode==='radial' ? 'Leque' : (state.gridMode==='paralelo' ? 'Vetores paralelos' : 'Retangular')]);
       if(state.gridMode==='radial'){
         paramsRows.push(['Incremento entre linhas', state.fanHours + 'h']);
         paramsRows.push(['Espa\u00e7amento entre pontos', fmt(getFanSpacing(),2) + ' m']);
@@ -3122,11 +3170,15 @@
 
   function onGridModeChange(){
     const isRadial = state.gridMode==='radial';
+    const isPar = state.gridMode==='paralelo';
     updateFieldVisibility();
-    document.getElementById('rowsLabel').textContent = isRadial ? 'Pontos por linha (sem ancoragem)' : 'Linhas da matriz';
+    document.getElementById('rowsLabel').textContent = isRadial ? 'Pontos por linha (sem ancoragem)'
+      : (isPar ? 'Pontos por vetor' : 'Linhas da matriz');
     document.getElementById('matrixHint').textContent = isRadial
       ? 'Todas as linhas partem de um único ponto de ancoragem fixo às 6h (fundo do tanque, 270°) e se espalham em leque para todas as outras horas da borda, ao redor do tanque inteiro. Preencha a leitura da ancoragem no campo acima, e os demais pontos na matriz.'
-      : 'Cada ponto representa uma sondagem sobre o fundo do tanque. Células hachuradas ficam fora do contorno do tanque e não recebem leitura. Preencha quantos pontos forem medidos em campo — não é necessário preencher todos.';
+      : (isPar
+        ? 'Cada coluna é um vetor (passada do ROV) atravessando o tanque, e cada linha é um ponto ao longo dele. Os pontos são distribuídos ao longo do comprimento útil de cada passada, sempre dentro do contorno do tanque — nenhuma leitura é descartada.'
+        : 'Cada ponto representa uma sondagem sobre o fundo do tanque. Células hachuradas ficam fora do contorno do tanque e não recebem leitura. Preencha quantos pontos forem medidos em campo — não é necessário preencher todos.');
     document.getElementById('heatmapHint').textContent = 'A área é interpolada como uma mancha contínua de calor entre os pontos medidos (0 até o maior valor medido). Marcadores pequenos indicam a posição exata de cada leitura.';
 
     if(isRadial){
@@ -3323,7 +3375,7 @@
   function updateGridSpacingInfo(){
     var el=document.getElementById('gridSpacingInfo'); if(!el) return;
     var f=state.formato||'circulo';
-    if(f==='circulo' || state.gridMode==='radial'){ el.style.display='none'; return; }
+    if(f==='circulo' || state.gridMode!=='rect'){ el.style.display='none'; return; }
     var M=state.cols, N=state.rows;
     if(!(M>0 && N>0)){ el.style.display='none'; return; }
     var bb=tankBBox();

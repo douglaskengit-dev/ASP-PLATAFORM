@@ -99,6 +99,10 @@ export default function InspecaoDetalhePage() {
   const [modalImport, setModalImport] = useState(false);
   const [impDiametro, setImpDiametro] = useState("");
   const [impAltura, setImpAltura] = useState("");
+  const [impFormato, setImpFormato] = useState<"circulo" | "quadrado" | "retangulo" | "ngon" | "custom">("circulo");
+  const [impLargura, setImpLargura] = useState("");
+  const [impLados, setImpLados] = useState("6");
+  const [impVertices, setImpVertices] = useState("");
   const [impUnidade, setImpUnidade] = useState<"m" | "cm">("m");
   const [impArquivo, setImpArquivo] = useState<File | null>(null);
   const [importando, setImportando] = useState(false);
@@ -276,7 +280,14 @@ export default function InspecaoDetalhePage() {
     setImpErro(null);
     if (!impArquivo) { setImpErro("Selecione o arquivo (CSV ou XLSX)."); return; }
     const diam = parseFloat((impDiametro || "").replace(",", "."));
-    if (!diam || diam <= 0) { setImpErro("Informe o diâmetro do tanque (m)."); return; }
+    const ehRetangular = impFormato === "quadrado" || impFormato === "retangulo";
+    if (!diam || diam <= 0) {
+      setImpErro(ehRetangular ? "Informe o comprimento do tanque (m)." : "Informe o diâmetro do tanque (m).");
+      return;
+    }
+    const larg = parseFloat((impLargura || "").replace(",", "."));
+    if (impFormato === "retangulo" && (!larg || larg <= 0)) { setImpErro("Informe a largura do tanque (m)."); return; }
+    if (impFormato === "custom" && !(impVertices || "").trim()) { setImpErro("Informe os vértices do tanque (x,y; x,y; …)."); return; }
     setImportando(true);
     try {
       const rows = await lerArquivoParaMatriz(impArquivo);
@@ -288,7 +299,15 @@ export default function InspecaoDetalhePage() {
       const maxVal = Math.max(0, ...dados.valores.flat().map((v) => (typeof v === "number" ? v : 0)));
       const alturaInput = parseFloat((impAltura || "").replace(",", "."));
       const altura = alturaInput > 0 ? alturaInput : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + 0.5);
-      const estado = montarEstadoMedidor(dados, { diametro: diam, altura, unidade: impUnidade });
+      const estado = montarEstadoMedidor(dados, {
+        diametro: diam, altura, unidade: impUnidade,
+        tanque: {
+          formato: impFormato,
+          largura: impFormato === "retangulo" ? larg : null,
+          ngonLados: impFormato === "ngon" ? (parseInt(impLados, 10) || 6) : 6,
+          vertices: impFormato === "custom" ? impVertices.trim() : "",
+        },
+      });
       setModalImport(false);
       carregarNoMedidor(estado);
     } catch (e) {
@@ -639,11 +658,43 @@ export default function InspecaoDetalhePage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p className="detalhe" style={{ margin: 0 }}>
               Envie a planilha no layout atual (blocos v1..vN com Esquerda/Centro/Direita e a linha “Altura sedimento”).
-              O sistema monta a matriz radial e abre no medidor para você revisar e salvar.
+              Cada lateral vira um vetor paralelo atravessando o tanque — todas as leituras entram no cálculo.
             </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Formato do tanque</label>
+                <select style={inputStyle} value={impFormato} onChange={(e) => setImpFormato(e.target.value as any)}>
+                  <option value="circulo">Cilíndrico (círculo)</option>
+                  <option value="quadrado">Quadrado</option>
+                  <option value="retangulo">Retângulo</option>
+                  <option value="ngon">N-ágono (cilindro)</option>
+                  <option value="custom">Personalizado (vértices)</option>
+                </select>
+              </div>
+              {impFormato === "retangulo" && (
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Largura *</label>
+                  <input style={inputStyle} value={impLargura} onChange={(e) => setImpLargura(e.target.value)} placeholder="ex.: 4" inputMode="decimal" />
+                </div>
+              )}
+              {impFormato === "ngon" && (
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Nº de lados</label>
+                  <input style={inputStyle} value={impLados} onChange={(e) => setImpLados(e.target.value)} placeholder="6" inputMode="numeric" />
+                </div>
+              )}
+              {impFormato === "custom" && (
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Vértices (x,y; …) *</label>
+                  <input style={inputStyle} value={impVertices} onChange={(e) => setImpVertices(e.target.value)} placeholder="-3,-2; 3,-2; 3,2; -3,2" />
+                </div>
+              )}
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Diâmetro (m) *</label>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>
+                  {impFormato === "quadrado" || impFormato === "retangulo" ? "Comprimento (m) *" : "Diâmetro (m) *"}
+                </label>
                 <input style={inputStyle} value={impDiametro} onChange={(e) => setImpDiametro(e.target.value)} placeholder="ex.: 12" inputMode="decimal" />
               </div>
               <div>
