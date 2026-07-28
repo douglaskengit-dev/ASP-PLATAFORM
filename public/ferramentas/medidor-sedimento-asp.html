@@ -175,7 +175,7 @@
 
   .legend{margin-top:14px;max-width:280px;}
   .legend-bar{height:14px;border-radius:3px;border:1px solid var(--line-dim);
-    background:linear-gradient(90deg,#FFFFCC 0%,#FED976 25%,#FD8D3C 50%,#FC4E2A 75%,#B10026 100%);}
+    background:linear-gradient(90deg,#3C6FD0 0%,#4AA3DE 6%,#41C0C0 12%,#5FBF5F 20%,#9BCF3C 28%,#EAD918 40%,#F2C230 55%,#F28C28 72%,#EC5A2A 88%,#D8382E 100%);}
   .legend-labels{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--paper-dim);margin-top:4px;}
 
   .btn-ghost{
@@ -1094,11 +1094,16 @@
   }
 
   const HEAT_STOPS = [
-    {t:0.00, c:'#FFFFCC'},
-    {t:0.25, c:'#FED976'},
-    {t:0.50, c:'#FD8D3C'},
-    {t:0.75, c:'#FC4E2A'},
-    {t:1.00, c:'#B10026'}
+    {t:0.00, c:'#3C6FD0'},
+    {t:0.06, c:'#4AA3DE'},
+    {t:0.12, c:'#41C0C0'},
+    {t:0.20, c:'#5FBF5F'},
+    {t:0.28, c:'#9BCF3C'},
+    {t:0.40, c:'#EAD918'},
+    {t:0.55, c:'#F2C230'},
+    {t:0.72, c:'#F28C28'},
+    {t:0.88, c:'#EC5A2A'},
+    {t:1.00, c:'#D8382E'}
   ];
   function heatColor(ratio){
     ratio = Math.max(0, Math.min(1, ratio));
