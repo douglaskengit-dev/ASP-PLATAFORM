@@ -123,6 +123,47 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
   return { vetores: N, pontos: m, valores, alturaSugerida, invalidos, totalValidacao };
 }
 
+/** Gera um MODELO vazio (.xlsx) com N vetores e m pontos, no mesmo layout que
+ * o importador lê, com as fórmulas de ALTURA REAL / Altura sedimento /
+ * VALIDAÇÃO prontas. Retorna um Blob para download. */
+export async function gerarModeloXlsx(N: number, m: number): Promise<Blob> {
+  const XLSX = await import("xlsx");
+  const col = (c: number) => XLSX.utils.encode_col(c);      // 0-idx → letra
+  const a1 = (r: number, c: number) => `${col(c)}${r + 1}`; // ref A1 (r,c 0-idx)
+  const cells: Record<string, any> = {};
+  const put = (r: number, c: number, v: any) => { cells[XLSX.utils.encode_cell({ r, c })] = typeof v === "string" ? { t: "s", v } : { t: "n", v }; };
+  const putF = (r: number, c: number, f: string) => { cells[XLSX.utils.encode_cell({ r, c })] = { t: "n", f }; };
+
+  let maxR = 0, maxC = 0;
+  for (let k = 0; k < N; k++) {
+    const B = 6 * k; // coluna base (0-idx) do bloco v(k+1)
+    put(0, B, `v${k + 1}`);
+    put(1, B + 1, "Coluna teorica da agua");        // água teórica: preencher em (1, B+2)
+    put(3, B + 2, "CONSTANTE ROV"); put(3, B + 3, 0.26);
+    for (let p = 0; p < m; p++) {
+      const hr = 7 + 5 * p; // linha do cabeçalho do ponto (0-idx)
+      put(hr, B + 2, p);
+      ["Esquerda", "Centro", "Direita"].forEach((lab, j) => put(hr, B + 3 + j, lab));
+      // régua medida em (hr+2, B); régua+0,15 em (hr+2, B+1)
+      putF(hr + 2, B + 1, `${a1(hr + 2, B)}+0.15`);
+      put(hr + 1, B + 2, "ALTURA SONAR");            // leitura do sonar: (hr+1, B+3..+5)
+      put(hr + 2, B + 2, "ALTURA REAL SONAR");
+      for (let j = 0; j < 3; j++) putF(hr + 2, B + 3 + j, `${a1(hr + 1, B + 3 + j)}+$${col(B + 3)}$4`);
+      put(hr + 3, B + 2, "Altura sedimento");
+      for (let j = 0; j < 3; j++) putF(hr + 3, B + 3 + j, `${a1(hr + 2, B + 1)}-${a1(hr + 2, B + 3 + j)}`);
+      put(hr + 4, B + 2, "VALIDACAO");
+      for (let j = 0; j < 3; j++) putF(hr + 4, B + 3 + j, `IF(ROUND(${a1(hr + 3, B + 3 + j)}+${a1(hr + 2, B + 3 + j)},2)=ROUND($${col(B + 2)}$2,2),"CORRETO","INCORRETO")`);
+      maxR = Math.max(maxR, hr + 4);
+    }
+    maxC = Math.max(maxC, B + 5);
+  }
+  cells["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, cells, "Batimetria");
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  return new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
 // ── Entrada manual (mesma matemática da planilha) ──────────────────────────
 // Espessura = (régua + peso) − (sonar + ROV). Padrões: ROV 0,26 e peso 0,15.
 

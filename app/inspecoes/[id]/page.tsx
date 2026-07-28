@@ -11,7 +11,7 @@ import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
-import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor } from "@/lib/asp/batimetria";
+import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 
 interface Projeto {
@@ -101,6 +101,10 @@ export default function InspecaoDetalhePage() {
   const [importando, setImportando] = useState(false);
   const [impErro, setImpErro] = useState<string | null>(null);
   const [modalEntrada, setModalEntrada] = useState(false);
+  const [modalModelo, setModalModelo] = useState(false);
+  const [modN, setModN] = useState("5");
+  const [modM, setModM] = useState("11");
+  const [gerandoModelo, setGerandoModelo] = useState(false);
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
@@ -247,6 +251,23 @@ export default function InspecaoDetalhePage() {
   function abrirImport() {
     setImpDiametro(""); setImpAltura(""); setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
     setModalImport(true);
+  }
+  async function baixarModelo() {
+    const N = Math.max(1, Math.min(24, parseInt(modN, 10) || 1));
+    const M = Math.max(1, Math.min(60, parseInt(modM, 10) || 1));
+    setGerandoModelo(true);
+    try {
+      const blob = await gerarModeloXlsx(N, M);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `modelo-batimetria-${N}vetores-${M}pontos.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      setModalModelo(false);
+    } finally {
+      setGerandoModelo(false);
+    }
   }
   async function importarBatimetria() {
     setImpErro(null);
@@ -440,6 +461,7 @@ export default function InspecaoDetalhePage() {
                 <button className="btn-azul" onClick={abrirMedidorNovo}>📐 Nova medição</button>
                 <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
                 <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar batimetria</button>
+                <button className="btn-azul btn-sec" onClick={() => setModalModelo(true)}>⬇ Modelo vazio</button>
                 <button className="btn-azul btn-sec" onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
                   {enviandoColeta ? "Enviando…" : "Anexar PDF"}
                 </button>
@@ -570,6 +592,35 @@ export default function InspecaoDetalhePage() {
           </div>
         )}
       </div>
+
+      {/* Modal: baixar modelo vazio (N vetores × m pontos) */}
+      {modalModelo && (
+        <Modal titulo="⬇ Baixar modelo de batimetria" onFechar={() => setModalModelo(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Gera uma planilha vazia com a quantidade exata de vetores e pontos, já com as fórmulas
+              (ALTURA REAL, Altura sedimento e VALIDAÇÃO). Preencha as leituras e depois use “Importar”.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Vetores</label>
+                <input type="number" min={1} max={24} style={inputStyle} value={modN} onChange={(e) => setModN(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Pontos por vetor</label>
+                <input type="number" min={1} max={60} style={inputStyle} value={modM} onChange={(e) => setModM(e.target.value)} />
+              </div>
+            </div>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Dica: mantenha a distância entre pontos ≤ 2 m — a quantidade de pontos depende do diâmetro do tanque.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="btn-azul btn-sec" onClick={() => setModalModelo(false)} disabled={gerandoModelo}>Cancelar</button>
+              <button className="btn-azul" onClick={baixarModelo} disabled={gerandoModelo}>{gerandoModelo ? "Gerando…" : "Baixar .xlsx"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Modal: digitar batimetria (mesma matemática da importação) */}
       {modalEntrada && (
