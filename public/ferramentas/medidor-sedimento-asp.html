@@ -333,10 +333,6 @@
         <label>Largura</label>
         <input type="number" id="tqLargura" min="0" step="0.01">
       </div>
-      <div class="field" id="paramAngulo" style="display:none;">
-        <label>Ângulo dos vértices (°)</label>
-        <input type="number" id="tqAngulo" min="1" max="179" step="1" value="90">
-      </div>
       <div class="field" id="paramLados" style="display:none;">
         <label>Nº de lados</label>
         <input type="number" id="tqLados" min="3" max="24" step="1" value="6">
@@ -813,7 +809,7 @@
     rows:4, cols:4, values:[], cleaningPct:30,
     gridMode:'rect', fanHours:1, fanSpacing:0.5, anchorValue:null,
     batimetria:'sim', rangeMin:null, rangeMax:null,
-    formato:'circulo', largura:null, anguloVert:90, ngonLados:6, vertices:'', colunas:[],
+    formato:'circulo', largura:null, ngonLados:6, vertices:'', colunas:[],
     reportDate:'', reportResponsavel:'', reportLocal:'',
     robotName:'', robotFlow:null, robotSpeed:null, robotPasses:1, dailyHours:8, extraTime:0, extraUnit:'h'
   };
@@ -916,7 +912,9 @@
     var f=state.formato||'circulo';
     if(f==='circulo') return null;
     if(f==='quadrado'){ var a=getDimM()/2; return [{x:-a,y:-a},{x:a,y:-a},{x:a,y:a},{x:-a,y:a}]; }
-    if(f==='retangulo'){ var L=getDimM()/2, W=getLarguraM()/2, ang=parseFloat(state.anguloVert)||90; var sk=(ang===90)?0:(2*W)/Math.tan(ang*Math.PI/180); return [{x:-L,y:-W},{x:L,y:-W},{x:L+sk,y:W},{x:-L+sk,y:W}]; }
+    // Retângulo reto (cantos a 90°) — mesma lógica do quadrado, só com
+    // comprimento e largura independentes.
+    if(f==='retangulo'){ var L=getDimM()/2, W=getLarguraM()/2; return [{x:-L,y:-W},{x:L,y:-W},{x:L,y:W},{x:-L,y:W}]; }
     if(f==='ngon'){ var n=Math.max(3,parseInt(state.ngonLados)||6), R=getDimM()/2, off=Math.PI/2, v=[]; for(var k=0;k<n;k++){var an=off+2*Math.PI*k/n; v.push({x:R*Math.cos(an),y:R*Math.sin(an)});} return v; }
     if(f==='custom') return parseVertices(state.vertices);
     return null;
@@ -3211,7 +3209,7 @@
   function atualizarParamsFormato(){
     var f=state.formato||'circulo';
     var set=function(id,vis){var el=document.getElementById(id); if(el) el.style.display=vis?'':'none';};
-    set('paramLargura', f==='retangulo'); set('paramAngulo', f==='retangulo');
+    set('paramLargura', f==='retangulo');
     set('paramLados', f==='ngon'); set('paramVertices', f==='custom');
     var radial=document.getElementById('gridmode-radial');
     if(f!=='circulo' && state.gridMode==='radial'){ state.gridMode='rect'; var rr=document.getElementById('gridmode-rect'); if(rr) rr.checked=true; }
@@ -3230,7 +3228,7 @@
     var sel=document.getElementById('formatoTanque');
     if(sel) sel.addEventListener('change', function(e){ state.formato=e.target.value; atualizarParamsFormato(); renderMatrix(); recompute(); });
     var bind=function(id,key){var el=document.getElementById(id); if(el) el.addEventListener('input', function(e){ state[key]=e.target.value; renderMatrix(); recompute(); });};
-    bind('tqLargura','largura'); bind('tqAngulo','anguloVert'); bind('tqLados','ngonLados'); bind('tqVertices','vertices');
+    bind('tqLargura','largura'); bind('tqLados','ngonLados'); bind('tqVertices','vertices');
     atualizarParamsFormato();
   })();
 
@@ -3369,7 +3367,6 @@
     // sem o default, o formato do modal anterior "vazaria" para esta.
     if(saved.formato===undefined) state.formato='circulo';
     if(saved.largura===undefined) state.largura=null;
-    if(saved.anguloVert===undefined) state.anguloVert=90;
     if(saved.ngonLados===undefined) state.ngonLados=6;
     if(saved.vertices===undefined) state.vertices='';
     if(!Array.isArray(state.colunas)) state.colunas=[];
@@ -3384,7 +3381,7 @@
     var setSeg = function(id,val){ var el=document.querySelector('#'+id+' input[value=\"'+val+'\"]'); if(el) el.checked = true; };
     setSeg('unitSeg', state.unit); setSeg('dimSeg', state.inputMode); setSeg('refSeg', state.refMode);
     setSeg('gridModeSeg', state.gridMode); setSeg('batimetriaSeg', state.batimetria); setSeg('extraUnitSeg', state.extraUnit);
-    setV('tqLargura', state.largura); setV('tqAngulo', state.anguloVert);
+    setV('tqLargura', state.largura);
     setV('tqLados', state.ngonLados); setV('tqVertices', state.vertices);
     try { if(typeof atualizarParamsFormato==='function') atualizarParamsFormato(); } catch(e){}
     try { if(typeof renderColunas==='function') renderColunas(); } catch(e){}
