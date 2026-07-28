@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarEmail } from "@/lib/email";
 import { emailAgendamentoHtml } from "@/lib/email-templates";
 import { gerarIcsAgendamento } from "@/lib/ics";
+import { enviarPushParaUsuarios } from "@/lib/push/send";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://asp-plataform.vercel.app";
 
@@ -110,6 +111,11 @@ export async function POST(req: NextRequest) {
         inspecao_id: body.inspecaoId, criado_por: profile.id,
       }))
     );
+
+    // Push (Web Push/VAPID) — best-effort; não bloqueia o agendamento se falhar.
+    try {
+      await enviarPushParaUsuarios(equipe.map((m) => m.id), { titulo, mensagem, link });
+    } catch (e) { /* ignora: push é complementar ao in-app/e-mail */ }
 
     // Destinatários: equipe (para) + Gerência/Comercial em cópia.
     const { data: eqPerfis } = await admin.from("gp_profiles").select("email").in("id", equipe.map((m) => m.id));

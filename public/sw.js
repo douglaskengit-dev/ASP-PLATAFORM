@@ -58,3 +58,31 @@ self.addEventListener("fetch", (event) => {
     }))
   );
 });
+
+/* ---------- Fase 3: notificações push ---------- */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+  const titulo = data.titulo || "ASP";
+  const opcoes = {
+    body: data.mensagem || "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { link: data.link || "/dashboard" },
+    tag: data.tag || undefined,
+  };
+  event.waitUntil(self.registration.showNotification(titulo, opcoes));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || "/dashboard";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cli) => {
+      for (const c of cli) {
+        if ("focus" in c) { c.navigate(link); return c.focus(); }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(link);
+    })
+  );
+});

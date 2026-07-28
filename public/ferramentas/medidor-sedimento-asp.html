@@ -319,6 +319,37 @@
     </div>
 
     <div class="field-row batimetria-only">
+      <div class="field" style="flex-basis:240px;">
+        <label>Formato do tanque</label>
+        <select id="formatoTanque">
+          <option value="circulo">Cilíndrico (círculo)</option>
+          <option value="quadrado">Quadrado</option>
+          <option value="retangulo">Paralelepípedo / Retângulo</option>
+          <option value="ngon">N-ágono (cilindro)</option>
+          <option value="custom">Personalizado (vértices)</option>
+        </select>
+      </div>
+      <div class="field" id="paramLargura" style="display:none;">
+        <label>Largura</label>
+        <input type="number" id="tqLargura" min="0" step="0.01">
+      </div>
+      <div class="field" id="paramAngulo" style="display:none;">
+        <label>Ângulo dos vértices (°)</label>
+        <input type="number" id="tqAngulo" min="1" max="179" step="1" value="90">
+      </div>
+      <div class="field" id="paramLados" style="display:none;">
+        <label>Nº de lados</label>
+        <input type="number" id="tqLados" min="3" max="24" step="1" value="6">
+      </div>
+    </div>
+    <div class="field-row batimetria-only" id="paramVertices" style="display:none;">
+      <div class="field" style="flex:1;">
+        <label>Vértices (x,y separados por ; )</label>
+        <input type="text" id="tqVertices" placeholder="ex.: -3,-2; 3,-2; 3,2; -3,2">
+      </div>
+    </div>
+
+    <div class="field-row batimetria-only">
       <div class="field" style="flex-basis:260px;">
         <label>Formato da matriz</label>
         <div class="segmented" id="gridModeSeg">
@@ -445,21 +476,23 @@
   </section>
 
   <section class="panel" id="heatmapSection">
-    <h2>4 · Mapa de calor — batimetria (vista circular)</h2>
+    <h2>4 · Mapa de calor — batimetria (vista em planta)</h2>
     <p class="hint" id="heatmapHint">A área é interpolada como uma mancha contínua de calor entre os pontos medidos (0 até o maior valor medido). Marcadores pequenos indicam a posição exata de cada leitura.</p>
     <div class="circle-wrap">
       <svg id="heatmapCircleSvg" class="heatmap-svg-box" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <clipPath id="tankClip"><circle cx="160" cy="160" r="140"/></clipPath>
+          <clipPath id="tankClip"><circle id="tankClipShape" cx="160" cy="160" r="140"/></clipPath>
           <filter id="blobBlur" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="13"/>
           </filter>
         </defs>
-        <circle cx="160" cy="160" r="140" fill="var(--navy-field)" stroke="var(--line)" stroke-width="1.4"/>
+        <circle id="tankOutlineCircle" cx="160" cy="160" r="140" fill="var(--navy-field)" stroke="var(--line)" stroke-width="1.4"/>
+        <path id="tankOutlinePath" d="" fill="var(--navy-field)" stroke="var(--line)" stroke-width="1.4" style="display:none"/>
         <g id="heatmapGuides"></g>
         <g id="heatmapBlobs" filter="url(#blobBlur)" clip-path="url(#tankClip)"></g>
         <g id="heatmapAngleTicks"></g>
         <g id="heatmapPoints"></g>
+        <g id="heatmapColumns"></g>
       </svg>
     </div>
     <div class="legend">
@@ -468,6 +501,21 @@
     </div>
     <div style="margin-top:10px;">
       <button class="btn-export" id="exportHeatmapBtn" type="button">⤓ Exportar mapa de calor (PNG)</button>
+    </div>
+
+    <div id="colunasBox" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px;">
+      <h3 style="margin:0 0 4px;font-size:13px;">Colunas internas (obstáculos)</h3>
+      <p class="hint" style="margin:0 0 8px;">Estruturas sólidas dentro do tanque — apenas visuais (planta e 3D). Não entram no cálculo de sedimento nem de volume. Posição x,y em metros a partir do centro.</p>
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;gap:6px;">
+        <div class="field" style="flex:0 0 70px;"><label>x (m)</label><input type="number" id="colX" step="0.05" value="0"></div>
+        <div class="field" style="flex:0 0 70px;"><label>y (m)</label><input type="number" id="colY" step="0.05" value="0"></div>
+        <div class="field" style="flex:0 0 110px;"><label>Formato</label>
+          <select id="colForma"><option value="circulo">Circular</option><option value="quadrado">Quadrado</option></select>
+        </div>
+        <div class="field" style="flex:0 0 90px;"><label id="colTamLabel">Diâmetro (m)</label><input type="number" id="colTam" step="0.05" min="0.05" value="0.5"></div>
+        <button class="btn-export" id="colAddBtn" type="button" style="flex:0 0 auto;">＋ Adicionar</button>
+      </div>
+      <div id="colLista" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;"></div>
     </div>
   </section>
 
@@ -760,6 +808,7 @@
     rows:4, cols:4, values:[], cleaningPct:30,
     gridMode:'rect', fanHours:1, fanSpacing:0.5, anchorValue:null,
     batimetria:'sim', rangeMin:null, rangeMax:null,
+    formato:'circulo', largura:null, anguloVert:90, ngonLados:6, vertices:'', colunas:[],
     reportDate:'', reportResponsavel:'', reportLocal:'',
     robotName:'', robotFlow:null, robotSpeed:null, robotPasses:1, dailyHours:8, extraTime:0, extraUnit:'h'
   };
@@ -832,12 +881,50 @@
       for(let j=0;j<M;j++){
         const x = M>0 ? -R + (j+0.5)*(2*R/M) : 0;
         const d = Math.sqrt(x*x+y*y);
-        row.push({row:i,col:j,x:x,y:y,valid: R>0 ? d<=R+1e-9 : false});
+        row.push({row:i,col:j,x:x,y:y,valid: pointInTankXY(x,y)});
       }
       pts.push(row);
     }
     return pts;
   }
+
+  // ── Formato do tanque (Fase 1): geometria + area/volume. Circulo continua
+  //    com integracao polar; poligonos usam integracao em grade (mesma IDW). ──
+  function getDimM(){ var v=parseFloat(state.dimValue); if(isNaN(v)||v<0)v=0; return state.unit==='cm'?v/100:v; }
+  function getLarguraM(){ var v=parseFloat(state.largura); if(isNaN(v)||v<=0) return getDimM(); return state.unit==='cm'?v/100:v; }
+  function parseVertices(str){ if(!str) return []; var k=state.unit==='cm'?0.01:1; return String(str).split(';').map(function(s){var p=s.split(','),x=parseFloat(p[0]),y=parseFloat(p[1]); return (isNaN(x)||isNaN(y))?null:{x:x*k,y:y*k};}).filter(Boolean); }
+  function tankVertices(){
+    var f=state.formato||'circulo';
+    if(f==='circulo') return null;
+    if(f==='quadrado'){ var a=getDimM()/2; return [{x:-a,y:-a},{x:a,y:-a},{x:a,y:a},{x:-a,y:a}]; }
+    if(f==='retangulo'){ var L=getDimM()/2, W=getLarguraM()/2, ang=parseFloat(state.anguloVert)||90; var sk=(ang===90)?0:(2*W)/Math.tan(ang*Math.PI/180); return [{x:-L,y:-W},{x:L,y:-W},{x:L+sk,y:W},{x:-L+sk,y:W}]; }
+    if(f==='ngon'){ var n=Math.max(3,parseInt(state.ngonLados)||6), R=getDimM()/2, off=Math.PI/2, v=[]; for(var k=0;k<n;k++){var an=off+2*Math.PI*k/n; v.push({x:R*Math.cos(an),y:R*Math.sin(an)});} return v; }
+    if(f==='custom') return parseVertices(state.vertices);
+    return null;
+  }
+  function shoelaceArea(v){ if(!v||v.length<3) return 0; var a=0; for(var i=0;i<v.length;i++){var j=(i+1)%v.length; a+=v[i].x*v[j].y - v[j].x*v[i].y;} return Math.abs(a)/2; }
+  function pointInPolygon(x,y,v){ var inside=false; for(var i=0,j=v.length-1;i<v.length;j=i++){var xi=v[i].x,yi=v[i].y,xj=v[j].x,yj=v[j].y; var inter=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/((yj-yi)||1e-12)+xi); if(inter) inside=!inside;} return inside; }
+  function tankArea(){ var R=getR(); if((state.formato||'circulo')==='circulo') return Math.PI*R*R; var v=tankVertices(); return (v&&v.length>=3)?shoelaceArea(v):Math.PI*R*R; }
+  function pointInTankXY(x,y){ var R=getR(); if((state.formato||'circulo')==='circulo') return R>0 && (x*x+y*y)<=R*R+1e-9; var v=tankVertices(); return (v&&v.length>=3)?pointInPolygon(x,y,v):false; }
+  function tankExtent(){ if((state.formato||'circulo')==='circulo') return getR(); var v=tankVertices()||[], m=0; for(var i=0;i<v.length;i++){m=Math.max(m,Math.abs(v[i].x),Math.abs(v[i].y));} return m||getR(); }
+  function boundaryRadius(th, R){
+    var f=state.formato||'circulo';
+    if(f==='circulo') return R;
+    var v=(typeof tankVertices==='function')?tankVertices():null;
+    if(!v||v.length<3) return R;
+    var dx=Math.cos(th), dy=Math.sin(th), best=Infinity;
+    for(var i=0;i<v.length;i++){
+      var A=v[i], B=v[(i+1)%v.length];
+      var ex=B.x-A.x, ey=B.y-A.y;
+      var det=ex*dy-dx*ey;
+      if(Math.abs(det)<1e-12) continue;
+      var t=(ex*A.y-A.x*ey)/det;
+      var sPar=(dx*A.y-dy*A.x)/det;
+      if(t>1e-9 && sPar>=-1e-9 && sPar<=1+1e-9 && t<best) best=t;
+    }
+    return best===Infinity?R:best;
+  }
+  function integrateVolumeGrid(samples){ if(!samples.length) return 0; var v=tankVertices(); if(!v||v.length<3) return 0; var minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity; for(var i=0;i<v.length;i++){minX=Math.min(minX,v[i].x);maxX=Math.max(maxX,v[i].x);minY=Math.min(minY,v[i].y);maxY=Math.max(maxY,v[i].y);} var dx=(maxX-minX)/INT_GRID, dy=(maxY-minY)/INT_GRID, cell=dx*dy, vol=0; for(var a=0;a<INT_GRID;a++){var cx=minX+(a+0.5)*dx; for(var b=0;b<INT_GRID;b++){var cy=minY+(b+0.5)*dy; if(pointInPolygon(cx,cy,v)){ vol += idwAt(samples,cx,cy,-1)*cell; }}} return vol; }
 
   function getFanSpacing(){
     let s = parseFloat(String(state.fanSpacing).replace(',','.'));
@@ -896,7 +983,7 @@
 
   function buildPositions(){
     const R = getR();
-    return state.gridMode==='radial' ? buildFanPositions(R) : buildRectPositions(R);
+    return state.gridMode==='radial' ? buildFanPositions(R) : buildRectPositions(tankExtent());
   }
 
   function colHeaderLabel(j){
@@ -1353,9 +1440,59 @@
     guides.innerHTML = ''; ticks.innerHTML = ''; points.innerHTML = ''; blobs.innerHTML = '';
 
     const cx=160, cy=160, rad=140;
+    const _isCirc = (state.formato||'circulo')==='circulo';
+    let _fit = null, _verts = null;
+    if(!_isCirc && typeof tankVertices==='function'){
+      _verts = tankVertices();
+      if(_verts && _verts.length>=3){
+        let mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity;
+        for(const v of _verts){ mnx=Math.min(mnx,v.x);mxx=Math.max(mxx,v.x);mny=Math.min(mny,v.y);mxy=Math.max(mxy,v.y); }
+        const span=Math.max(mxx-mnx, mxy-mny)||1;
+        _fit={ mx:(mnx+mxx)/2, my:(mny+mxy)/2, sc:(2*rad*0.94)/span };
+      }
+    }
     const toPx = function(x,y){
+      if(_fit){ return { x: cx+(x-_fit.mx)*_fit.sc, y: cy-(y-_fit.my)*_fit.sc }; }
       return { x: R>0 ? cx+(x/R)*rad : cx, y: R>0 ? cy-(y/R)*rad : cy };
     };
+    // contorno do tanque + clip conforme o formato
+    (function(){
+      const oc=document.getElementById('tankOutlineCircle');
+      const op=document.getElementById('tankOutlinePath');
+      const clip=document.getElementById('tankClipShape');
+      if(_fit && _verts){
+        const d='M'+_verts.map(function(v){var p=toPx(v.x,v.y);return p.x.toFixed(1)+','+p.y.toFixed(1);}).join(' L')+' Z';
+        if(oc) oc.style.display='none';
+        if(op){ op.setAttribute('d',d); op.style.display=''; }
+        if(clip){ const np=document.createElementNS(ns,'path'); np.setAttribute('id','tankClipShape'); np.setAttribute('d',d); clip.parentNode.replaceChild(np,clip); }
+      } else {
+        if(oc) oc.style.display='';
+        if(op) op.style.display='none';
+        if(clip && clip.tagName.toLowerCase()!=='circle'){ const nc=document.createElementNS(ns,'circle'); nc.setAttribute('id','tankClipShape'); nc.setAttribute('cx','160'); nc.setAttribute('cy','160'); nc.setAttribute('r','140'); clip.parentNode.replaceChild(nc,clip); }
+      }
+    })();
+    // colunas internas (obstáculos — apenas visual)
+    (function(){
+      const cg=document.getElementById('heatmapColumns'); if(!cg) return; cg.innerHTML='';
+      const cols=(state.colunas||[]); const kunit=(state.unit==='cm')?0.01:1;
+      for(const c of cols){
+        const p=toPx(parseFloat(c.x)||0, parseFloat(c.y)||0);
+        const tam=(parseFloat(c.tam)||0)*kunit;
+        const rpx=_fit ? (tam/2)*_fit.sc : (R>0?(tam/2/R)*rad:0);
+        let el;
+        if(c.forma==='quadrado'){
+          el=document.createElementNS(ns,'rect');
+          el.setAttribute('x',(p.x-rpx).toFixed(1)); el.setAttribute('y',(p.y-rpx).toFixed(1));
+          el.setAttribute('width',(rpx*2).toFixed(1)); el.setAttribute('height',(rpx*2).toFixed(1));
+        } else {
+          el=document.createElementNS(ns,'circle');
+          el.setAttribute('cx',p.x.toFixed(1)); el.setAttribute('cy',p.y.toFixed(1)); el.setAttribute('r',Math.max(1,rpx).toFixed(1));
+        }
+        el.setAttribute('fill','var(--navy-field)'); el.setAttribute('stroke','var(--line)'); el.setAttribute('stroke-width','1.2');
+        const t=document.createElementNS(ns,'title'); t.textContent='Coluna interna (obstáculo — sem sedimento)'; el.appendChild(t);
+        cg.appendChild(el);
+      }
+    })();
 
     if(state.gridMode==='radial' && anchorPos){
       const ap = toPx(anchorPos.x, anchorPos.y);
@@ -1539,7 +1676,7 @@
      - Validação cruzada leave-one-out → RMSE → incerteza do volume
      ============================================================ */
   const IDW_POWER = 2;
-  const INT_NR = 80, INT_NTH = 120;
+  const INT_NR = 80, INT_NTH = 120, INT_GRID = 140;
 
   function collectSamples(positions, cellResults, anchorPos, anchorResult){
     const samples = [];
@@ -1630,11 +1767,12 @@
     const g = [];
     const R = surf3d.R, samples = surf3d.samples;
     for(let a=0;a<=NR;a++){
-      const r = R*(a/NR);
+      const frac = a/NR;
       const ring = [];
       for(let b=0;b<NTH;b++){
         const th = 2*Math.PI*b/NTH;
-        const x = r*Math.cos(th), y = r*Math.sin(th);
+        const rb = boundaryRadius(th, R)*frac;
+        const x = rb*Math.cos(th), y = rb*Math.sin(th);
         ring.push({x:x, y:y, h: idwAt(samples, x, y, -1)});
       }
       g.push(ring);
@@ -1729,7 +1867,8 @@
     let basePoly = '';
     for(let b=0;b<=SURF_NTH;b++){
       const th = 2*Math.PI*b/SURF_NTH;
-      const p = project(R*Math.cos(th), R*Math.sin(th), 0);
+      const rb = boundaryRadius(th, R);
+      const p = project(rb*Math.cos(th), rb*Math.sin(th), 0);
       basePoly += pt(p)+' ';
     }
     out += '<polygon points="'+basePoly+'" fill="#081D33" stroke="#1B3C63" stroke-width="0.8"/>';
@@ -1739,7 +1878,8 @@
     let wallQuads = '';
     for(let b=0;b<SURF_NTH;b++){
       const th1 = 2*Math.PI*b/SURF_NTH, th2 = 2*Math.PI*(b+1)/SURF_NTH;
-      const x1=R*Math.cos(th1), y1=R*Math.sin(th1), x2=R*Math.cos(th2), y2=R*Math.sin(th2);
+      const rb1=boundaryRadius(th1,R), rb2=boundaryRadius(th2,R);
+      const x1=rb1*Math.cos(th1), y1=rb1*Math.sin(th1), x2=rb2*Math.cos(th2), y2=rb2*Math.sin(th2);
       const pB1=project(x1,y1,0), pB2=project(x2,y2,0);
       if((pB1.depth+pB2.depth)/2 <= 0) continue;   // só o lado de trás
       const pT1=project(x1,y1,wallH), pT2=project(x2,y2,wallH);
@@ -1758,7 +1898,8 @@
       const thL = clockHourToDeg(hourNum)*Math.PI/180;
       const nx = Math.cos(thL), ny = Math.sin(thL);
       const tx = -Math.sin(thL), ty = Math.cos(thL);
-      const rBase = isInternal ? R*0.93 : R*1.05;
+      const _RbL = boundaryRadius(thL, R);
+      const rBase = isInternal ? _RbL*0.93 : _RbL*1.05;
       const halfW = Math.min(0.35, Math.max(0.12, R*0.05));   // meia-largura proporcional ao tanque
       const topZ = wallH;
       const col = isInternal ? '#E0B45C' : '#5AA9F2';
@@ -1866,7 +2007,8 @@
       let mouth = '';
       for(let b=0;b<=SURF_NTH;b++){
         const th = 2*Math.PI*b/SURF_NTH;
-        const p = project(R*Math.cos(th), R*Math.sin(th), Hh);
+        const rb = boundaryRadius(th, R);
+        const p = project(rb*Math.cos(th), rb*Math.sin(th), Hh);
         mouth += (b===0?'M':'L') + pt(p) + ' ';
       }
       out += '<path d="'+mouth+'" fill="none" stroke="#3D7FC4" stroke-width="1" stroke-dasharray="4,3"/>';
@@ -1923,7 +2065,8 @@
       let ring = '';
       for(let b=0;b<=SURF_NTH;b++){
         const th = 2*Math.PI*b/SURF_NTH;
-        const p = project(rw*Math.cos(th), rw*Math.sin(th), 0);
+        const _rb = boundaryRadius(th,R)*(rv/Rdisp);
+        const p = project(_rb*Math.cos(th), _rb*Math.sin(th), 0);
         ring += (b===0?'M':'L') + pt(p) + ' ';
       }
       out += '<path d="'+ring+'" fill="none" stroke="#1B3C63" stroke-width="0.8" stroke-dasharray="3,3"/>';
@@ -2015,7 +2158,8 @@
     let rim = '';
     for(let b=0;b<=SURF_NTH;b++){
       const th = 2*Math.PI*b/SURF_NTH;
-      const p = project(R*Math.cos(th), R*Math.sin(th), 0);
+      const rb = boundaryRadius(th, R);
+      const p = project(rb*Math.cos(th), rb*Math.sin(th), 0);
       rim += (b===0?'M':'L') + pt(p) + ' ';
     }
     out += '<path d="'+rim+'" fill="none" stroke="#3D7FC4" stroke-width="1.6"/>';
@@ -2224,6 +2368,36 @@
         }
       }
     }
+
+    // colunas internas (obstáculos) — marcadores visuais 3D (não afetam cálculo)
+    (function(){
+      var cols=(state.colunas||[]); if(!cols.length) return;
+      var kunit=(state.unit==='cm')?0.01:1;
+      var Hc=getH(); if(!(Hc>0)) Hc=(maxSed>0?maxSed*2:1);
+      var pieces=[];
+      cols.forEach(function(c){
+        var mx=(parseFloat(c.x)||0), my=(parseFloat(c.y)||0), tam=(parseFloat(c.tam)||0)*kunit;
+        if(tam<=0) return;
+        var half=tam/2, base=[];
+        if(c.forma==='quadrado'){ base=[[mx-half,my-half],[mx+half,my-half],[mx+half,my+half],[mx-half,my+half]]; }
+        else { var N=16; for(var k=0;k<N;k++){var a=2*Math.PI*k/N; base.push([mx+half*Math.cos(a), my+half*Math.sin(a)]);} }
+        for(var i=0;i<base.length;i++){
+          var j=(i+1)%base.length;
+          var p1=project(base[i][0],base[i][1],0), p2=project(base[j][0],base[j][1],0);
+          var p3=project(base[j][0],base[j][1],Hc), p4=project(base[i][0],base[i][1],Hc);
+          pieces.push({depth:(p1.depth+p2.depth)/2, poly:pt(p1)+' '+pt(p2)+' '+pt(p3)+' '+pt(p4), face:'side'});
+        }
+        var top=base.map(function(b){return pt(project(b[0],b[1],Hc));}).join(' ');
+        pieces.push({depth:1e9, poly:top, face:'top'});
+      });
+      pieces.sort(function(a,b){return a.depth-b.depth;});
+      var g='<g>';
+      pieces.forEach(function(pc){
+        var fill = pc.face==='top' ? '#8FA6BC' : '#5B7089';
+        g += '<polygon points="'+pc.poly+'" fill="'+fill+'" fill-opacity="0.92" stroke="#2A3A4C" stroke-width="0.7" stroke-linejoin="round"/>';
+      });
+      out += g+'</g>';
+    })();
 
     svg.innerHTML = out;
 
@@ -2446,7 +2620,7 @@
     }
 
     const avg = count ? sum/count : 0;
-    const Area = Math.PI*R*R;
+    const Area = tankArea();
 
     // ---- Volume: integral polar sobre superfície IDW (>=3 pontos) ou média × área (fallback) ----
     let samples = [];
@@ -2455,8 +2629,9 @@
       samples = collectSamples(positions, cellResults, isFan ? anchorPos : null, anchorResult);
     }
     if(samples.length >= 3){
-      volSedM3 = integrateVolumePolar(samples, R);
-      volMethod = 'idw';
+      var _circ = (state.formato||'circulo')==='circulo';
+      volSedM3 = _circ ? integrateVolumePolar(samples, R) : integrateVolumeGrid(samples);
+      volMethod = _circ ? 'idw' : 'idw-grid';
       avgEq = Area>0 ? volSedM3/Area : 0;   // altura média equivalente (ponderada espacialmente)
       rmseLoo = looRmse(samples);
       if(rmseLoo !== null){
@@ -2723,8 +2898,9 @@
     const ring0=[], ring1=[];
     for(let s=0;s<SEG;s++){
       const th=2*Math.PI*s/SEG;
-      ring0.push(addW(R*Math.cos(th), R*Math.sin(th), 0));
-      ring1.push(addW(R*Math.cos(th), R*Math.sin(th), Hh));
+      const rb=boundaryRadius(th, R);
+      ring0.push(addW(rb*Math.cos(th), rb*Math.sin(th), 0));
+      ring1.push(addW(rb*Math.cos(th), rb*Math.sin(th), Hh));
     }
     for(let s=0;s<SEG;s++){
       const s2=(s+1)%SEG;
@@ -2923,6 +3099,61 @@
     if(state.gridMode==='radial') renderMatrix();
     recompute();
   });
+
+  function atualizarParamsFormato(){
+    var f=state.formato||'circulo';
+    var set=function(id,vis){var el=document.getElementById(id); if(el) el.style.display=vis?'':'none';};
+    set('paramLargura', f==='retangulo'); set('paramAngulo', f==='retangulo');
+    set('paramLados', f==='ngon'); set('paramVertices', f==='custom');
+    var radial=document.getElementById('gridmode-radial');
+    if(f!=='circulo' && state.gridMode==='radial'){ state.gridMode='rect'; var rr=document.getElementById('gridmode-rect'); if(rr) rr.checked=true; }
+    if(radial) radial.disabled=(f!=='circulo');
+    var sel=document.getElementById('formatoTanque'); if(sel) sel.value=f;
+  }
+  (function(){
+    var sel=document.getElementById('formatoTanque');
+    if(sel) sel.addEventListener('change', function(e){ state.formato=e.target.value; atualizarParamsFormato(); renderMatrix(); recompute(); });
+    var bind=function(id,key){var el=document.getElementById(id); if(el) el.addEventListener('input', function(e){ state[key]=e.target.value; renderMatrix(); recompute(); });};
+    bind('tqLargura','largura'); bind('tqAngulo','anguloVert'); bind('tqLados','ngonLados'); bind('tqVertices','vertices');
+    atualizarParamsFormato();
+  })();
+
+  function renderColunas(){
+    var box=document.getElementById('colLista'); if(!box) return;
+    var cols=(state.colunas||[]);
+    if(!cols.length){ box.innerHTML='<span class="hint" style="margin:0;">Nenhuma coluna adicionada.</span>'; }
+    else {
+      box.innerHTML='';
+      cols.forEach(function(c,idx){
+        var row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:8px;font-family:IBM Plex Mono,monospace;font-size:12px;';
+        var forma=(c.forma==='quadrado')?'▪ quadrada':'● circular';
+        var dim=(c.forma==='quadrado')?'lado':'⌀';
+        row.innerHTML='<span style="flex:1;">'+forma+' — x '+(parseFloat(c.x)||0)+', y '+(parseFloat(c.y)||0)+' · '+dim+' '+(parseFloat(c.tam)||0)+' '+state.unit+'</span>';
+        var del=document.createElement('button'); del.type='button'; del.textContent='✕'; del.title='Remover';
+        del.style.cssText='background:none;border:1px solid var(--line);color:var(--alert);border-radius:6px;cursor:pointer;width:24px;height:24px;';
+        del.addEventListener('click', function(){ state.colunas.splice(idx,1); renderColunas(); recompute(); });
+        row.appendChild(del); box.appendChild(row);
+      });
+    }
+  }
+  (function(){
+    var forma=document.getElementById('colForma'), lbl=document.getElementById('colTamLabel');
+    if(forma) forma.addEventListener('change', function(){ if(lbl) lbl.textContent = forma.value==='quadrado'?'Lado (m)':'Diâmetro (m)'; });
+    var add=document.getElementById('colAddBtn');
+    if(add) add.addEventListener('click', function(){
+      var x=parseFloat(document.getElementById('colX').value)||0;
+      var y=parseFloat(document.getElementById('colY').value)||0;
+      var tam=parseFloat(document.getElementById('colTam').value)||0;
+      var fm=(document.getElementById('colForma')||{}).value||'circulo';
+      if(tam<=0){ alert('Informe um tamanho maior que zero.'); return; }
+      if(!Array.isArray(state.colunas)) state.colunas=[];
+      state.colunas.push({x:x,y:y,tam:tam,forma:fm});
+      renderColunas(); recompute();
+    });
+    renderColunas();
+  })();
+
   document.getElementById('heightValue').addEventListener('input', function(e){
     state.height = e.target.value; recompute();
   });

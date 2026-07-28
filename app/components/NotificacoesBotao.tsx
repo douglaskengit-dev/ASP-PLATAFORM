@@ -10,6 +10,7 @@ import Link from "next/link";
 import Modal from "./Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { tituloFase } from "@/lib/asp/fases";
+import { estadoPush, ativarPush, desativarPush, type EstadoPush } from "@/lib/pwa/push";
 
 interface Aviso {
   id: string;
@@ -52,6 +53,26 @@ export default function NotificacoesBotao() {
   const [perfil, setPerfil] = useState<string | null>(null);
   const [aberto, setAberto] = useState(false);
   const [resolvendo, setResolvendo] = useState<string | null>(null);
+  const [push, setPush] = useState<EstadoPush>("indisponivel");
+  const [pushMsg, setPushMsg] = useState<string | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  async function alternarPush() {
+    setPushBusy(true);
+    setPushMsg(null);
+    try {
+      if (push === "ativo") {
+        await desativarPush();
+        setPush("inativo");
+      } else {
+        const r = await ativarPush();
+        if (r.ok) { setPush("ativo"); setPushMsg("Notificações ativadas neste dispositivo."); }
+        else setPushMsg(r.motivo || "Não foi possível ativar.");
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  }
 
   async function carregarFeedbacks() {
     const supabase = getSupabaseBrowserClient();
@@ -75,6 +96,7 @@ export default function NotificacoesBotao() {
   }, []);
 
   useEffect(() => { carregar(); }, [carregar]);
+  useEffect(() => { estadoPush().then(setPush).catch(() => {}); }, []);
 
   async function resolverFeedback(id: string) {
     setResolvendo(id);
@@ -117,6 +139,25 @@ export default function NotificacoesBotao() {
 
       {aberto && (
         <Modal titulo="🔔 Notificações" onFechar={() => setAberto(false)}>
+          {push !== "indisponivel" && push !== "sem-chave" && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+              border: "1px solid #3a3529", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
+              <div>
+                <strong style={{ fontSize: 13 }}>Notificações no aparelho</strong>
+                <span className="detalhe" style={{ display: "block" }}>
+                  {push === "ativo" ? "Ativas neste dispositivo."
+                    : push === "negado" ? "Permissão bloqueada no navegador."
+                    : "Receba avisos mesmo com o app fechado."}
+                  {pushMsg ? ` ${pushMsg}` : ""}
+                </span>
+              </div>
+              {push !== "negado" && (
+                <button type="button" className="btn-doc" disabled={pushBusy} onClick={alternarPush}>
+                  {pushBusy ? "…" : push === "ativo" ? "Desativar" : "Ativar"}
+                </button>
+              )}
+            </div>
+          )}
           <span className="detalhe" style={{ fontWeight: 700, display: "block", margin: "0 0 8px" }}>📣 Avisos</span>
           {avisos.length === 0 ? (
             <p className="vazio" style={{ marginBottom: 16 }}>Nenhum aviso.</p>
