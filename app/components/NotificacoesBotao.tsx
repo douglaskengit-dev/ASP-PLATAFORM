@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Modal from "./Modal";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { tituloFase } from "@/lib/asp/fases";
 
 interface Aviso {
@@ -16,6 +17,14 @@ interface Aviso {
   mensagem: string | null;
   link: string | null;
   lida: boolean;
+  criado_em: string;
+}
+interface Feedback {
+  id: string;
+  tipo: "erro" | "sugestao";
+  mensagem: string;
+  pagina: string | null;
+  autor: string;
   criado_em: string;
 }
 interface Inspecao {
@@ -39,18 +48,48 @@ function fmtData(iso: string | null) {
 export default function NotificacoesBotao() {
   const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [inspecoes, setInspecoes] = useState<Inspecao[]>([]);
+  const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [aberto, setAberto] = useState(false);
+  const [resolvendo, setResolvendo] = useState<string | null>(null);
+
+  async function carregarFeedbacks() {
+    const supabase = getSupabaseBrowserClient();
+    const { data } = await supabase
+      .from("gp_feedbacks")
+      .select("id, tipo, mensagem, pagina, created_at, autor:criado_por(nome_completo, email)")
+      .eq("status", "aberto")
+      .order("created_at", { ascending: false });
+    setFeedbacks((data || []).map((f: any) => ({
+      id: f.id, tipo: f.tipo, mensagem: f.mensagem, pagina: f.pagina,
+      autor: f.autor?.nome_completo || f.autor?.email || "usuário", criado_em: f.created_at,
+    })));
+  }
 
   const carregar = useCallback(() => {
     fetch("/api/notificacoes").then((r) => r.ok ? r.json() : { notificacoes: [] }).then((d: any) => setAvisos(d.notificacoes || [])).catch(() => {});
-    fetch("/api/inspecoes/pendentes").then((r) => r.ok ? r.json() : {}).then((d: any) => { setInspecoes(d.inspecoes || []); setPerfil(d.perfil || null); }).catch(() => {});
+    fetch("/api/inspecoes/pendentes").then((r) => r.ok ? r.json() : {}).then((d: any) => {
+      setInspecoes(d.inspecoes || []); setPerfil(d.perfil || null);
+      if (d.perfil === "admin") carregarFeedbacks().catch(() => {});
+    }).catch(() => {});
   }, []);
 
   useEffect(() => { carregar(); }, [carregar]);
 
+  async function resolverFeedback(id: string) {
+    setResolvendo(id);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from("gp_feedbacks").update({ status: "resolvido", resolvido_por: userData.user?.id, resolvido_em: new Date().toISOString() }).eq("id", id);
+      setFeedbacks((prev) => prev.filter((f) => f.id !== id));
+    } finally {
+      setResolvendo(null);
+    }
+  }
+
   const naoLidos = avisos.filter((a) => !a.lida).length;
-  const total = naoLidos + inspecoes.length;
+  const total = naoLidos + inspecoes.length + feedbacks.length;
 
   async function abrir() {
     setAberto(true);
@@ -99,6 +138,26 @@ export default function NotificacoesBotao() {
                 <div className="item notif" key={a.id} style={{ display: "block", marginBottom: 8 }}>{conteudo}</div>
               );
             })
+          )}
+
+          {perfil === "admin" && (
+            <>
+              <span className="detalhe" style={{ fontWeight: 700, display: "block", margin: "12px 0 8px" }}>💬 Erros e sugestões</span>
+              {feedbacks.length === 0 ? (
+                <p className="vazio" style={{ marginBottom: 8 }}>Nenhum aberto.</p>
+              ) : (
+                feedbacks.map((f) => (
+                  <div className="item notif" key={f.id} style={{ display: "block", marginBottom: 8 }}>
+                    <strong>{f.tipo === "erro" ? "🐞 Erro" : "💡 Sugestão"} — {f.autor}</strong>
+                    <span className="detalhe" style={{ whiteSpace: "pre-wrap" }}>{f.mensagem}</span>
+                    <span className="detalhe">{f.pagina ? `Página: ${f.pagina} — ` : ""}{fmtData(f.criado_em)}</span>
+                    <button type="button" className="btn-doc" style={{ marginTop: 6 }} disabled={resolvendo === f.id} onClick={() => resolverFeedback(f.id)}>
+                      {resolvendo === f.id ? "Salvando…" : "✓ Marcar como resolvido"}
+                    </button>
+                  </div>
+                ))
+              )}
+            </>
           )}
 
           <span className="detalhe" style={{ fontWeight: 700, display: "block", margin: "12px 0 8px" }}>
