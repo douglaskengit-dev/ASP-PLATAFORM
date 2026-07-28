@@ -39,6 +39,8 @@ export default function ArquivosPage() {
   const [q, setQ] = useState("");
   const [cliente, setCliente] = useState("");
   const [tipo, setTipo] = useState<FiltroTipo>("todos");
+  const [estrutura, setEstrutura] = useState<"cli/proj/insp" | "proj/insp" | "cli/proj/insp/tipo">("cli/proj/insp");
+  const [baixando, setBaixando] = useState<null | "tudo" | "novos">(null);
 
   useEffect(() => {
     fetch("/api/arquivos")
@@ -82,6 +84,68 @@ export default function ArquivosPage() {
       .filter((p) => p.inspecoes.length > 0);
   }, [projetos, cliente, tipo, termo]);
 
+  function limpar(s?: string | null) {
+    return (s || "").replace(/[\\/:*?"<>|]/g, "-").trim() || "sem-nome";
+  }
+  function caminhoArquivo(p: Projeto, i: Inspecao, item: any, kind: "coleta" | "relatorio") {
+    const cli = limpar(p.cliente?.razao_social || "Sem cliente");
+    const proj = limpar(p.codigo_projeto || p.pedido_compra || "Projeto");
+    const insp = limpar(i.identificacao);
+    let nome: string;
+    if (kind === "coleta") nome = `Coleta-${limpar(item.tipo)}-${(item.criado_em || "").slice(0, 10)}.pdf`;
+    else { const ext = String(item.arquivo_path || "").endsWith(".docx") ? "docx" : "pdf"; nome = `Relatorio-${limpar(item.tipo)}-v${item.versao}.${ext}`; }
+    let base: string;
+    if (estrutura === "proj/insp") base = `${proj}/${insp}`;
+    else if (estrutura === "cli/proj/insp/tipo") base = `${cli}/${proj}/${insp}/${kind === "coleta" ? "Coletas" : "Relatorios"}`;
+    else base = `${cli}/${proj}/${insp}`;
+    return `${base}/${nome}`;
+  }
+
+  const CHAVE_ULTIMO = "asp:arqUltimoDownload";
+  async function baixarZip(apenasNovos: boolean) {
+    setBaixando(apenasNovos ? "novos" : "tudo");
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const corte = apenasNovos ? Number(localStorage.getItem(CHAVE_ULTIMO) || 0) : 0;
+      let count = 0;
+      for (const p of filtrados) {
+        for (const i of p.inspecoes) {
+          for (const c of i.coletas) {
+            if (!c.pdf_path) continue;
+            if (apenasNovos && new Date(c.criado_em).getTime() <= corte) continue;
+            const resp = await fetch(`/api/coletas/${c.id}/download`);
+            if (!resp.ok) continue;
+            zip.file(caminhoArquivo(p, i, c, "coleta"), await resp.blob());
+            count++;
+          }
+          for (const r of i.relatorios) {
+            if (!r.arquivo_path) continue;
+            const dt = r.enviado_em ? new Date(r.enviado_em).getTime() : 0;
+            if (apenasNovos && dt <= corte) continue;
+            const resp = await fetch(`/api/relatorios/${r.id}/download`);
+            if (!resp.ok) continue;
+            zip.file(caminhoArquivo(p, i, r, "relatorio"), await resp.blob());
+            count++;
+          }
+        }
+      }
+      if (count === 0) { alert(apenasNovos ? "Nada novo para baixar desde o último download." : "Nenhum arquivo para baixar no filtro atual."); return; }
+      const out = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `arquivos-asp-${new Date().toISOString().slice(0, 10)}${apenasNovos ? "-novidades" : ""}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      localStorage.setItem(CHAVE_ULTIMO, String(Date.now()));
+    } catch {
+      alert("Falha ao gerar o ZIP.");
+    } finally {
+      setBaixando(null);
+    }
+  }
+
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
 
   return (
@@ -109,6 +173,23 @@ export default function ArquivosPage() {
             <option value="relatorio_execucao">Relatório de execução</option>
           </select>
         </div>
+      </div>
+
+      <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 20 }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Estrutura das pastas</label>
+          <select value={estrutura} onChange={(e) => setEstrutura(e.target.value as typeof estrutura)} style={inp}>
+            <option value="cli/proj/insp">Cliente / Projeto / Inspeção</option>
+            <option value="proj/insp">Projeto / Inspeção</option>
+            <option value="cli/proj/insp/tipo">Cliente / Projeto / Inspeção / Tipo</option>
+          </select>
+        </div>
+        <button className="btn-azul" onClick={() => baixarZip(false)} disabled={!!baixando}>
+          {baixando === "tudo" ? "Baixando…" : "⬇ Baixar tudo (ZIP)"}
+        </button>
+        <button className="btn-azul btn-sec" onClick={() => baixarZip(true)} disabled={!!baixando} title="Somente arquivos novos desde o último download">
+          {baixando === "novos" ? "Baixando…" : "⬇ Baixar novidades"}
+        </button>
       </div>
 
       {filtrados.length === 0 ? (

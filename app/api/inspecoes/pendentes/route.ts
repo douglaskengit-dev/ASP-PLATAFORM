@@ -29,10 +29,14 @@ export async function GET() {
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
     .from("gp_inspecoes")
-    .select("id, identificacao, fase, atualizado_em, projeto:gp_projetos(id, codigo_projeto, pedido_compra, cliente:gp_orgaos(razao_social))")
+    .select("id, identificacao, fase, atualizado_em, projeto:gp_projetos(id, codigo_projeto, pedido_compra, excluido_em, cliente:gp_orgaos(razao_social))")
     .in("fase", fases)
+    .lt("fase", 10)                 // fase 10 = Encerramento → não notifica encerradas
+    .is("excluido_em", null)         // inspeção não excluída (lixeira)
     .order("atualizado_em", { ascending: true });
 
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, perfil: profile.perfil, inspecoes: data || [] });
+  // Remove também inspeções de projetos excluídos/encerrados na lixeira.
+  const inspecoes = (data || []).filter((i: any) => !i.projeto?.excluido_em);
+  return NextResponse.json({ ok: true, perfil: profile.perfil, inspecoes });
 }
