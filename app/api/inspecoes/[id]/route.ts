@@ -55,8 +55,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   if (error) return NextResponse.json({ erro: error.message }, { status: error.code === "PGRST116" ? 404 : 500 });
 
+  // Purga preguiçosa da lixeira de coletas: apaga o que passou de 30 dias.
+  const corteColetas = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  await getSupabaseAdmin().from("gp_coletas").delete().lt("excluido_em", corteColetas);
+
   const [coletas, agendamentos, relatorios, historico] = await Promise.all([
-    supabase.from("gp_coletas").select("*").eq("inspecao_id", params.id).order("criado_em", { ascending: false }),
+    supabase.from("gp_coletas").select("*").eq("inspecao_id", params.id).is("excluido_em", null).order("criado_em", { ascending: false }),
     supabase.from("gp_agendamentos").select("*").eq("inspecao_id", params.id).order("criado_em", { ascending: false }),
     supabase.from("gp_relatorios").select("*").eq("inspecao_id", params.id).order("versao", { ascending: false }),
     supabase.from("gp_fase_historico").select("*, autor_perfil:gp_profiles!autor(nome_completo, email)").eq("inspecao_id", params.id).order("criado_em", { ascending: false }),

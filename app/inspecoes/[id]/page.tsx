@@ -99,6 +99,7 @@ export default function InspecaoDetalhePage() {
   const [modalImport, setModalImport] = useState(false);
   const [impDiametro, setImpDiametro] = useState("");
   const [impAltura, setImpAltura] = useState("");
+  const [excluindoColeta, setExcluindoColeta] = useState<string | null>(null);
   const [impFormato, setImpFormato] = useState<"circulo" | "quadrado" | "retangulo" | "ngon" | "custom">("circulo");
   const [impLargura, setImpLargura] = useState("");
   const [impLados, setImpLados] = useState("6");
@@ -192,6 +193,25 @@ export default function InspecaoDetalhePage() {
     } finally {
       setEnviandoColeta(false);
       if (coletaInputRef.current) coletaInputRef.current.value = "";
+    }
+  }
+
+  /** Exclui a medição — vai para a lixeira, recuperável por 30 dias. */
+  async function excluirColeta(c: Coleta) {
+    const temMedicao = c.dados && Object.keys(c.dados).length > 0;
+    const rotulo = temMedicao ? "esta medição (Relatório Técnico interno)" : `este anexo (${c.tipo})`;
+    if (!confirm(`Excluir ${rotulo}?\n\nEla sai da lista, mas fica recuperável por 30 dias antes de ser apagada definitivamente.`)) return;
+    setExcluindoColeta(c.id);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/coletas/${c.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(data?.erro || "Falha ao excluir a medição."); return; }
+      setColetas((prev) => prev.filter((x) => x.id !== c.id));
+    } catch {
+      setErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setExcluindoColeta(null);
     }
   }
 
@@ -521,6 +541,13 @@ export default function InspecaoDetalhePage() {
                     )}
                     {c.pdf_path && (
                       <a className="btn-dl btn-sec" href={`/api/coletas/${c.id}/download`} target="_blank" rel="noopener noreferrer">PDF</a>
+                    )}
+                    {podeColeta && (
+                      <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                        title="Excluir medição (lixeira de 30 dias)"
+                        disabled={excluindoColeta === c.id} onClick={() => excluirColeta(c)}>
+                        {excluindoColeta === c.id ? "Excluindo…" : "Excluir"}
+                      </button>
                     )}
                   </span>
                 </div>
