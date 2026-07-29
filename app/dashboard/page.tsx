@@ -173,7 +173,7 @@ export default function DashboardPage() {
               tip={<span>Inspeções na fase de coleta de dados de campo.</span>} />
           </div>
 
-          <div className="dash-colunas" style={{ gridTemplateColumns: "1.4fr 1fr", marginTop: 16 }}>
+          <div className="dash-colunas" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", marginTop: 16 }}>
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Inspeções por fase</h2>
               <BarrasHorizontais dados={porFase} vazio="Nenhuma inspeção ainda."

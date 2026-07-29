@@ -200,6 +200,42 @@
     #elevationSvg{width:120px;height:156px;}
     #planSvg{width:150px;height:150px;}
   }
+
+  /* ---------- Uso em campo (celular / tablet) ----------
+     A matriz rola na horizontal dentro do próprio quadro; os campos viram
+     uma coluna; alvos de toque maiores; nada estoura a largura da tela. */
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  @media (max-width:820px){
+    body{padding:14px 10px 48px;}
+    .panel{padding:14px 12px;}
+    h1{font-size:clamp(20px,6vw,26px);}
+    .subtitle{font-size:13px;}
+    .field-row{gap:10px;margin-top:12px;}
+    .field{flex:1 1 100%;min-width:0;}
+    /* Campos e seletores confortáveis para o dedo; 16px evita zoom no iOS. */
+    .field input[type=number], .field input[type=text], .field select{
+      font-size:16px;padding:11px 12px;min-height:44px;
+    }
+    .segmented label{padding:11px 12px;font-size:13px;}
+    .stepper button{width:44px;font-size:18px;}
+    /* Matriz: células maiores para tocar, com rolagem lateral. */
+    table.matrix td{width:56px;height:48px;}
+    table.matrix th{min-width:56px;font-size:12px;}
+    table.matrix td input{font-size:16px;}
+    /* Cartões de resultado em duas colunas no celular. */
+    .results{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}
+    .card{padding:11px 10px;}
+    .card .value{font-size:17px;}
+    /* Desenhos e mapa ocupam a largura disponível. */
+    .diagrams{gap:12px;}
+    .heatmap-svg-box{width:100%;height:auto;max-width:340px;}
+    .export-bar{gap:8px;}
+    .btn-export,.btn-ghost{padding:11px 14px;min-height:44px;}
+  }
+  @media (max-width:420px){
+    table.matrix td{width:52px;height:46px;}
+    .results{grid-template-columns:1fr 1fr;}
+  }
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important;}
   }

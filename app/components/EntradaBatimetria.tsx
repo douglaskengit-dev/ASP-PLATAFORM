@@ -92,7 +92,7 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
           Célula vazia = ponto não medido. E/C/D = Esquerda/Central/Direita.
         </p>
 
-        <div style={{ overflow: "auto", maxHeight: "50vh", border: "1px solid var(--borda)", borderRadius: 8 }}>
+        <div className="rolagem-x" style={{ overflowY: "auto", maxHeight: "50vh", border: "1px solid var(--borda)", borderRadius: 8 }}>
           <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "var(--escuro)", color: "#fff" }}>

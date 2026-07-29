@@ -224,7 +224,7 @@ export default function ProjetosPage() {
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Código do projeto</label>
                 <input value={form.codigoProjeto} onChange={(e) => atualizar("codigoProjeto", e.target.value)} placeholder="ex.: ASP-2026-001" />
@@ -240,7 +240,7 @@ export default function ProjetosPage() {
               <input value={form.endereco} onChange={(e) => atualizar("endereco", e.target.value)} placeholder="pode diferir do endereço do cliente" />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Responsável</label>
                 <input value={form.responsavelProjeto} onChange={(e) => atualizar("responsavelProjeto", e.target.value)} placeholder="responsável pelo projeto" />

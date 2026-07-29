@@ -30,6 +30,7 @@ export default function BarraUsuario() {
   const [tipoPerfil, setTipoPerfil] = useState<TipoPerfil>(null);
   const [ehAdmin, setEhAdmin] = useState(false);
   const [modalAberto, setModalAberto] = useState<ModalId>(null);
+  const [menuAberto, setMenuAberto] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -118,13 +119,13 @@ export default function BarraUsuario() {
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <Link href="/" title="Voltar à página inicial" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
             <Image src="/assets/asp-badge.svg" alt="ASP" width={38} height={38} priority />
-            <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.05, fontFamily: "var(--fonte-titulo)", fontWeight: 800, letterSpacing: "0.14em", color: "#fff", fontSize: 10 }}>
+            <span className="barra-wordmark" style={{ fontFamily: "var(--fonte-titulo)", fontWeight: 800, letterSpacing: "0.14em", color: "#fff", fontSize: 10 }}>
               <span>ADVANCED</span>
               <span>SERVICES</span>
               <span>PROVIDER</span>
             </span>
           </Link>
-          <nav style={{ display: "flex", gap: 4 }}>
+          <nav className="barra-nav-desktop">
             {abas.map((a) => {
               const ativa = pathname.startsWith(a.href);
               return (
@@ -150,7 +151,7 @@ export default function BarraUsuario() {
             })}
           </nav>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div className="barra-acoes-desktop">
           <button onClick={() => setModalAberto("orgaos")} title="Clientes cadastrados" style={linkEstilo()}>
             Clientes
           </button>
@@ -215,7 +216,58 @@ export default function BarraUsuario() {
             Sair
           </button>
         </div>
+
+        {/* Celular: notificações sempre à mão + menu hambúrguer com o resto. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }} className="barra-hamburguer-wrap">
+          <NotificacoesBotao />
+          <button className="barra-hamburguer" aria-label="Abrir menu" aria-expanded={menuAberto}
+            onClick={() => setMenuAberto(true)}>☰</button>
+        </div>
       </div>
+
+      {menuAberto && (
+        <div className="menu-mobile" onClick={() => setMenuAberto(false)}>
+          <div className="menu-mobile-painel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ color: "#fff", fontFamily: "var(--fonte-titulo)", fontWeight: 800, fontSize: 13, letterSpacing: "0.1em" }}>MENU</span>
+              <button aria-label="Fechar menu" onClick={() => setMenuAberto(false)}
+                style={{ background: "none", border: "1px solid #3a3529", borderRadius: 8, width: 34, height: 34, color: "#c9c4b6", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {abas.map((a) => (
+              <Link key={a.href} href={a.href} onClick={() => setMenuAberto(false)}
+                className={`menu-mobile-item${pathname.startsWith(a.href) ? " ativo" : ""}`}>
+                {a.rotulo}
+              </Link>
+            ))}
+
+            <div className="menu-mobile-sep" />
+
+            <button className="menu-mobile-item" onClick={() => { setModalAberto("orgaos"); setMenuAberto(false); }}>Clientes</button>
+            <button className="menu-mobile-item" onClick={() => { setModalAberto("historico"); setMenuAberto(false); }}>Histórico</button>
+            {ehAdmin && (
+              <button className="menu-mobile-item" onClick={() => { setModalAberto("admin"); setMenuAberto(false); }}>Administração</button>
+            )}
+            <button className="menu-mobile-item" onClick={() => { setModalAberto("perfil"); setMenuAberto(false); }}>
+              <span style={{ width: 24, height: 24, borderRadius: "50%", background: corPerfil(tipoPerfil), color: textoAvatarPerfil(tipoPerfil), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, flexShrink: 0 }}>
+                {(nome || email || "?").trim().charAt(0).toUpperCase()}
+              </span>
+              <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{nome || email}</span>
+            </button>
+
+            <div className="menu-mobile-sep" />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "4px 12px" }}>
+              <SyncStatus />
+              <FeedbackBotao />
+              <ThemeToggle />
+            </div>
+
+            <button className="menu-mobile-item" style={{ color: "#e5807a" }}
+              onClick={() => { setMenuAberto(false); sair(); }}>Sair</button>
+          </div>
+        </div>
+      )}
 
       {modalAberto === "orgaos" && (
         <Modal titulo="Clientes" onFechar={() => setModalAberto(null)}>

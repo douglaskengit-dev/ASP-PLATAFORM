@@ -316,7 +316,7 @@ export default function ProjetoDetalhePage() {
                 {orgaos.map((o) => <option key={o.id} value={o.id}>{o.razao_social}</option>)}
               </select>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Código do projeto</label>
                 <input value={edForm.codigoProjeto} onChange={(e) => setEdForm((f) => ({ ...f, codigoProjeto: e.target.value }))} />

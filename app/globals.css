@@ -490,3 +490,110 @@ textarea {
 .fase-barra { flex:1.2; height:8px; }
 .fase-qtd { font-weight:700; min-width:34px; text-align:right; font-size:13px; }
 @media (max-width:1000px) { .dash-colunas { grid-template-columns:1fr; } .dash-scroll { max-height:none; } }
+
+/* ==========================================================================
+   RESPONSIVO — celular e tablet
+   Regra geral: nada pode estourar a largura da tela. Como boa parte do app
+   usa estilo inline (que media query não sobrescreve), as grades inline usam
+   repeat(auto-fit, minmax(...)) e colapsam sozinhas; aqui tratamos o que é
+   classe: espaçamento, tipografia, tabelas largas e alvos de toque.
+   ========================================================================== */
+
+/* Nada rola na horizontal por acidente. */
+html, body { max-width: 100%; overflow-x: hidden; }
+/* Filho de flex/grid só encolhe se puder: evita texto longo esticar o pai. */
+.card, .page, .page-larga { min-width: 0; }
+img, svg, video, canvas, iframe, table { max-width: 100%; }
+
+@media (max-width: 820px) {
+  .page, .page-larga { padding: 18px 14px 60px; }
+  .card { padding: 16px 14px; border-radius: 10px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; }
+  header.topo { padding: 14px 16px; }
+  header.topo h1 { font-size: 17px; }
+
+  /* Cabeçalhos de card (título + botões) empilham em vez de espremer. */
+  .card > div:first-child { flex-wrap: wrap; }
+
+  /* Grades declaradas em classe viram uma coluna. */
+  .grid { grid-template-columns: 1fr; }
+  .dash-colunas { grid-template-columns: 1fr; }
+
+  /* Alvos de toque confortáveis (mín. ~44px de altura). */
+  .btn-azul { padding: 12px 18px; font-size: 14px; }
+  .btn-dl, .btn-doc { padding: 11px 16px; }
+  input, select, textarea { font-size: 16px; }  /* 16px evita zoom automático no iOS */
+}
+
+@media (max-width: 520px) {
+  .page, .page-larga { padding: 14px 12px 56px; }
+  .card { padding: 14px 12px; }
+  /* Botões de ação ocupam a linha inteira quando sozinhos no bloco. */
+  .btn-bloco-mobile { width: 100%; justify-content: center; }
+  .fu-resumo-card { min-width: 100%; }
+}
+
+/* Blocos largos (tabelas, matrizes) rolam dentro do próprio container. */
+.rolagem-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ---- Barra superior: abas no desktop, menu hambúrguer no celular ---- */
+.barra-nav-desktop { display: flex; gap: 4px; }
+.barra-acoes-desktop { display: flex; align-items: center; gap: 14px; }
+.barra-hamburguer { display: none; }
+.barra-hamburguer-wrap { display: none; }
+.barra-wordmark { display: flex; flex-direction: column; line-height: 1.05; }
+
+@media (max-width: 900px) {
+  .barra-nav-desktop, .barra-acoes-desktop { display: none; }
+  .barra-hamburguer-wrap { display: flex !important; }
+  .barra-hamburguer {
+    display: flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
+    background: none; border: 1px solid #3a3529; color: var(--primaria); font-size: 20px;
+  }
+  .barra-wordmark { display: none; }
+}
+
+/* Painel do menu no celular */
+.menu-mobile {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.55);
+}
+.menu-mobile-painel {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(84vw, 320px);
+  background: var(--escuro);
+  border-left: 3px solid var(--acento);
+  padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto;
+}
+.menu-mobile-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 12px; border-radius: 8px;
+  font-family: var(--fonte-titulo); font-weight: 700; font-size: 14px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--primaria); background: none; border: none;
+  text-decoration: none; cursor: pointer; width: 100%; text-align: left;
+}
+.menu-mobile-item.ativo { background: var(--primaria); color: var(--escuro); }
+.menu-mobile-sep { height: 1px; background: #3a3529; margin: 8px 0; }
+
+/* ---- Modal do medidor: tela cheia no celular (ferramenta de campo) ---- */
+.medidor-shell { display: flex; flex-direction: column; height: 82vh; }
+@media (max-width: 820px) {
+  .medidor-shell { height: calc(100dvh - 120px); min-height: 420px; }
+  /* A barra de ações do medidor quebra em vez de espremer. */
+  .medidor-barra { flex-wrap: wrap; }
+  .medidor-barra > span:last-child { width: 100%; display: flex; gap: 8px; }
+  .medidor-barra > span:last-child button { flex: 1; }
+}
+
+/* ---- Modal: quase tela cheia no celular, centralizado no desktop ---- */
+.modal-overlay { padding: 40px 16px; }
+.modal-caixa { max-height: calc(100vh - 80px); }
+@media (max-width: 820px) {
+  .modal-overlay { padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); align-items: flex-start; }
+  .modal-caixa { max-height: calc(100dvh - 20px); border-radius: 10px; }
+  .modal-caixa > div:first-child { padding: 12px 14px; }
+}

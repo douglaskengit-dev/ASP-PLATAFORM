@@ -178,7 +178,7 @@ function OficioConteudo() {
           <summary style={{ fontWeight: 700, cursor: "pointer" }}>Destinatário e referência</summary>
           <div style={{ marginTop: 14 }}>
             <label style={lbl}>Destinatário<input style={inp} value={f.destinatario} onChange={set("destinatario")} required /></label>
-            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 90px", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
               <label style={lbl}>Logradouro
                 <select style={inp} value={f.tipoLogradouro} onChange={set("tipoLogradouro")}>
                   {LOGRADOUROS.map((t) => <option key={t}>{t}</option>)}
@@ -187,7 +187,7 @@ function OficioConteudo() {
               <label style={lbl}>Endereço<input style={inp} value={f.logradouro} onChange={set("logradouro")} /></label>
               <label style={lbl}>Número<input style={inp} value={f.numero} onChange={set("numero")} /></label>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 80px", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               <label style={lbl}>Complemento<input style={inp} value={f.complemento} onChange={set("complemento")} /></label>
               <label style={lbl}>Bairro<input style={inp} value={f.bairro} onChange={set("bairro")} /></label>
               <label style={lbl}>Cidade<input style={inp} value={f.cidadeEnd} onChange={set("cidadeEnd")} /></label>
@@ -197,7 +197,7 @@ function OficioConteudo() {
                 </select>
               </label>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
               <label style={lbl}>Nº do contrato<input style={inp} value={f.contrato} onChange={set("contrato")} required /></label>
               <label style={lbl}>Tratamento
                 <select style={inp} value={f.tratamento} onChange={set("tratamento")}>
@@ -206,7 +206,7 @@ function OficioConteudo() {
               </label>
             </div>
             <label style={lbl}>Assunto<input style={inp} value={f.assunto} onChange={set("assunto")} required /></label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
               <label style={lbl}>A/C — Nome<input style={inp} value={f.acNome} onChange={set("acNome")} /></label>
               <label style={lbl}>A/C — Cargo<input style={inp} value={f.acCargo} onChange={set("acCargo")} /></label>
             </div>
@@ -240,7 +240,7 @@ function OficioConteudo() {
         <details open className="card">
           <summary style={{ fontWeight: 700, cursor: "pointer" }}>Fecho</summary>
           <div style={{ marginTop: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
               <label style={lbl}>Cidade de emissão<input style={inp} value={f.cidade} onChange={set("cidade")} /></label>
               <label style={lbl}>Data por extenso<input style={inp} value={f.data} onChange={set("data")} /></label>
             </div>

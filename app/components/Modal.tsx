@@ -58,19 +58,19 @@ export default function Modal({
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",
-        padding: "40px 16px",
         overflowY: "auto",
       }}
+      className="modal-overlay"
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-caixa"
         style={{
           background: "var(--bg-card)",
           color: "var(--texto)",
           borderRadius: 12,
           width: "100%",
           maxWidth: largo ? 1120 : 720,
-          maxHeight: "calc(100vh - 80px)",
           display: "flex",
           flexDirection: "column",
           boxShadow: "0 12px 40px rgba(0,0,0,0.25)",

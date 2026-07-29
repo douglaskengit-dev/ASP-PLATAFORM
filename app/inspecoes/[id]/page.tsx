@@ -657,7 +657,7 @@ export default function InspecaoDetalhePage() {
               Gera uma planilha vazia com a quantidade exata de vetores e pontos, já com as fórmulas
               (ALTURA REAL, Altura sedimento e VALIDAÇÃO). Preencha as leituras e depois use “Importar”.
             </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Vetores</label>
                 <input type="number" min={1} max={24} style={inputStyle} value={modN} onChange={(e) => setModN(e.target.value)} />
@@ -694,7 +694,7 @@ export default function InspecaoDetalhePage() {
               Envie a planilha no layout atual (blocos v1..vN com Esquerda/Centro/Direita e a linha “Altura sedimento”).
               Cada lateral vira um vetor paralelo atravessando o tanque — todas as leituras entram no cálculo.
             </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Formato do tanque</label>
                 <select style={inputStyle} value={impFormato} onChange={(e) => setImpFormato(e.target.value as any)}>
@@ -724,7 +724,7 @@ export default function InspecaoDetalhePage() {
                 </div>
               )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>
                   {impFormato === "quadrado" || impFormato === "retangulo" ? "Comprimento (m) *" : "Diâmetro (m) *"}
@@ -761,8 +761,8 @@ export default function InspecaoDetalhePage() {
         <Modal titulo={coletaEditando ? "📐 Editar medição" : "📐 Medidor de Sedimento"}
           onFechar={() => { setModalMedidor(false); setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null; }}
           largo semPadding>
-          <div style={{ display: "flex", flexDirection: "column", height: "82vh" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--borda)", background: "var(--bg-suave)", flexShrink: 0 }}>
+          <div className="medidor-shell">
+            <div className="medidor-barra" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--borda)", background: "var(--bg-suave)", flexShrink: 0 }}>
               <span className="detalhe" style={{ margin: 0 }}>
                 {coletaEditando ? "Editando o registro salvo." : "A medição é salva como Relatório Técnico interno (editável). Use “Exportar em PDF” dentro da ferramenta para o PDF."}
               </span>
@@ -784,7 +784,7 @@ export default function InspecaoDetalhePage() {
       {modalAgenda && (
         <Modal titulo={agendaEditando ? `Editar agendamento (${bloco})` : `Agendar ${bloco}`} onFechar={() => { setModalAgenda(false); setAgendaEditando(null); }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita *</label>
                 <input type="date" style={{ ...inputStyle, borderColor: erro && !agData ? "#dc2626" : "var(--borda)" }} value={agData} onChange={(e) => setAgData(e.target.value)} />
