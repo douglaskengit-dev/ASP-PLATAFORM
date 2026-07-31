@@ -291,6 +291,10 @@ function injetarNaCaixa(tblXml: string, paragrafos: string): string {
 
 // ── Geração ──────────────────────────────────────────────────────────────────
 
+/** A capa é o tópico 0: tudo que vem antes do título "1." (título do relatório,
+ *  cliente, endereço e o quadro de controle de revisão). Pode ser omitida. */
+export const TOPICO_CAPA = { numero: 0, titulo: "Capa e controle de revisão" };
+
 /** Títulos originais do template, na ordem. Usados para localizar as seções. */
 export const TOPICOS_PADRAO: { numero: number; titulo: string }[] = [
   { numero: 1, titulo: "Identificação do local" },
@@ -445,7 +449,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   });
 
   let saida = "";
-  let idx = 0;
+  // Capa (tópico 0): se desmarcada, começamos direto no título "1.".
+  const capaOculta = dados.topicos.some((t) => t.numero === 0 && !t.visivel);
+  let idx = capaOculta ? (inicioDoTopico.get(1) ?? 0) : 0;
   while (idx < blocos.length) {
     const nTop = numeroTopico(blocos[idx].texto);
     if (nTop !== null && inicioDoTopico.get(nTop) === idx) {
@@ -489,6 +495,12 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     saida += blocos[idx].xml;
     idx++;
   }
+
+  // O <w:sectPr> final (margens + referência a cabeçalho/rodapé) fica no fim do
+  // body e NÃO é um bloco w:p/w:tbl — precisa ser recolocado, senão o documento
+  // perde o timbre e volta às margens padrão.
+  const fimUltimoBloco = blocos.length > 0 ? blocos[blocos.length - 1].fim : 0;
+  saida += body.slice(fimUltimoBloco);
 
   xml = xml.slice(0, iniBody) + saida + xml.slice(fimBody);
   zip.file("word/document.xml", xml);

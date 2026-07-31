@@ -792,6 +792,7 @@ export default function InspecaoDetalhePage() {
           onFechar={() => setModalRelatorio(false)}
           nomeArquivo={`Relatorio-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
+          usuarios={usuarios}
         />
       )}
 
