@@ -141,6 +141,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     }
   }
 
+  // IMPORTANTE: estes auxiliares são CHAMADOS como função ({Topico({...})}),
+  // e não usados como componente JSX (<Topico/>). Como são declarados dentro
+  // de GerarRelatorio, a cada render virariam um "tipo" novo para o React, que
+  // desmontaria e remontaria a árvore — e o campo perderia o foco a cada tecla,
+  // impedindo a edição. Chamando como função, o JSX é inserido no mesmo nível.
+
   /** Fotos de um subtópico (6.1, 6.2, 6.3), com limite de quantidade.
    *  Cada envio abre uma nova linha com legenda própria. */
   function BlocoFotosAncora({ ancora, legendaPadrao, max }: { ancora: string; legendaPadrao: string; max: number }) {
@@ -215,7 +221,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {on && (
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
             {children}
-            <BlocoFotos topico={numero} max={maxFotos} legendaPadrao={legendaFoto} />
+            {BlocoFotos({ topico: numero, max: maxFotos, legendaPadrao: legendaFoto })}
           </div>
         )}
       </div>
@@ -231,7 +237,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           de figura em Arial 10. {qtdOcultos > 0 && <strong>{qtdOcultos} tópico(s) oculto(s) — os demais são renumerados.</strong>}
         </p>
 
-        <Topico numero={0} titulo={TOPICO_CAPA.titulo}>
+        {Topico({ numero: 0, titulo: TOPICO_CAPA.titulo, children: <>
           <div style={grade}>
             <div><label style={rotulo}>Título do relatório *</label>
               <input style={campo} value={d.titulo || ""} onChange={set("titulo")} placeholder="ex.: Batimetria — Tanque TQ-01" /></div>
@@ -299,9 +305,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               Nenhum usuário de Operações cadastrado — as listas de preparado/checado/aprovado ficam vazias.
             </p>
           )}
-        </Topico>
+        </> })}
 
-        <Topico numero={1} titulo="Identificação do local">
+        {Topico({ numero: 1, titulo: "Identificação do local", children: <>
           <div style={grade}>
             <div><label style={rotulo}>Cliente <span className="detalhe">(automático)</span></label>
               <input style={campo} value={d.cliente || ""} onChange={set("cliente")} /></div>
@@ -319,9 +325,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>Relatório <span className="detalhe">(automático — código do projeto)</span></label>
               <input style={campo} value={d.relatorioCodigo || ""} onChange={set("relatorioCodigo")} /></div>
           </div>
-        </Topico>
+        </> })}
 
-        <Topico numero={2} titulo="Identificação do tanque">
+        {Topico({ numero: 2, titulo: "Identificação do tanque", children: <>
           <div style={grade}>
             <div><label style={rotulo}>TAG</label><input style={campo} value={d.tag || ""} onChange={set("tag")} /></div>
             <div><label style={rotulo}>Área</label><input style={campo} value={d.area || ""} onChange={set("area")} /></div>
@@ -340,9 +346,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           </div>
           <div><label style={rotulo}>Observações</label>
             <textarea style={{ ...campo, minHeight: 56 }} value={d.observacoesTanque || ""} onChange={set("observacoesTanque")} /></div>
-        </Topico>
+        </> })}
 
-        <Topico numero={3} titulo="Métodos">
+        {Topico({ numero: 3, titulo: "Métodos", children: <>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn-dl btn-sec" disabled={!proc} onClick={aplicarSugestao}>
               ✨ Usar sugestão do procedimento
@@ -353,9 +359,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           </div>
           <textarea style={{ ...campo, minHeight: 110 }} value={d.metodos || ""} onChange={set("metodos")}
             placeholder="Descreva o método de inspeção empregado." />
-        </Topico>
+        </> })}
 
-        <Topico numero={4} titulo="Equipamentos utilizados">
+        {Topico({ numero: 4, titulo: "Equipamentos utilizados", children: <>
           <label style={rotulo}>
             Equipamentos {proc ? <span className="detalhe">— sugeridos por {proc.codigo}</span> : null}
           </label>
@@ -370,9 +376,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           </div>
           <label style={rotulo}>Texto que irá para o relatório</label>
           <textarea style={{ ...campo, minHeight: 80 }} value={d.equipamentos || ""} onChange={set("equipamentos")} />
-        </Topico>
+        </> })}
 
-        <Topico numero={5} titulo="Equipe de trabalho">
+        {Topico({ numero: 5, titulo: "Equipe de trabalho", children: <>
           <label style={rotulo}>Envolvidos — selecione entre os usuários cadastrados</label>
           {usuarios.length === 0 ? (
             <p className="vazio" style={{ margin: 0 }}>Nenhum usuário disponível.</p>
@@ -388,9 +394,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             </div>
           )}
           {nomesEquipe && <p className="detalhe" style={{ margin: "6px 0 0" }}>No relatório: {nomesEquipe}</p>}
-        </Topico>
+        </> })}
 
-        <Topico numero={6} titulo="Dados reservatório">
+        {Topico({ numero: 6, titulo: "Dados reservatório", children: <>
           <div style={grade}>
             <div><label style={rotulo}>Equipamento <span className="detalhe">(tipo/uso do tanque)</span></label>
               <input style={campo} value={d.equipamentoTanque || ""} onChange={set("equipamentoTanque")}
@@ -405,19 +411,19 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
             <strong style={{ fontSize: 12.5 }}>6.1 Vista em planta</strong>
-            <BlocoFotosAncora ancora="6.1" legendaPadrao="Vista superior" max={1} />
+            {BlocoFotosAncora({ ancora: "6.1", legendaPadrao: "Vista superior", max: 1 })}
           </div>
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
             <strong style={{ fontSize: 12.5 }}>6.2 Vista lateral</strong>
-            <BlocoFotosAncora ancora="6.2" legendaPadrao="Vista lateral" max={1} />
+            {BlocoFotosAncora({ ancora: "6.2", legendaPadrao: "Vista lateral", max: 1 })}
           </div>
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
             <strong style={{ fontSize: 12.5 }}>6.3 Fotos do tanque <span className="detalhe">(até 5)</span></strong>
-            <BlocoFotosAncora ancora="6.3" legendaPadrao="Foto do tanque" max={5} />
+            {BlocoFotosAncora({ ancora: "6.3", legendaPadrao: "Foto do tanque", max: 5 })}
           </div>
-        </Topico>
+        </> })}
 
-        <Topico numero={7} titulo="Batimetria">
+        {Topico({ numero: 7, titulo: "Batimetria", children: <>
           <div style={grade}>
             <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(automático — medição)</span></label>
               <input style={campo} value={d.volumeSedimento || ""} onChange={set("volumeSedimento")} placeholder="ex.: 12,480 m³" /></div>
@@ -430,17 +436,17 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             O texto do modelo já traz os dois parágrafos; o volume e a faixa de ±5% são substituídos
             automaticamente. As imagens abaixo entram no lugar do marcador de gráficos da batimetria.
           </p>
-        </Topico>
+        </> })}
 
-        <Topico numero={8} titulo="Imagens do fundo do tanque" maxFotos={5} legendaFoto="Imagem do fundo do tanque" />
+        {Topico({ numero: 8, titulo: "Imagens do fundo do tanque", maxFotos: 5, legendaFoto: "Imagem do fundo do tanque" })}
 
-        <Topico numero={9} titulo="Observações" maxFotos={5} legendaFoto="Observação">
+        {Topico({ numero: 9, titulo: "Observações", maxFotos: 5, legendaFoto: "Observação", children: <>
           <textarea style={{ ...campo, minHeight: 60 }} value={d.observacoes || ""} onChange={set("observacoes")} />
-        </Topico>
+        </> })}
 
-        <Topico numero={10} titulo="Conclusão">
+        {Topico({ numero: 10, titulo: "Conclusão", children: <>
           <textarea style={{ ...campo, minHeight: 76 }} value={d.conclusao || ""} onChange={set("conclusao")} />
-        </Topico>
+        </> })}
 
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
