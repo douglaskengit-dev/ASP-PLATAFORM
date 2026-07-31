@@ -40,12 +40,24 @@ export interface ImagemRelatorio {
   larguraCm?: number;
   /** Em qual tópico entra (número original). */
   topico: number;
+  /** Subtópico de destino ("6.1", "6.2", "6.3"). A figura entra logo abaixo
+   *  daquele subtítulo, em vez de no fim da seção. */
+  ancora?: string;
 }
 
 export interface DadosRelatorio {
   titulo: string;
   cliente: string;
   endereco: string;
+  // Quadro de controle de revisão (capa)
+  revisao?: string;          // automático: incrementa a cada reprovação
+  statusRevisao?: string;    // A … E
+  dataRevisao?: string;      // dd/mm/aaaa
+  preparadoPor?: string;
+  checadoPor?: string;
+  aprovadoPor?: string;
+  relatorioCodigo?: string;  // automático: código do projeto
+  procedimento?: string;     // manual por enquanto
   unidade?: string;
   contato?: string;
   dataExecucao?: string;
@@ -54,10 +66,16 @@ export interface DadosRelatorio {
   tag?: string;
   area?: string;
   material?: string;
-  capacidadeNominal?: string;
+  capacidadeNominal?: string;   // dado de placa (tópico 2, manual)
   alturaTanque?: string;
   diametro?: string;
   observacoesTanque?: string;
+  // Tópico 6 — quadro "Dados do Tanque"
+  equipamentoTanque?: string;   // tipo/uso do tanque (manual)
+  capacidadeTanque?: string;    // volume calculado (automático)
+  // Tópico 7 — faixa de ±5% sobre o volume medido
+  volumeMin?: string;
+  volumeMax?: string;
   // Conteúdos livres
   metodos?: string;
   equipamentos?: string;
@@ -65,10 +83,17 @@ export interface DadosRelatorio {
   volumeSedimento?: string;
   observacoes?: string;
   conclusao?: string;
+  // Bloco de assinaturas (fim do documento)
+  elaboradoPor?: string;   // usuário de Operações
+  revisadoPor?: string;    // usuário da Gerência
   // Estrutura
   topicos: TopicoRelatorio[];
   imagens?: ImagemRelatorio[];
 }
+
+/** Marcador temporário do número da figura: substituído no fim, na ordem em
+ *  que as figuras aparecem no documento (exigência da ABNT). */
+const MARCA_FIG = "\u0001FIG\u0001";
 
 // ── Utilidades de XML ────────────────────────────────────────────────────────
 
@@ -281,6 +306,45 @@ function preencherCelulaVizinha(xml: string, rotuloLinha: string, valor?: string
   return xml;
 }
 
+/** Injeta um texto na última posição de uma célula (que costuma estar vazia). */
+function injetarNaCelula(tcXml: string, valor: string, tamanho = 18): string {
+  const run = `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="${tamanho}"/></w:rPr>` +
+    `<w:t xml:space="preserve">${esc(valor)}</w:t></w:r>`;
+  const pos = tcXml.lastIndexOf("</w:p>");
+  if (pos !== -1) return tcXml.slice(0, pos) + run + tcXml.slice(pos);
+  return tcXml.replace("</w:tc>", `<w:p>${run}</w:p></w:tc>`);
+}
+
+/** Preenche a linha de dados do quadro de controle de revisão da capa.
+ *
+ *  O quadro tem 3 linhas: a PRIMEIRA é a linha de dados (vazia no modelo, com
+ *  altura reservada), a segunda traz os rótulos (REVISÃO, STATUS, DATA…) e a
+ *  terceira o texto de confidencialidade. Preenchemos as 6 células da primeira
+ *  linha, na ordem dos rótulos. */
+function preencherQuadroRevisao(xml: string, valores: (string | undefined)[]): string {
+  if (valores.every((v) => !v)) return xml;
+  const reTbl = /<w:tbl>[\s\S]*?<\/w:tbl>/g;
+  let m: RegExpExecArray | null;
+  while ((m = reTbl.exec(xml)) !== null) {
+    const tbl = m[0];
+    if (!/>REVIS[ÃA]O</.test(tbl)) continue;
+    const linhas = tbl.match(/<w:tr\b[\s\S]*?<\/w:tr>/g);
+    if (!linhas || linhas.length === 0) continue;
+    const primeira = linhas[0];
+    const celulas = primeira.match(/<w:tc\b[\s\S]*?<\/w:tc>/g);
+    if (!celulas) continue;
+    let novaLinha = primeira;
+    for (let i = celulas.length - 1; i >= 0; i--) {
+      const v = valores[i];
+      if (!v) continue;
+      novaLinha = novaLinha.replace(celulas[i], injetarNaCelula(celulas[i], v));
+    }
+    const novaTbl = tbl.replace(primeira, novaLinha);
+    return xml.slice(0, m.index) + novaTbl + xml.slice(m.index + tbl.length);
+  }
+  return xml;
+}
+
 /** Injeta parágrafos dentro da primeira célula de uma tabela vazia
  *  (as "caixas" do template, como a de Métodos). */
 function injetarNaCaixa(tblXml: string, paragrafos: string): string {
@@ -339,12 +403,21 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = trocarMarcador(xml, "[Volume de sedimento]", dados.volumeSedimento || "—");
   xml = trocarMarcador(xml, "[data de realização do relatorio]", dados.dataRelatorio || "");
 
-  // 3) Tabelas (rótulo + valor)
+  // 3) Quadro de controle de revisão (capa), na ordem dos rótulos
+  xml = preencherQuadroRevisao(xml, [
+    dados.revisao, dados.statusRevisao, dados.dataRevisao,
+    dados.preparadoPor, dados.checadoPor, dados.aprovadoPor,
+  ]);
+  xml = preencherRotulo(xml, "Relatório: ", dados.relatorioCodigo);
+  xml = preencherRotulo(xml, "Procedimento: ", dados.procedimento);
+
+  // 4) Tabelas (rótulo + valor)
   xml = preencherRotulo(xml, "Cliente...: ", dados.cliente);
   xml = preencherRotulo(xml, "Unidade.:  ", dados.unidade);
   xml = preencherRotulo(xml, "Contato.: ", dados.contato);
   xml = preencherRotulo(xml, "Execução...: ", dados.dataExecucao);
-  xml = preencherRotulo(xml, "Relatório.: ", dados.dataRelatorio);
+  // "Relatório.:" do tópico 1 leva o código do projeto (não a data).
+  xml = preencherRotulo(xml, "Relatório.: ", dados.relatorioCodigo);
   xml = preencherRotulo(xml, "TAG: ", dados.tag);
   xml = preencherRotulo(xml, "Área: ", dados.area);
   xml = preencherRotulo(xml, "Material: ", dados.material);
@@ -353,10 +426,26 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = preencherRotulo(xml, "Diâmetro: ", dados.diametro);
   xml = preencherRotulo(xml, "Observações:  ", dados.observacoesTanque);
   xml = preencherRotulo(xml, "Envolvidos:", dados.equipe ? " " + dados.equipe : undefined);
-  // Tabela "Dados do Tanque": células vazias ao lado dos rótulos
+  // Bloco de assinaturas
+  xml = preencherRotulo(xml, "Relatório elaborado por:", dados.elaboradoPor ? " " + dados.elaboradoPor : undefined);
+  xml = preencherRotulo(xml, "Relatório revisado por:", dados.revisadoPor ? " " + dados.revisadoPor : undefined);
+  // Tópico 6 — quadro "Dados do Tanque": células vazias ao lado dos rótulos.
   xml = preencherCelulaVizinha(xml, "Altura", dados.alturaTanque);
   xml = preencherCelulaVizinha(xml, "Diâmetro", dados.diametro);
-  xml = preencherCelulaVizinha(xml, "Capacidade", dados.capacidadeNominal);
+  xml = preencherCelulaVizinha(xml, "Capacidade", dados.capacidadeTanque || dados.capacidadeNominal);
+  // A linha "Equipamento" vem preenchida no modelo: trocamos pelo tipo informado.
+  if (dados.equipamentoTanque) {
+    xml = trocarTexto(xml, "Tanque de combate a incêndio", dados.equipamentoTanque);
+  }
+
+  // Tópico 7 — o modelo traz um intervalo fixo de um relatório antigo
+  // ("entre 1,43 e 1,58 m³"). Substituímos pela faixa de ±5% desta medição.
+  if (dados.volumeMin && dados.volumeMax) {
+    const faixa = `${dados.volumeMin} e ${dados.volumeMax} m³`;
+    const antes = xml;
+    xml = trocarTexto(xml, "entre1,43 e 1,58 m³", `entre ${faixa}`);
+    if (xml === antes) xml = trocarTexto(xml, "1,43 e 1,58 m³", faixa);
+  }
 
   // 4) Imagens: registra no ZIP + relationships + content types
   const rels: { rId: string; nome: string }[] = [];
@@ -414,21 +503,25 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   if (dados.observacoes) addTexto(9, paragrafoAbnt(dados.observacoes));
   if (dados.conclusao) addTexto(10, paragrafoAbnt(dados.conclusao));
 
-  // Figuras por tópico: legenda ABNT acima ("Figura N – …") e fonte abaixo.
+  // Figuras: legenda ABNT acima ("Figura N – …") e fonte abaixo. As que têm
+  // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.
   const figurasDoTopico = new Map<number, string>();
-  let contadorFigura = 0;
+  const figurasDaAncora = new Map<string, string>();
   (dados.imagens || []).forEach((img, i) => {
     if (ocultos.has(img.topico)) return;
     const rId = rels[i]?.rId;
     if (!rId) return;
-    contadorFigura++;
     const largura = img.larguraCm || 15;
     const altura = Math.round(largura * 0.72 * 100) / 100;
     const bloco =
-      legendaAbnt(`Figura ${contadorFigura} – ${img.legenda}`, true) +
+      legendaAbnt(`Figura ${MARCA_FIG} – ${img.legenda}`, true) +
       figuraXml(rId, i + 1, largura, altura) +
       legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`);
-    figurasDoTopico.set(img.topico, (figurasDoTopico.get(img.topico) || "") + bloco);
+    if (img.ancora) {
+      figurasDaAncora.set(img.ancora, (figurasDaAncora.get(img.ancora) || "") + bloco);
+    } else {
+      figurasDoTopico.set(img.topico, (figurasDoTopico.get(img.topico) || "") + bloco);
+    }
   });
 
   const MARCADOR_IMAGENS = "[Imagens grafica da batimetria]";
@@ -481,6 +574,11 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
           continue;
         }
         saida += bx;
+        // Figuras ancoradas em subtítulo (6.1, 6.2, 6.3) entram logo abaixo dele.
+        // A comparação usa o texto ORIGINAL do bloco, antes da renumeração.
+        for (const [ancora, fig] of figurasDaAncora) {
+          if (t.startsWith(ancora)) { saida += fig; figurasDaAncora.delete(ancora); }
+        }
         // sem caixa: o texto vem logo após o título
         if (k === idx && txtTopico && !(idx + 1 < fim && blocos[idx + 1].xml.startsWith("<w:tbl>") && blocos[idx + 1].texto === "")) {
           saida += txtTopico;
@@ -501,6 +599,12 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // perde o timbre e volta às margens padrão.
   const fimUltimoBloco = blocos.length > 0 ? blocos[blocos.length - 1].fim : 0;
   saida += body.slice(fimUltimoBloco);
+
+  // Numera as figuras na ORDEM DO DOCUMENTO (e não na ordem em que foram
+  // anexadas), como manda a ABNT.
+  let nFig = 0;
+  saida = saida.split(MARCA_FIG).reduce((acc, parte, i) =>
+    i === 0 ? parte : acc + String(++nFig) + parte, "");
 
   xml = xml.slice(0, iniBody) + saida + xml.slice(fimBody);
   zip.file("word/document.xml", xml);

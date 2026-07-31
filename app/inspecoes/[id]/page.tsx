@@ -170,23 +170,39 @@ export default function InspecaoDetalhePage() {
     const un = medicao?.unit === "cm" ? "cm" : "m";
     const num = (v: any, casas = 2) =>
       v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
-    const ag = agendamentos[0];
+    // A data de execução vem do agendamento do MESMO tipo do relatório:
+    // até a fase 5 o relatório é de inspeção; a partir daí, de execução.
+    const tipoRelatorio: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
+    const ag = agendamentos.find((a) => a.tipo === tipoRelatorio) || agendamentos[0];
+    const dataServico = tipoRelatorio === "execucao"
+      ? (ag?.data_execucao || ag?.data_visita)
+      : (ag?.data_visita || ag?.data_execucao);
     const hoje = new Date().toLocaleDateString("pt-BR");
+    // Revisão: começa em 0 e incrementa a cada reprovação ("Ajustar") já
+    // registrada nos relatórios desta inspeção.
+    const reprovacoes = relatorios.filter((r) => r.status === "ajustar").length;
     return {
       titulo: insp ? `Batimetria — ${insp.identificacao}` : "",
       cliente: proj?.cliente?.razao_social || "",
       endereco: proj?.endereco || "",
-      dataExecucao: formatarData(ag?.data_execucao || ag?.data_visita) || "",
+      revisao: String(reprovacoes),
+      dataRevisao: hoje,
+      relatorioCodigo: proj?.codigo_projeto || proj?.pedido_compra || "",
+      dataExecucao: formatarData(dataServico) || "",
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
       alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : "",
       diametro: medicao?.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
-      capacidadeNominal: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
+      // Capacidade nominal é dado de placa (manual). Aqui vai o volume
+      // calculado do tanque, que alimenta o quadro do tópico 6.
+      capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
       volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
+      // Faixa de ±5% sobre o volume medido (texto do tópico 7).
+      volumeMin: res?.volSedM3 != null ? num(res.volSedM3 * 0.95, 2) : "",
+      volumeMax: res?.volSedM3 != null ? num(res.volSedM3 * 1.05, 2) : "",
       equipe: (ag?.equipe || []).map((m) => m.nome).join(", "),
-      equipamentos: "ROV de inspeção visual com sonar batimétrico e régua graduada de conferência.",
     };
-  }, [insp, coletas, agendamentos]);
+  }, [insp, coletas, agendamentos, relatorios]);
   const bloco: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
