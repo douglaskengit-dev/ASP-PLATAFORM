@@ -13,6 +13,7 @@ import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_
 import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
+import GerarRelatorio from "@/app/components/GerarRelatorio";
 
 interface Projeto {
   id: string;
@@ -115,6 +116,7 @@ export default function InspecaoDetalhePage() {
   const [gerandoModelo, setGerandoModelo] = useState(false);
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
+  const [modalRelatorio, setModalRelatorio] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
   // Agendamento
   const [modalAgenda, setModalAgenda] = useState(false);
@@ -157,6 +159,34 @@ export default function InspecaoDetalhePage() {
   }, [carregar]);
 
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
+
+  /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
+   *  cliente, última medição salva (volume, altura, diâmetro) e a equipe do
+   *  agendamento. O usuário revisa tudo no formulário antes de gerar. */
+  const dadosIniciaisRelatorio = useMemo(() => {
+    const proj = insp?.projeto;
+    const medicao = coletas.find((c) => c.dados && Object.keys(c.dados).length > 0)?.dados as any;
+    const res = medicao?.resultado;
+    const un = medicao?.unit === "cm" ? "cm" : "m";
+    const num = (v: any, casas = 2) =>
+      v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
+    const ag = agendamentos[0];
+    const hoje = new Date().toLocaleDateString("pt-BR");
+    return {
+      titulo: insp ? `Batimetria — ${insp.identificacao}` : "",
+      cliente: proj?.cliente?.razao_social || "",
+      endereco: proj?.endereco || "",
+      dataExecucao: formatarData(ag?.data_execucao || ag?.data_visita) || "",
+      dataRelatorio: hoje,
+      tag: insp?.identificacao || "",
+      alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : "",
+      diametro: medicao?.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
+      capacidadeNominal: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
+      volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
+      equipe: (ag?.equipe || []).map((m) => m.nome).join(", "),
+      equipamentos: "ROV de inspeção visual com sonar batimétrico e régua graduada de conferência.",
+    };
+  }, [insp, coletas, agendamentos]);
   const bloco: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
@@ -594,10 +624,11 @@ export default function InspecaoDetalhePage() {
 
       {/* Relatórios (Operações envia; Gerência aprova nas fases 5/9) */}
       <div className="card" style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <h3 style={{ margin: 0 }}>Relatórios ({relatorios.length})</h3>
           {podeRelatorio && (
-            <div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setModalRelatorio(true)}>📄 Gerar relatório</button>
               <button className="btn-azul" onClick={() => relatorioInputRef.current?.click()} disabled={enviandoRelatorio}>
                 {enviandoRelatorio ? "Enviando…" : `Enviar relatório (${bloco})`}
               </button>
@@ -754,6 +785,14 @@ export default function InspecaoDetalhePage() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {modalRelatorio && (
+        <GerarRelatorio
+          onFechar={() => setModalRelatorio(false)}
+          nomeArquivo={`Relatorio-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}`}
+          inicial={dadosIniciaisRelatorio}
+        />
       )}
 
       {/* Modal: medidor de sedimento (ferramenta de campo embutida por iframe) */}

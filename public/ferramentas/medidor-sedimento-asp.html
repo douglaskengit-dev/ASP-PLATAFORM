@@ -2850,6 +2850,13 @@
     };
     surf3d.lastData = resultsData;
     surf3d.lastDims = {R:R, H:H, D:2*R};
+    // Guarda o resumo no estado: assim a medição salva já leva o volume, a
+    // área e o método, e o gerador de relatório não precisa recalcular.
+    state.resultado = {
+      volSedM3: volSedM3, volSedL: volSedM3*1000, areaM2: Area,
+      volTankM3: volTankM3, pct: pct, alturaMedia: avgEq,
+      volUncM3: volUncM3, metodo: volMethod, pontos: count
+    };
     renderResults(resultsData);
     updateElevation(H, avgEq);
     const maxSedObserved = count ? max : 0;
