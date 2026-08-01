@@ -15,7 +15,7 @@ import {
 import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { MATERIAIS_TANQUE, PROCEDIMENTOS, EQUIPAMENTOS, textoEquipamentos } from "@/lib/asp/procedimentos";
 
-export interface ColetaOpcao { id: string; criado_em: string; dados: any }
+export interface ColetaOpcao { id: string; criado_em: string; dados: any; aprovada_em?: string | null }
 
 export interface UsuarioRelatorio { id: string; nome: string; perfil: string; funcao: string | null }
 
@@ -52,7 +52,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [equipeIds, setEquipeIds] = useState<string[]>([]);
   const [equipIds, setEquipIds] = useState<string[]>([]);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
-  const [coletaId, setColetaId] = useState<string>(coletas[0]?.id || "");
+  // Por padrão usa a medição APROVADA; se não houver, a mais recente.
+  const [coletaId, setColetaId] = useState<string>(
+    (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || ""
+  );
   const [gerando, setGerando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -296,11 +299,17 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <select style={campo} value={coletaId} onChange={(e) => trocarColeta(e.target.value)}>
               {coletas.map((c, i) => (
                 <option key={c.id} value={c.id}>
-                  Medição {coletas.length - i} — {new Date(c.criado_em).toLocaleString("pt-BR")}
+                  {c.aprovada_em ? "✓ " : ""}Medição {coletas.length - i} — {new Date(c.criado_em).toLocaleString("pt-BR")}
                   {c.dados?.resultado?.volSedM3 != null ? ` · ${Number(c.dados.resultado.volSedM3).toFixed(3).replace(".", ",")} m³` : ""}
                 </option>
               ))}
             </select>
+          )}
+          {coletas.length > 0 && !coletas.some((c) => c.aprovada_em) && (
+            <p className="detalhe" style={{ margin: "6px 0 0", color: "#c2410c" }}>
+              ⚠ Nenhuma medição foi aprovada nesta inspeção. Você pode gerar assim mesmo, mas convém
+              aprovar a medição válida no card de Coletas antes de enviar.
+            </p>
           )}
         </div>
 

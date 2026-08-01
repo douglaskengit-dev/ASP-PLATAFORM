@@ -11,6 +11,7 @@ import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
+import { podeAprovarColeta } from "@/lib/asp/permissoes";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
@@ -41,7 +42,7 @@ interface Historico {
   criado_em: string;
   autor_perfil: { nome_completo: string | null; email: string | null } | null;
 }
-interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string }
+interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null }
 interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null }
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
@@ -79,6 +80,8 @@ export default function InspecaoDetalhePage() {
   const [relatorios, setRelatorios] = useState<Relatorio[]>([]);
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
+  const [funcao, setFuncao] = useState<string | null>(null);
+  const [aprovandoColeta, setAprovandoColeta] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
   const [processando, setProcessando] = useState(false);
@@ -152,8 +155,9 @@ export default function InspecaoDetalhePage() {
     const supabase = getSupabaseBrowserClient();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
-      const { data: p } = await supabase.from("gp_profiles").select("perfil").eq("id", data.user.id).single();
+      const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
+      setFuncao((p as any)?.funcao ?? null);
     });
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
   }, [carregar]);
@@ -165,7 +169,9 @@ export default function InspecaoDetalhePage() {
    *  agendamento. O usuário revisa tudo no formulário antes de gerar. */
   const dadosIniciaisRelatorio = useMemo(() => {
     const proj = insp?.projeto;
-    const medicao = coletas.find((c) => c.dados && Object.keys(c.dados).length > 0)?.dados as any;
+    // Prioriza a medição APROVADA; se nenhuma foi validada, usa a mais recente.
+    const comDados = coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0);
+    const medicao = (comDados.find((c) => c.aprovada_em) || comDados[0])?.dados as any;
     const res = medicao?.resultado;
     const un = medicao?.unit === "cm" ? "cm" : "m";
     const num = (v: any, casas = 2) =>
@@ -211,6 +217,7 @@ export default function InspecaoDetalhePage() {
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "");
+  const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao });
 
   async function aplicar(acao: string, motivoTexto?: string) {
     setErro(null);
@@ -243,6 +250,29 @@ export default function InspecaoDetalhePage() {
     } finally {
       setEnviandoColeta(false);
       if (coletaInputRef.current) coletaInputRef.current.value = "";
+    }
+  }
+
+  /** Marca qual medição vale para o relatório (uma por inspeção). */
+  async function aprovarColeta(c: Coleta) {
+    const jaAprovada = !!c.aprovada_em;
+    const outraAprovada = coletas.find((x) => x.aprovada_em && x.id !== c.id);
+    if (!jaAprovada && outraAprovada &&
+        !confirm("Outra medição já está aprovada. Ao aprovar esta, a anterior deixa de valer para o relatório. Continuar?")) return;
+    setAprovandoColeta(c.id);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/coletas/${c.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aprovar: !jaAprovada }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(data?.erro || "Falha ao aprovar a medição."); return; }
+      carregar();
+    } catch {
+      setErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setAprovandoColeta(null);
     }
   }
 
@@ -584,6 +614,11 @@ export default function InspecaoDetalhePage() {
                 <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6 }}>
                   <span className="detalhe" style={{ margin: 0 }}>
                     {temMedicao ? "📋 Relatório Técnico interno" : `📎 ${c.tipo}`} · {formatar(c.criado_em)}
+                    {c.aprovada_em && (
+                      <strong style={{ display: "block", color: "#16a34a" }}>
+                        ✓ Em uso no relatório — aprovada em {formatar(c.aprovada_em)}
+                      </strong>
+                    )}
                   </span>
                   <span style={{ display: "flex", gap: 6 }}>
                     {podeColeta && temMedicao && (
@@ -591,6 +626,16 @@ export default function InspecaoDetalhePage() {
                     )}
                     {c.pdf_path && (
                       <a className="btn-dl btn-sec" href={`/api/coletas/${c.id}/download`} target="_blank" rel="noopener noreferrer">PDF</a>
+                    )}
+                    {podeAprovarMedicao && temMedicao && (
+                      <button className="btn-dl btn-sec"
+                        style={c.aprovada_em
+                          ? { color: "#16a34a", borderColor: "#16a34a" }
+                          : undefined}
+                        title={c.aprovada_em ? "Desmarcar esta medição" : "Marcar como a medição válida para o relatório"}
+                        disabled={aprovandoColeta === c.id} onClick={() => aprovarColeta(c)}>
+                        {aprovandoColeta === c.id ? "…" : c.aprovada_em ? "✓ Aprovada" : "Aprovar"}
+                      </button>
                     )}
                     {podeColeta && (
                       <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
