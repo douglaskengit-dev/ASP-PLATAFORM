@@ -92,6 +92,25 @@ export interface DadosRelatorio {
   imagens?: ImagemRelatorio[];
 }
 
+/** Extrai do estado salvo do medidor os campos automáticos do relatório.
+ *  Usado tanto no pré-preenchimento quanto ao trocar a medição escolhida,
+ *  garantindo que os dois caminhos produzam exatamente os mesmos valores. */
+export function camposDaMedicao(medicao: any): Partial<DadosRelatorio> {
+  if (!medicao || typeof medicao !== "object") return {};
+  const un = medicao.unit === "cm" ? "cm" : "m";
+  const num = (v: any, casas = 2) =>
+    v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
+  const res = medicao.resultado;
+  return {
+    alturaTanque: medicao.height ? `${num(medicao.height)} ${un}` : "",
+    diametro: medicao.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
+    capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
+    volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
+    volumeMin: res?.volSedM3 != null ? num(res.volSedM3 * 0.95, 2) : "",
+    volumeMax: res?.volSedM3 != null ? num(res.volSedM3 * 1.05, 2) : "",
+  };
+}
+
 /** Marcador temporário do número da figura: substituído no fim, na ordem em
  *  que as figuras aparecem no documento (exigência da ABNT). */
 const MARCA_FIG = "\u0001FIG\u0001";

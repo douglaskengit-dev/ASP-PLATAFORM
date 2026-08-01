@@ -813,6 +813,13 @@ export default function InspecaoDetalhePage() {
           nomeArquivo={`Relatorio-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
+          coletas={coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0)}
+          onSalvar={async (blob) => {
+            const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "inspecao"}.docx`, {
+              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            });
+            await enviarRelatorio(arquivo);
+          }}
         />
       )}
 

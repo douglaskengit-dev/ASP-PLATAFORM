@@ -12,7 +12,10 @@ import {
   gerarRelatorioDocx, TOPICOS_PADRAO, TOPICO_CAPA,
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
+import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { MATERIAIS_TANQUE, PROCEDIMENTOS, EQUIPAMENTOS, textoEquipamentos } from "@/lib/asp/procedimentos";
+
+export interface ColetaOpcao { id: string; criado_em: string; dados: any }
 
 export interface UsuarioRelatorio { id: string; nome: string; perfil: string; funcao: string | null }
 
@@ -22,6 +25,10 @@ interface Props {
   nomeArquivo: string;
   /** Usuários da base — a lista de envolvidos sai daqui. */
   usuarios: UsuarioRelatorio[];
+  /** Medições salvas: definem os dados automáticos (altura, diâmetro, volume). */
+  coletas: ColetaOpcao[];
+  /** Salva o documento no card da inspeção e o envia para aprovação. */
+  onSalvar: (blob: Blob) => Promise<void>;
 }
 
 interface FotoTopico { arquivo: File; legenda: string; topico: number; ancora?: string }
@@ -37,7 +44,7 @@ const grade: React.CSSProperties = {
 
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
 
-export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios }: Props) {
+export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar }: Props) {
   const [d, setD] = useState<Partial<DadosRelatorio>>(inicial);
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
     Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
@@ -45,7 +52,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [equipeIds, setEquipeIds] = useState<string[]>([]);
   const [equipIds, setEquipIds] = useState<string[]>([]);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
+  const [coletaId, setColetaId] = useState<string>(coletas[0]?.id || "");
   const [gerando, setGerando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   /** Revisão e código do projeto compõem o campo "Relatório" da capa,
@@ -55,6 +64,14 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
       const base = v.codigoProjeto || "";
       return { ...v, revisao: valor, relatorioCodigo: base ? `${base} Rev${valor}` : v.relatorioCodigo };
     });
+  }
+
+  /** Ao trocar a medição, os campos automáticos são recalculados a partir
+   *  DAQUELA coleta — o resto do formulário é preservado. */
+  function trocarColeta(id: string) {
+    setColetaId(id);
+    const c = coletas.find((x) => x.id === id);
+    if (c) setD((v) => ({ ...v, ...camposDaMedicao(c.dados) }));
   }
 
   const set = (k: keyof DadosRelatorio) =>
@@ -103,11 +120,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: legendaPadrao, topico }))]);
   }
 
-  async function gerar() {
-    setErro(null);
-    if (ativo(0) && !d.titulo?.trim()) { setErro("Informe o título do relatório (capa)."); return; }
-    setGerando(true);
-    try {
+  /** Monta o .docx com o que está no formulário. */
+  async function montarBlob(): Promise<Blob> {
       const imgs: ImagemRelatorio[] = [];
       for (const f of fotos) {
         if (!ativo(f.topico)) continue;               // tópico oculto: ignora a foto
@@ -119,7 +133,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           topico: f.topico, ancora: f.ancora,
         });
       }
-      const blob = await gerarRelatorioDocx({
+      return gerarRelatorioDocx({
         titulo: d.titulo || "", cliente: d.cliente || "", endereco: d.endereco || "",
         revisao: d.revisao, statusRevisao: d.statusRevisao, dataRevisao: d.dataRevisao,
         preparadoPor: d.preparadoPor, checadoPor: d.checadoPor, aprovadoPor: d.aprovadoPor,
@@ -138,15 +152,43 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         topicos: TODOS_TOPICOS.map((t) => ({ ...t, visivel: ativo(t.numero) })),
         imagens: imgs,
       });
+  }
+
+  function validar(): boolean {
+    setErro(null);
+    if (ativo(0) && !d.titulo?.trim()) { setErro("Informe o título do relatório (capa)."); return false; }
+    return true;
+  }
+
+  /** Só baixa o arquivo, sem registrar na inspeção. */
+  async function baixar() {
+    if (!validar()) return;
+    setGerando(true);
+    try {
+      const blob = await montarBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = `${nomeArquivo}.docx`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-      onFechar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao gerar o relatório.");
     } finally {
       setGerando(false);
+    }
+  }
+
+  /** Gera, salva como nova versão no card da inspeção e envia para aprovação. */
+  async function salvarEEnviar() {
+    if (!validar()) return;
+    setEnviando(true);
+    try {
+      const blob = await montarBlob();
+      await onSalvar(blob);
+      onFechar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao enviar o relatório.");
+    } finally {
+      setEnviando(false);
     }
   }
 
@@ -245,6 +287,22 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           ABNT (NBR 14724): Arial 12, entrelinha 1,5, texto justificado, margens 3/2/3/2 cm e legendas
           de figura em Arial 10. {qtdOcultos > 0 && <strong>{qtdOcultos} tópico(s) oculto(s) — os demais são renumerados.</strong>}
         </p>
+
+        <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
+          <label style={rotulo}>Medição utilizada <span className="detalhe">(define altura, diâmetro, capacidade e volume)</span></label>
+          {coletas.length === 0 ? (
+            <p className="vazio" style={{ margin: 0 }}>Nenhuma medição salva nesta inspeção — os campos automáticos ficam vazios.</p>
+          ) : (
+            <select style={campo} value={coletaId} onChange={(e) => trocarColeta(e.target.value)}>
+              {coletas.map((c, i) => (
+                <option key={c.id} value={c.id}>
+                  Medição {coletas.length - i} — {new Date(c.criado_em).toLocaleString("pt-BR")}
+                  {c.dados?.resultado?.volSedM3 != null ? ` · ${Number(c.dados.resultado.volSedM3).toFixed(3).replace(".", ",")} m³` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
 
         {Topico({ numero: 0, titulo: TOPICO_CAPA.titulo, children: <>
           <div style={grade}>
@@ -489,9 +547,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
         {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button className="btn-azul btn-sec" onClick={onFechar} disabled={gerando}>Cancelar</button>
-          <button className="btn-azul" onClick={gerar} disabled={gerando}>
-            {gerando ? "Gerando…" : "Gerar e baixar (.docx)"}
+          <button className="btn-azul btn-sec" onClick={onFechar} disabled={gerando || enviando}>Cancelar</button>
+          <button className="btn-azul btn-sec" onClick={baixar} disabled={gerando || enviando}>
+            {gerando ? "Gerando…" : "⬇ Só baixar (.docx)"}
+          </button>
+          <button className="btn-azul" onClick={salvarEEnviar} disabled={gerando || enviando}>
+            {enviando ? "Enviando…" : "💾 Salvar no card e enviar para aprovação"}
           </button>
         </div>
       </div>
