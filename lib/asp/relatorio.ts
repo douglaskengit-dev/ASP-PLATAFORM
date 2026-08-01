@@ -405,7 +405,7 @@ function numeroTopico(texto: string): number | null {
 export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
 
-  const resp = await fetch("/templates/relatorio-asp.docx");
+  const resp = await fetch("/templates/relatorio-asp-v2.docx");
   if (!resp.ok) throw new Error("Não foi possível carregar o modelo do relatório.");
   const zip = await JSZip.loadAsync(await resp.arrayBuffer());
 

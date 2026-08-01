@@ -22,6 +22,9 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
   const inspecaoId = String(form.get("inspecaoId") || "");
   const tipo = String(form.get("tipo") || "") === "execucao" ? "execucao" : "inspecao";
+  // Rascunho: fica anexado ao card sem ir para a fila da Gerência. O envio
+  // para aprovação é um segundo passo, explícito (PATCH .../enviar).
+  const ehRascunho = String(form.get("rascunho") || "") === "1";
   const f = form.get("arquivo");
 
   if (!inspecaoId) {
@@ -66,16 +69,18 @@ export async function POST(req: NextRequest) {
       tipo,
       versao,
       arquivo_path: caminho,
-      status: "em_aprovacao",
+      status: ehRascunho ? "rascunho" : "em_aprovacao",
       enviado_por: profile.id,
-      enviado_em: new Date().toISOString(),
+      enviado_em: ehRascunho ? null : new Date().toISOString(),
     })
     .select("*")
     .single();
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
-  const colStatus = tipo === "inspecao" ? "status_relatorio_inspecao" : "status_relatorio_execucao";
-  await supabase.from("gp_inspecoes").update({ [colStatus]: "em_aprovacao" }).eq("id", inspecaoId);
+  if (!ehRascunho) {
+    const colStatus = tipo === "inspecao" ? "status_relatorio_inspecao" : "status_relatorio_execucao";
+    await supabase.from("gp_inspecoes").update({ [colStatus]: "em_aprovacao" }).eq("id", inspecaoId);
+  }
 
   return NextResponse.json({ ok: true, relatorio: data });
 }

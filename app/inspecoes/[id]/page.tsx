@@ -424,11 +424,33 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  async function enviarRelatorio(arquivo: File) {
+  /** Submete um rascunho já anexado à aprovação da Gerência. */
+  async function enviarParaAprovacao(relatorioId: string) {
     setEnviandoRelatorio(true);
     setErro(null);
     try {
-      const res = await enviarArquivo("/api/relatorios", { inspecaoId: id, tipo: bloco }, arquivo, "Relatório");
+      const res = await fetch(`/api/relatorios/${relatorioId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enviar: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(data?.erro || "Falha ao enviar para aprovação."); return; }
+      carregar();
+    } catch {
+      setErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setEnviandoRelatorio(false);
+    }
+  }
+
+  async function enviarRelatorio(arquivo: File, rascunho = false) {
+    setEnviandoRelatorio(true);
+    setErro(null);
+    try {
+      const res = await enviarArquivo(
+        "/api/relatorios",
+        { inspecaoId: id, tipo: bloco, ...(rascunho ? { rascunho: "1" } : {}) },
+        arquivo, "Relatório");
       if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
       if (!res.ok) { setErro(res.data?.erro || "Falha ao enviar o relatório."); return; }
       carregar();
@@ -717,7 +739,16 @@ export default function InspecaoDetalhePage() {
                   {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {r.motivo_ajuste}</div>}
                   {r.enviado_em && <div className="detalhe" style={{ margin: 0 }}>Enviado em {formatar(r.enviado_em)}</div>}
                 </div>
-                <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">Baixar</a>
+                <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {podeRelatorio && r.status === "rascunho" && (
+                    <button className="btn-dl" disabled={enviandoRelatorio}
+                      title="Submeter este rascunho à Gerência"
+                      onClick={() => enviarParaAprovacao(r.id)}>
+                      {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
+                    </button>
+                  )}
+                  <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">Baixar</a>
+                </span>
               </div>
             ))}
           </div>
@@ -863,7 +894,7 @@ export default function InspecaoDetalhePage() {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "inspecao"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             });
-            await enviarRelatorio(arquivo);
+            await enviarRelatorio(arquivo, true);   // true = rascunho
           }}
         />
       )}

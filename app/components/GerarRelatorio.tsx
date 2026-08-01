@@ -27,7 +27,7 @@ interface Props {
   usuarios: UsuarioRelatorio[];
   /** Medições salvas: definem os dados automáticos (altura, diâmetro, volume). */
   coletas: ColetaOpcao[];
-  /** Salva o documento no card da inspeção e o envia para aprovação. */
+  /** Anexa o .docx ao card como RASCUNHO (o envio é um passo à parte). */
   onSalvar: (blob: Blob) => Promise<void>;
 }
 
@@ -180,7 +180,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     }
   }
 
-  /** Gera, salva como nova versão no card da inspeção e envia para aprovação. */
+  /** Gera e anexa como rascunho no card. O envio para aprovação é feito
+   *  depois, pelo botão do próprio card — assim dá para revisar antes. */
   async function salvarEEnviar() {
     if (!validar()) return;
     setEnviando(true);
@@ -561,7 +562,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             {gerando ? "Gerando…" : "⬇ Só baixar (.docx)"}
           </button>
           <button className="btn-azul" onClick={salvarEEnviar} disabled={gerando || enviando}>
-            {enviando ? "Enviando…" : "💾 Salvar no card e enviar para aprovação"}
+            {enviando ? "Salvando…" : "💾 Salvar rascunho no card"}
           </button>
         </div>
       </div>
