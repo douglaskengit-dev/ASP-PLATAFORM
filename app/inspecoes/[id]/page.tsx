@@ -99,6 +99,9 @@ export default function InspecaoDetalhePage() {
   const editandoRef = useRef<string | null>(null);
   const dadosCarregarRef = useRef<any>(null);
   const [salvandoMedicao, setSalvandoMedicao] = useState(false);
+  const [gerandoPdfMedicao, setGerandoPdfMedicao] = useState(false);
+  /** Quando true, o próximo asp:save vira PDF anexado em vez de só salvar. */
+  const querPdfRef = useRef(false);
   // Importação de batimetria (CSV/XLSX no layout da planilha)
   const [modalImport, setModalImport] = useState(false);
   const [impDiametro, setImpDiametro] = useState("");
@@ -327,7 +330,12 @@ export default function InspecaoDetalhePage() {
           medidorRef.current.contentWindow.postMessage({ type: "asp:load", dados: dadosCarregarRef.current }, "*");
         }
       } else if (msg.type === "asp:save") {
-        salvarMedicao(msg.dados);
+        if (querPdfRef.current) {
+          querPdfRef.current = false;
+          anexarPdfMedicao(msg.dados);
+        } else {
+          salvarMedicao(msg.dados);
+        }
       }
     }
     window.addEventListener("message", onMsg);
@@ -342,6 +350,39 @@ export default function InspecaoDetalhePage() {
     setColetaEditando(c.id); editandoRef.current = c.id; dadosCarregarRef.current = c.dados || null;
     setErro(null); setModalMedidor(true);
   }
+  /** Gera o PDF do relatório da medição e anexa à inspeção como coleta.
+   *  O "Exportar em PDF" da ferramenta usa a impressão do navegador, cujo
+   *  arquivo o site não enxerga — por isso montamos o PDF por código. */
+  async function anexarPdfMedicao(estado: any) {
+    setGerandoPdfMedicao(true);
+    setErro(null);
+    try {
+      const { gerarPdfMedicao } = await import("@/lib/asp/relatorio-medicao");
+      const blob = await gerarPdfMedicao(estado, {
+        inspecao: insp?.identificacao || "Inspeção",
+        projeto: insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || undefined,
+        cliente: insp?.projeto?.cliente?.razao_social || undefined,
+      });
+      const nome = `Medicao-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}.pdf`;
+      const arquivo = new File([blob], nome, { type: "application/pdf" });
+      const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento", dados: JSON.stringify(estado) }, arquivo, "Relatório da medição");
+      if (res.queued) { alert("Sem conexão — o relatório será enviado ao reconectar."); return; }
+      if (!res.ok) { setErro(res.data?.erro || "Falha ao anexar o relatório da medição."); return; }
+      carregar();
+      alert("Relatório da medição anexado às Coletas.");
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao gerar o PDF da medição.");
+    } finally {
+      setGerandoPdfMedicao(false);
+    }
+  }
+
+  /** Pede o estado ao medidor para virar PDF anexado. */
+  function pedirPdfMedicao() {
+    querPdfRef.current = true;
+    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
+  }
+
   function pedirSalvarMedicao() {
     medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
   }
@@ -912,6 +953,10 @@ export default function InspecaoDetalhePage() {
               <span style={{ display: "flex", gap: 8 }}>
                 <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar</button>
                 <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar</button>
+                <button className="btn-azul btn-sec" onClick={pedirPdfMedicao} disabled={gerandoPdfMedicao || salvandoMedicao}
+                  title="Gera o relatório da medição em PDF e anexa às Coletas">
+                  {gerandoPdfMedicao ? "Gerando…" : "📄 Salvar relatório (PDF)"}
+                </button>
                 <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
                   {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
                 </button>

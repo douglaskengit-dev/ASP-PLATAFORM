@@ -26,6 +26,15 @@ interface Projeto {
   data_abertura: string;
   cliente: Cliente | null;
 }
+/** Um arquivo do projeto, já classificado para exibição agrupada. */
+interface ArquivoProjeto {
+  grupo: "inspecao" | "execucao" | "medicao";
+  inspecao: string;
+  rotulo: string;
+  data?: string | null;
+  href: string;
+}
+
 interface Inspecao {
   id: string;
   identificacao: string;
@@ -58,6 +67,7 @@ export default function ProjetoDetalhePage() {
   const [inspLixeira, setInspLixeira] = useState<Inspecao[]>([]);
   const [projeto, setProjeto] = useState<Projeto | null>(null);
   const [inspecoes, setInspecoes] = useState<Inspecao[]>([]);
+  const [arquivos, setArquivos] = useState<ArquivoProjeto[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
   const [modalAberto, setModalAberto] = useState(false);
@@ -90,6 +100,29 @@ export default function ProjetoDetalhePage() {
 
   useEffect(() => {
     carregar();
+    // Arquivos do projeto: a rota devolve tudo agrupado por projeto/inspeção.
+    fetch("/api/arquivos").then((r) => r.ok ? r.json() : { projetos: [] }).then((d: any) => {
+      const proj = (d.projetos || []).find((p: any) => p.id === id);
+      const lista: ArquivoProjeto[] = [];
+      for (const insp of proj?.inspecoes || []) {
+        for (const c of insp.coletas || []) {
+          lista.push({
+            grupo: "medicao", inspecao: insp.identificacao,
+            rotulo: `Medição (${c.tipo || "sedimento"})`, data: c.criado_em,
+            href: `/api/coletas/${c.id}/download`,
+          });
+        }
+        for (const r of insp.relatorios || []) {
+          lista.push({
+            grupo: r.tipo === "execucao" ? "execucao" : "inspecao", inspecao: insp.identificacao,
+            rotulo: `Relatório v${r.versao} — ${r.status}`, data: r.enviado_em,
+            href: `/api/relatorios/${r.id}/download`,
+          });
+        }
+      }
+      setArquivos(lista);
+    }).catch(() => {});
+
     const supabase = getSupabaseBrowserClient();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
@@ -365,6 +398,37 @@ export default function ProjetoDetalhePage() {
           </div>
         </Modal>
       )}
+
+      {/* Arquivos do projeto, ao final: agrupados por Inspeção, Execução e Medição. */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Arquivos do projeto ({arquivos.length})</h3>
+        {arquivos.length === 0 ? (
+          <p className="vazio" style={{ margin: 0 }}>Nenhum arquivo anexado neste projeto.</p>
+        ) : (
+          (["inspecao", "execucao", "medicao"] as const).map((grupo) => {
+            const itens = arquivos.filter((a) => a.grupo === grupo);
+            if (itens.length === 0) return null;
+            const titulo = grupo === "inspecao" ? "Relatórios de inspeção"
+              : grupo === "execucao" ? "Relatórios de execução" : "Medições";
+            return (
+              <div key={grupo} style={{ marginTop: 14 }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: 14, borderBottom: "1px solid var(--borda)", paddingBottom: 6 }}>
+                  {titulo} ({itens.length})
+                </h4>
+                {itens.map((a) => (
+                  <div key={a.href} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                    <span className="detalhe" style={{ margin: 0 }}>
+                      <strong style={{ color: "var(--texto)" }}>{a.inspecao}</strong> · {a.rotulo}
+                      {a.data ? ` · ${formatarDataHora(a.data)}` : ""}
+                    </span>
+                    <a className="btn-dl btn-sec" href={a.href} target="_blank" rel="noopener noreferrer">Baixar</a>
+                  </div>
+                ))}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
