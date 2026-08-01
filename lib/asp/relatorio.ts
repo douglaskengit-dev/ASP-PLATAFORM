@@ -56,7 +56,8 @@ export interface DadosRelatorio {
   preparadoPor?: string;
   checadoPor?: string;
   aprovadoPor?: string;
-  relatorioCodigo?: string;  // automático: código do projeto
+  relatorioCodigo?: string;  // automático: "<código do projeto> Rev<revisão>"
+  codigoProjeto?: string;    // só para compor o campo acima (não vai ao doc)
   procedimento?: string;     // manual por enquanto
   unidade?: string;
   contato?: string;

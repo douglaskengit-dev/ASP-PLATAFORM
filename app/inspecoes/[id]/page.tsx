@@ -187,7 +187,11 @@ export default function InspecaoDetalhePage() {
       endereco: proj?.endereco || "",
       revisao: String(reprovacoes),
       dataRevisao: hoje,
-      relatorioCodigo: proj?.codigo_projeto || proj?.pedido_compra || "",
+      // Campo "Relatório" da capa segue o padrão do modelo: "37/MG/26 Rev1".
+      codigoProjeto: proj?.codigo_projeto || proj?.pedido_compra || "",
+      relatorioCodigo: (proj?.codigo_projeto || proj?.pedido_compra)
+        ? `${proj?.codigo_projeto || proj?.pedido_compra} Rev${reprovacoes}`
+        : "",
       dataExecucao: formatarData(dataServico) || "",
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",

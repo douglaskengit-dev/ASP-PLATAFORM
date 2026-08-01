@@ -48,6 +48,15 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [gerando, setGerando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
+  /** Revisão e código do projeto compõem o campo "Relatório" da capa,
+   *  no formato do modelo: "37/MG/26 Rev1". */
+  function mudarRevisao(valor: string) {
+    setD((v) => {
+      const base = v.codigoProjeto || "";
+      return { ...v, revisao: valor, relatorioCodigo: base ? `${base} Rev${valor}` : v.relatorioCodigo };
+    });
+  }
+
   const set = (k: keyof DadosRelatorio) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setD((v) => ({ ...v, [k]: e.target.value }));
@@ -253,8 +262,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           <div style={grade}>
             <div>
               <label style={rotulo}>Revisão <span className="detalhe">(automática)</span></label>
-              <input style={{ ...campo, fontWeight: 700 }} value={d.revisao || ""} onChange={set("revisao")} />
-              <span className="detalhe">Incrementa a cada reprovação registrada nesta inspeção.</span>
+              <input style={{ ...campo, fontWeight: 700 }} value={d.revisao || ""}
+                onChange={(e) => mudarRevisao(e.target.value)} />
+              <span className="detalhe">Incrementa a cada reprovação registrada nesta inspeção e compõe o campo Relatório.</span>
             </div>
             <div>
               <label style={rotulo}>Status</label>
