@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { removerArquivos } from "@/lib/processos/arquivos";
 
 export const runtime = "nodejs";
 
@@ -37,5 +38,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const colStatus = rel.tipo === "inspecao" ? "status_relatorio_inspecao" : "status_relatorio_execucao";
   await supabase.from("gp_inspecoes").update({ [colStatus]: "em_aprovacao" }).eq("id", rel.inspecao_id);
 
+  return NextResponse.json({ ok: true });
+}
+
+/** Exclui um relatório em RASCUNHO (registro + arquivo). Só rascunhos: uma
+ *  versão já enviada faz parte do histórico de aprovação e não se apaga. */
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const profile = await getProfileAtual();
+  if (!profile) {
+    return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
+  }
+  if (!PERFIS_ENVIO.includes(profile.perfil)) {
+    return NextResponse.json({ erro: "Ação restrita a Operações." }, { status: 403 });
+  }
+
+  const supabase = getSupabaseRouteClient();
+  const { data: rel } = await supabase
+    .from("gp_relatorios").select("id, status, arquivo_path").eq("id", params.id).single();
+  if (!rel) return NextResponse.json({ erro: "Relatório não encontrado." }, { status: 404 });
+  if (rel.status !== "rascunho") {
+    return NextResponse.json({ erro: "Só rascunhos podem ser excluídos." }, { status: 400 });
+  }
+
+  const { error } = await supabase.from("gp_relatorios").delete().eq("id", params.id);
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  if (rel.arquivo_path) { try { await removerArquivos([rel.arquivo_path]); } catch { /* arquivo órfão não bloqueia */ } }
   return NextResponse.json({ ok: true });
 }

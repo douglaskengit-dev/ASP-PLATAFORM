@@ -51,6 +51,11 @@ interface Agendamento {
   criado_em: string;
 }
 interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null }
+/** Arquivo do projeto, classificado para exibição agrupada. */
+interface ArquivoProjeto {
+  grupo: "inspecao" | "execucao" | "medicao";
+  inspecao: string; rotulo: string; data?: string | null; href: string;
+}
 
 // Fase 1 é nível-projeto (abertura); as demais correm na inspeção.
 const TODAS_FASES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -123,6 +128,7 @@ export default function InspecaoDetalhePage() {
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
+  const [excluindoRelatorio, setExcluindoRelatorio] = useState<string | null>(null);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
   // Agendamento
   const [modalAgenda, setModalAgenda] = useState(false);
@@ -137,6 +143,7 @@ export default function InspecaoDetalhePage() {
   const [agNovoItem, setAgNovoItem] = useState("");
   const [salvandoAgenda, setSalvandoAgenda] = useState(false);
   const [usuarios, setUsuarios] = useState<UsuarioOpcao[]>([]);
+  const [arquivos, setArquivos] = useState<ArquivoProjeto[]>([]);
 
   const carregar = useCallback(() => {
     fetch(`/api/inspecoes/${id}`)
@@ -166,6 +173,29 @@ export default function InspecaoDetalhePage() {
   }, [carregar]);
 
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
+
+  // Arquivos do projeto desta inspeção (mesma fonte da aba Arquivos).
+  const projetoId = insp?.projeto?.id;
+  useEffect(() => {
+    if (!projetoId) return;
+    fetch("/api/arquivos").then((r) => r.ok ? r.json() : { projetos: [] }).then((d: any) => {
+      const proj = (d.projetos || []).find((p: any) => p.id === projetoId);
+      const lista: ArquivoProjeto[] = [];
+      for (const i of proj?.inspecoes || []) {
+        for (const c of i.coletas || []) {
+          lista.push({ grupo: "medicao", inspecao: i.identificacao,
+            rotulo: `Medição (${c.tipo || "sedimento"})`, data: c.criado_em,
+            href: `/api/coletas/${c.id}/download` });
+        }
+        for (const r of i.relatorios || []) {
+          lista.push({ grupo: r.tipo === "execucao" ? "execucao" : "inspecao", inspecao: i.identificacao,
+            rotulo: `Relatório v${r.versao} — ${r.status}`, data: r.enviado_em,
+            href: `/api/relatorios/${r.id}/download` });
+        }
+      }
+      setArquivos(lista);
+    }).catch(() => {});
+  }, [projetoId, relatorios, coletas]);
 
   /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
    *  cliente, última medição salva (volume, altura, diâmetro) e a equipe do
@@ -462,6 +492,23 @@ export default function InspecaoDetalhePage() {
       setImpErro(e instanceof Error ? e.message : "Falha ao importar o arquivo.");
     } finally {
       setImportando(false);
+    }
+  }
+
+  /** Exclui um rascunho (registro + arquivo). Versões enviadas ficam. */
+  async function excluirRascunho(relatorioId: string) {
+    if (!confirm("Excluir este rascunho de relatório? O arquivo também será apagado.")) return;
+    setExcluindoRelatorio(relatorioId);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/relatorios/${relatorioId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(data?.erro || "Falha ao excluir o rascunho."); return; }
+      carregar();
+    } catch {
+      setErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setExcluindoRelatorio(null);
     }
   }
 
@@ -782,17 +829,56 @@ export default function InspecaoDetalhePage() {
                 </div>
                 <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {podeRelatorio && r.status === "rascunho" && (
-                    <button className="btn-dl" disabled={enviandoRelatorio}
-                      title="Submeter este rascunho à Gerência"
-                      onClick={() => enviarParaAprovacao(r.id)}>
-                      {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
-                    </button>
+                    <>
+                      <button className="btn-dl" disabled={enviandoRelatorio}
+                        title="Submeter este rascunho à Gerência"
+                        onClick={() => enviarParaAprovacao(r.id)}>
+                        {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
+                      </button>
+                      <button className="btn-dl btn-sec" title="Refazer o documento (gera uma nova versão)"
+                        onClick={() => setModalRelatorio(true)}>Editar</button>
+                      <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                        disabled={excluindoRelatorio === r.id} onClick={() => excluirRascunho(r.id)}>
+                        {excluindoRelatorio === r.id ? "…" : "Excluir"}
+                      </button>
+                    </>
                   )}
                   <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">Baixar</a>
                 </span>
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Arquivos do projeto inteiro, para consulta sem sair da inspeção. */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Arquivos do projeto ({arquivos.length})</h3>
+        {arquivos.length === 0 ? (
+          <p className="vazio" style={{ margin: 0 }}>Nenhum arquivo anexado neste projeto.</p>
+        ) : (
+          (["inspecao", "execucao", "medicao"] as const).map((grupo) => {
+            const itens = arquivos.filter((a) => a.grupo === grupo);
+            if (itens.length === 0) return null;
+            const titulo = grupo === "inspecao" ? "Relatórios de inspeção"
+              : grupo === "execucao" ? "Relatórios de execução" : "Medições";
+            return (
+              <div key={grupo} style={{ marginTop: 14 }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: 14, borderBottom: "1px solid var(--borda)", paddingBottom: 6 }}>
+                  {titulo} ({itens.length})
+                </h4>
+                {itens.map((a) => (
+                  <div key={a.href} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                    <span className="detalhe" style={{ margin: 0 }}>
+                      <strong style={{ color: "var(--texto)" }}>{a.inspecao}</strong> · {a.rotulo}
+                      {a.data ? ` · ${formatar(a.data)}` : ""}
+                    </span>
+                    <a className="btn-dl btn-sec" href={a.href} target="_blank" rel="noopener noreferrer">Baixar</a>
+                  </div>
+                ))}
+              </div>
+            );
+          })
         )}
       </div>
 
