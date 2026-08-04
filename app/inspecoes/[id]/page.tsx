@@ -15,6 +15,7 @@ import { podeAprovarColeta } from "@/lib/asp/permissoes";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
+import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
 
 interface Projeto {
   id: string;
@@ -86,6 +87,7 @@ export default function InspecaoDetalhePage() {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [funcao, setFuncao] = useState<string | null>(null);
+  const [nomeUsuarioAtual, setNomeUsuarioAtual] = useState("");
   const [aprovandoColeta, setAprovandoColeta] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
@@ -165,9 +167,10 @@ export default function InspecaoDetalhePage() {
     const supabase = getSupabaseBrowserClient();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
-      const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao").eq("id", data.user.id).single();
+      const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao, nome_completo").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
       setFuncao((p as any)?.funcao ?? null);
+      setNomeUsuarioAtual((p as any)?.nome_completo || data.user.email || "");
     });
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
   }, [carregar]);
@@ -796,6 +799,14 @@ export default function InspecaoDetalhePage() {
           )}
         </div>
       </div>
+
+      {insp && (
+        <ChecklistEquipamentos
+          inspecaoId={id}
+          etapa={bloco}
+          nomeUsuario={nomeUsuarioAtual}
+        />
+      )}
 
       {/* Relatórios (Operações envia; Gerência aprova nas fases 5/9) */}
       <div className="card" style={{ marginTop: 16 }}>
