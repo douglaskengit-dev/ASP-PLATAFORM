@@ -11,6 +11,7 @@
  * guarda quem conferiu, quando e uma observação (avaria, nº de série). */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Modal from "./Modal";
+import AvisoCliente from "./AvisoCliente";
 
 interface Item {
   slug?: string;
@@ -27,11 +28,14 @@ const campo: React.CSSProperties = {
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 13,
 };
 
-export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario }: {
+export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, clienteId }: {
   inspecaoId: string;
   /** Etapa corrente da inspeção — define qual checklist é o principal. */
   etapa: "inspecao" | "execucao";
   nomeUsuario: string;
+  /** Cliente da inspeção — o aviso dele é repetido aqui, pois é na hora de
+   *  conferir os equipamentos que a exigência precisa ser lembrada. */
+  clienteId?: string | null;
 }) {
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [podeEditar, setPodeEditar] = useState(false);
@@ -172,6 +176,8 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario }
         procedimento e aceita itens avulsos.
       </p>
       {erro && <p className="erro-texto" style={{ margin: "6px 0 0" }}>{erro}</p>}
+
+      <AvisoCliente clienteId={clienteId} compacto />
 
       {!atual && !outro && <p className="vazio" style={{ margin: "8px 0 0" }}>Nenhum checklist montado.</p>}
       {atual && render(atual, true)}

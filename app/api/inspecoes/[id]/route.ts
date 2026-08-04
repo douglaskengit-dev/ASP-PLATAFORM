@@ -49,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const supabase = getSupabaseRouteClient();
   const { data: inspecao, error } = await supabase
     .from("gp_inspecoes")
-    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(razao_social))")
+    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(id, razao_social))")
     .eq("id", params.id)
     .single();
 

@@ -16,13 +16,14 @@ import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarMode
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
+import AvisoCliente from "@/app/components/AvisoCliente";
 
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
   pedido_compra: string | null;
   endereco: string | null;
-  cliente: { razao_social: string } | null;
+  cliente: { id?: string; razao_social: string } | null;
 }
 interface Inspecao {
   id: string;
@@ -632,6 +633,8 @@ export default function InspecaoDetalhePage() {
         </Link>
       )}
 
+      <AvisoCliente clienteId={insp.projeto?.cliente?.id} />
+
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div>
@@ -805,6 +808,7 @@ export default function InspecaoDetalhePage() {
           inspecaoId={id}
           etapa={bloco}
           nomeUsuario={nomeUsuarioAtual}
+          clienteId={insp.projeto?.cliente?.id}
         />
       )}
 
