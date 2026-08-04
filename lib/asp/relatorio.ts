@@ -265,6 +265,135 @@ function paragrafoAbnt(texto: string): string {
   ).join("");
 }
 
+
+/** Formatação herdada ao percorrer o HTML do editor. */
+interface Fmt { b?: boolean; i?: boolean; u?: boolean; fonte?: string; tam?: number; cor?: string }
+
+/** Propriedades de run (<w:rPr>) a partir da formatação acumulada. */
+function rPr(f: Fmt): string {
+  const fonte = f.fonte || "Arial";
+  const meiaPt = Math.round((f.tam || 12) * 2);      // Word usa meio-pontos
+  return "<w:rPr>" +
+    `<w:rFonts w:ascii="${esc(fonte)}" w:hAnsi="${esc(fonte)}"/>` +
+    (f.b ? "<w:b/>" : "") + (f.i ? "<w:i/>" : "") + (f.u ? '<w:u w:val="single"/>' : "") +
+    (f.cor ? `<w:color w:val="${f.cor.replace("#", "").slice(0, 6)}"/>` : "") +
+    `<w:sz w:val="${meiaPt}"/><w:szCs w:val="${meiaPt}"/>` +
+    "</w:rPr>";
+}
+
+/** Converte "rgb(r, g, b)" ou "#rgb" em hexadecimal de 6 dígitos. */
+function corHex(v?: string | null): string | undefined {
+  if (!v) return undefined;
+  const m = v.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (m) return [1, 2, 3].map((i) => Number(m[i]).toString(16).padStart(2, "0")).join("");
+  const h = v.trim().replace("#", "");
+  if (/^[0-9a-f]{6}$/i.test(h)) return h;
+  if (/^[0-9a-f]{3}$/i.test(h)) return h.split("").map((c) => c + c).join("");
+  return undefined;
+}
+
+/**
+ * Converte o HTML do editor em parágrafos do Word.
+ *
+ * Suporta negrito, itálico, sublinhado, família e tamanho da fonte, cor,
+ * alinhamento e listas. Blocos (p, div, li) viram <w:p>; a formatação inline
+ * é acumulada e aplicada em cada <w:r>. Texto sem marcação nenhuma cai no
+ * formato ABNT padrão, preservando o comportamento anterior.
+ */
+function htmlParaParagrafos(html: string): string {
+  if (!html || !html.trim()) return "";
+  if (!/<[a-z][\s\S]*>/i.test(html)) return paragrafoAbnt(html);   // texto puro
+  if (typeof DOMParser === "undefined") return paragrafoAbnt(html.replace(/<[^>]+>/g, ""));
+
+  const doc = new DOMParser().parseFromString(`<div id="raiz">${html}</div>`, "text/html");
+  const raiz = doc.getElementById("raiz");
+  if (!raiz) return "";
+
+  const BLOCOS = new Set(["P", "DIV", "LI", "H1", "H2", "H3", "H4", "BLOCKQUOTE"]);
+  let saida = "";
+
+  const paragrafo = (runs: string, alinha?: string, lista?: "ul" | "ol") => {
+    if (!runs.trim()) return;
+    const jc = alinha === "center" ? "center" : alinha === "right" ? "right"
+      : alinha === "left" ? "left" : "both";
+    saida += "<w:p><w:pPr>" +
+      '<w:spacing w:line="360" w:lineRule="auto" w:after="0"/>' +
+      (lista ? '<w:ind w:left="709" w:hanging="283"/>' : '<w:ind w:firstLine="709"/>') +
+      `<w:jc w:val="${jc}"/></w:pPr>` + runs + "</w:p>";
+  };
+
+  const estilo = (el: HTMLElement, f: Fmt): Fmt => {
+    const st = el.style;
+    const tag = el.tagName;
+    const nova: Fmt = { ...f };
+    if (tag === "B" || tag === "STRONG" || st.fontWeight === "bold" || Number(st.fontWeight) >= 600) nova.b = true;
+    if (tag === "I" || tag === "EM" || st.fontStyle === "italic") nova.i = true;
+    if (tag === "U" || (st.textDecoration || "").includes("underline")) nova.u = true;
+    const fam = st.fontFamily || el.getAttribute("face") || "";
+    if (fam) nova.fonte = fam.split(",")[0].replace(/["']/g, "").trim();
+    const tam = st.fontSize;
+    if (tam && tam.endsWith("pt")) nova.tam = parseFloat(tam);
+    else if (tam && tam.endsWith("px")) nova.tam = Math.round(parseFloat(tam) * 0.75);
+    const c = corHex(st.color || el.getAttribute("color"));
+    if (c) nova.cor = c;
+    return nova;
+  };
+
+  /** Junta os runs de um bloco, descendo pelos filhos inline. */
+  const runsDe = (no: Node, f: Fmt): string => {
+    let out = "";
+    no.childNodes.forEach((filho) => {
+      if (filho.nodeType === 3) {
+        const t = (filho.textContent || "").replace(/\s+/g, " ");
+        if (t.trim()) out += `<w:r>${rPr(f)}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
+      } else if (filho.nodeType === 1) {
+        const el = filho as HTMLElement;
+        if (el.tagName === "BR") { out += `<w:r>${rPr(f)}<w:br/></w:r>`; return; }
+        if (BLOCOS.has(el.tagName)) return;            // tratado como bloco próprio
+        out += runsDe(el, estilo(el, f));
+      }
+    });
+    return out;
+  };
+
+  /** Percorre a árvore emitindo um parágrafo por bloco. */
+  const percorrer = (no: Node, f: Fmt, lista?: "ul" | "ol", indice = { n: 0 }) => {
+    const filhos = Array.from(no.childNodes);
+    const temBloco = filhos.some((c) => c.nodeType === 1 && BLOCOS.has((c as HTMLElement).tagName));
+    if (!temBloco) {
+      const el = no as HTMLElement;
+      paragrafo(runsDe(no, f), el.style?.textAlign, lista);
+      return;
+    }
+    filhos.forEach((c) => {
+      if (c.nodeType === 3) {
+        const t = (c.textContent || "").trim();
+        if (t) paragrafo(`<w:r>${rPr(f)}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`, undefined, lista);
+        return;
+      }
+      if (c.nodeType !== 1) return;
+      const el = c as HTMLElement;
+      const nf = estilo(el, f);
+      if (el.tagName === "UL" || el.tagName === "OL") {
+        percorrer(el, nf, el.tagName === "UL" ? "ul" : "ol", { n: 0 });
+        return;
+      }
+      if (el.tagName === "LI") {
+        indice.n++;
+        const marca = lista === "ol" ? `${indice.n}. ` : "• ";
+        paragrafo(`<w:r>${rPr(nf)}<w:t xml:space="preserve">${marca}</w:t></w:r>` + runsDe(el, nf),
+          el.style.textAlign, lista);
+        return;
+      }
+      if (BLOCOS.has(el.tagName)) { percorrer(el, nf, lista, indice); return; }
+      paragrafo(runsDe(el, nf), el.style.textAlign, lista);
+    });
+  };
+
+  percorrer(raiz, {}, undefined);
+  return saida;
+}
+
 /** Legenda de figura: Arial 10, centralizada, entrelinha simples. */
 function legendaAbnt(texto: string, antes = false): string {
   return '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" ' +
@@ -518,10 +647,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const textoDoTopico = new Map<number, string>();
   const addTexto = (n: number, s: string) =>
     textoDoTopico.set(n, (textoDoTopico.get(n) || "") + s);
-  if (dados.metodos) addTexto(3, paragrafoAbnt(dados.metodos));
-  if (dados.equipamentos) addTexto(4, paragrafoAbnt(dados.equipamentos));
-  if (dados.observacoes) addTexto(9, paragrafoAbnt(dados.observacoes));
-  if (dados.conclusao) addTexto(10, paragrafoAbnt(dados.conclusao));
+  if (dados.metodos) addTexto(3, htmlParaParagrafos(dados.metodos));
+  if (dados.equipamentos) addTexto(4, htmlParaParagrafos(dados.equipamentos));
+  if (dados.observacoes) addTexto(9, htmlParaParagrafos(dados.observacoes));
+  if (dados.conclusao) addTexto(10, htmlParaParagrafos(dados.conclusao));
 
   // Figuras: legenda ABNT acima ("Figura N – …") e fonte abaixo. As que têm
   // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.

@@ -8,6 +8,7 @@
  * A capa é o tópico 0 e também pode ser omitida. */
 import { useMemo, useState } from "react";
 import Modal from "./Modal";
+import EditorTexto from "./EditorTexto";
 import {
   gerarRelatorioDocx, TOPICOS_PADRAO, TOPICO_CAPA,
   type DadosRelatorio, type ImagemRelatorio,
@@ -423,7 +424,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>Diâmetro</label><input style={campo} value={d.diametro || ""} onChange={set("diametro")} /></div>
           </div>
           <div><label style={rotulo}>Observações</label>
-            <textarea style={{ ...campo, minHeight: 56 }} value={d.observacoesTanque || ""} onChange={set("observacoesTanque")} /></div>
+            <EditorTexto valor={d.observacoesTanque || ""} onChange={(v) => setD((x) => ({ ...x, observacoesTanque: v }))} altura={70} /></div>
         </> })}
 
         {Topico({ numero: 3, titulo: "Métodos", children: <>
@@ -435,8 +436,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               {proc ? `Baseada em ${proc.codigo} — ${proc.nome}.` : "Escolha o procedimento na capa para habilitar a sugestão."}
             </span>
           </div>
-          <textarea style={{ ...campo, minHeight: 110 }} value={d.metodos || ""} onChange={set("metodos")}
-            placeholder="Descreva o método de inspeção empregado." />
+          <EditorTexto valor={d.metodos || ""} onChange={(v) => setD((x) => ({ ...x, metodos: v }))} altura={130} />
         </> })}
 
         {Topico({ numero: 4, titulo: "Equipamentos utilizados", children: <>
@@ -453,7 +453,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             ))}
           </div>
           <label style={rotulo}>Texto que irá para o relatório</label>
-          <textarea style={{ ...campo, minHeight: 80 }} value={d.equipamentos || ""} onChange={set("equipamentos")} />
+          <EditorTexto valor={d.equipamentos || ""} onChange={(v) => setD((x) => ({ ...x, equipamentos: v }))} altura={100} />
         </> })}
 
         {Topico({ numero: 5, titulo: "Equipe de trabalho", children: <>
@@ -519,11 +519,11 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {Topico({ numero: 8, titulo: "Imagens do fundo do tanque", maxFotos: 5, legendaFoto: "Imagem do fundo do tanque" })}
 
         {Topico({ numero: 9, titulo: "Observações", maxFotos: 5, legendaFoto: "Observação", children: <>
-          <textarea style={{ ...campo, minHeight: 60 }} value={d.observacoes || ""} onChange={set("observacoes")} />
+          <EditorTexto valor={d.observacoes || ""} onChange={(v) => setD((x) => ({ ...x, observacoes: v }))} altura={90} />
         </> })}
 
         {Topico({ numero: 10, titulo: "Conclusão", children: <>
-          <textarea style={{ ...campo, minHeight: 76 }} value={d.conclusao || ""} onChange={set("conclusao")} />
+          <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
         </> })}
 
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
