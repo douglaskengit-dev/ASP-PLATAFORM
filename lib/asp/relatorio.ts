@@ -82,8 +82,9 @@ export interface DadosRelatorio {
   equipamentos?: string;
   equipe?: string;
   volumeSedimento?: string;
-  observacoes?: string;
-  conclusao?: string;
+  fotosInternas?: string;   // texto do tópico 8
+  conclusao?: string;       // tópico 9
+  recomendacoes?: string;   // tópico 10
   // Bloco de assinaturas (fim do documento)
   elaboradoPor?: string;   // usuário de Operações
   revisadoPor?: string;    // usuário da Gerência
@@ -517,9 +518,9 @@ export const TOPICOS_PADRAO: { numero: number; titulo: string }[] = [
   { numero: 5, titulo: "Equipe de trabalho" },
   { numero: 6, titulo: "Dados reservatório" },
   { numero: 7, titulo: "Batimetria" },
-  { numero: 8, titulo: "Imagens do fundo do tanque" },
-  { numero: 9, titulo: "Observações" },
-  { numero: 10, titulo: "Conclusão" },
+  { numero: 8, titulo: "Foto da Inspeção Visual Interna" },
+  { numero: 9, titulo: "Conclusão" },
+  { numero: 10, titulo: "Recomendações" },
 ];
 
 /** Detecta o número do tópico de nível 1 num bloco ("7. Batimetria:" → 7). */
@@ -534,7 +535,7 @@ function numeroTopico(texto: string): number | null {
 export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
 
-  const resp = await fetch("/templates/relatorio-asp-v2.docx");
+  const resp = await fetch("/templates/relatorio-asp-v3.docx");
   if (!resp.ok) throw new Error("Não foi possível carregar o modelo do relatório.");
   const zip = await JSZip.loadAsync(await resp.arrayBuffer());
 
@@ -649,8 +650,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     textoDoTopico.set(n, (textoDoTopico.get(n) || "") + s);
   if (dados.metodos) addTexto(3, htmlParaParagrafos(dados.metodos));
   if (dados.equipamentos) addTexto(4, htmlParaParagrafos(dados.equipamentos));
-  if (dados.observacoes) addTexto(9, htmlParaParagrafos(dados.observacoes));
-  if (dados.conclusao) addTexto(10, htmlParaParagrafos(dados.conclusao));
+  if (dados.fotosInternas) addTexto(8, htmlParaParagrafos(dados.fotosInternas));
+  if (dados.conclusao) addTexto(9, htmlParaParagrafos(dados.conclusao));
+  if (dados.recomendacoes) addTexto(10, htmlParaParagrafos(dados.recomendacoes));
 
   // Figuras: legenda ABNT acima ("Figura N – …") e fonte abaixo. As que têm
   // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.

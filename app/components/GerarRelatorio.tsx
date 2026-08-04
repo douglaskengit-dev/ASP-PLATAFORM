@@ -151,7 +151,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
         equipe: nomesEquipe || d.equipe,
-        volumeSedimento: d.volumeSedimento, observacoes: d.observacoes, conclusao: d.conclusao,
+        volumeSedimento: d.volumeSedimento,
+        fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
         topicos: TODOS_TOPICOS.map((t) => ({ ...t, visivel: ativo(t.numero) })),
         imagens: imgs,
@@ -516,14 +517,16 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           </p>
         </> })}
 
-        {Topico({ numero: 8, titulo: "Imagens do fundo do tanque", maxFotos: 5, legendaFoto: "Imagem do fundo do tanque" })}
-
-        {Topico({ numero: 9, titulo: "Observações", maxFotos: 5, legendaFoto: "Observação", children: <>
-          <EditorTexto valor={d.observacoes || ""} onChange={(v) => setD((x) => ({ ...x, observacoes: v }))} altura={90} />
+        {Topico({ numero: 8, titulo: "Foto da Inspeção Visual Interna", maxFotos: 5, legendaFoto: "Inspeção visual interna", children: <>
+          <EditorTexto valor={d.fotosInternas || ""} onChange={(v) => setD((x) => ({ ...x, fotosInternas: v }))} altura={80} />
         </> })}
 
-        {Topico({ numero: 10, titulo: "Conclusão", children: <>
+        {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
+        </> })}
+
+        {Topico({ numero: 10, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
+          <EditorTexto valor={d.recomendacoes || ""} onChange={(v) => setD((x) => ({ ...x, recomendacoes: v }))} altura={110} />
         </> })}
 
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
