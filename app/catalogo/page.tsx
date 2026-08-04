@@ -2,20 +2,36 @@
 
 /** ASP — Catálogo: procedimentos e equipamentos usados no Relatório Técnico.
  *
- * Substitui a lista que antes era fixa no código. O procedimento sugere os
- * equipamentos e o texto de métodos; cada equipamento tem sua ficha de
- * especificações em pares rótulo/valor, que é como elas saem no relatório. */
+ * A aba mostra apenas as listas; criar e editar acontece em modal, para a
+ * tela não virar um formulário gigante. O procedimento sugere equipamentos e
+ * o texto de métodos; cada equipamento tem ficha de especificações (pares
+ * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
+import Modal from "@/app/components/Modal";
 
 interface Espec { rotulo: string; valor: string }
-interface Equipamento { id: string; slug: string; nome: string; especificacoes: Espec[]; ordem: number }
-interface Procedimento { id: string; codigo: string; nome: string; metodos: string | null; equipamentos: string[]; ordem: number }
+interface Foto { caminho: string; legenda?: string }
+interface Equipamento {
+  id: string; slug: string; nome: string;
+  especificacoes: Espec[]; fotos: Foto[]; ordem: number;
+}
+interface Procedimento {
+  id: string; codigo: string; nome: string; metodos: string | null;
+  equipamentos: string[]; ordem: number;
+}
 
 const campo: React.CSSProperties = {
   width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid var(--borda)",
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
 };
 const rot: React.CSSProperties = { fontWeight: 600, fontSize: 12.5, display: "block", marginBottom: 4 };
+const grade: React.CSSProperties = {
+  display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10,
+};
+const linha: React.CSSProperties = {
+  display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
+  padding: "10px 0", borderBottom: "1px solid var(--borda)", flexWrap: "wrap",
+};
 
 export default function CatalogoPage() {
   const [equipamentos, setEquipamentos] = useState<Equipamento[]>([]);
@@ -23,13 +39,17 @@ export default function CatalogoPage() {
   const [podeEditar, setPodeEditar] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [salvando, setSalvando] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [enviandoFoto, setEnviandoFoto] = useState(false);
+  // Item aberto no modal (cópia local — só grava ao salvar).
+  const [edEquip, setEdEquip] = useState<Equipamento | null>(null);
+  const [edProc, setEdProc] = useState<Procedimento | null>(null);
 
   const carregar = useCallback(() => {
-    fetch("/api/catalogo").then((r) => r.ok ? r.json() : { equipamentos: [], procedimentos: [] })
-      .then((d) => {
-        setEquipamentos(d.equipamentos || []);
-        setProcedimentos(d.procedimentos || []);
+    fetch("/api/catalogo").then((r) => r.ok ? r.json() : {})
+      .then((d: any) => {
+        setEquipamentos((d.equipamentos || []).map((e: any) => ({ ...e, especificacoes: e.especificacoes || [], fotos: e.fotos || [] })));
+        setProcedimentos((d.procedimentos || []).map((p: any) => ({ ...p, equipamentos: p.equipamentos || [] })));
         setPodeEditar(!!d.podeEditar);
       })
       .finally(() => setCarregando(false));
@@ -43,44 +63,58 @@ export default function CatalogoPage() {
       ...(corpo ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) } : {}),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) { setErro(d?.erro || "Falha ao salvar."); return null; }
+    if (!res.ok) { setErro(d?.erro || "Falha na operação."); return null; }
     return d;
   }
 
-  async function salvarEquip(e: Equipamento) {
-    setSalvando(e.id);
-    await api("PATCH", { tipo: "equipamento", id: e.id, dados: { nome: e.nome, slug: e.slug, especificacoes: e.especificacoes, ordem: e.ordem } });
-    setSalvando(null); carregar();
+  async function salvar(tipo: "equipamento" | "procedimento", item: any) {
+    setSalvando(true);
+    const dados = tipo === "equipamento"
+      ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
+      : { codigo: item.codigo, nome: item.nome, metodos: item.metodos, equipamentos: item.equipamentos, ordem: item.ordem };
+    const r = item.id
+      ? await api("PATCH", { tipo, id: item.id, dados })
+      : await api("POST", { tipo, dados });
+    setSalvando(false);
+    if (r) { setEdEquip(null); setEdProc(null); carregar(); }
   }
-  async function salvarProc(p: Procedimento) {
-    setSalvando(p.id);
-    await api("PATCH", { tipo: "procedimento", id: p.id, dados: { codigo: p.codigo, nome: p.nome, metodos: p.metodos, equipamentos: p.equipamentos, ordem: p.ordem } });
-    setSalvando(null); carregar();
-  }
+
   async function excluir(tipo: string, id: string, nome: string) {
     if (!confirm(`Excluir "${nome}" do catálogo?`)) return;
     await api("DELETE", undefined, `?tipo=${tipo}&id=${id}`);
     carregar();
   }
-  async function novoEquip() {
-    await api("POST", { tipo: "equipamento", dados: { slug: `equip-${Date.now()}`, nome: "Novo equipamento", especificacoes: [], ordem: equipamentos.length + 1 } });
-    carregar();
-  }
-  async function novoProc() {
-    await api("POST", { tipo: "procedimento", dados: { codigo: `PR-${Date.now().toString().slice(-5)}`, nome: "Novo procedimento", metodos: "", equipamentos: [], ordem: procedimentos.length + 1 } });
-    carregar();
+
+  async function enviarFoto(arquivo: File) {
+    if (!edEquip) return;
+    setEnviandoFoto(true);
+    setErro(null);
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", arquivo);
+      fd.append("slug", edEquip.slug || "equipamento");
+      const res = await fetch("/api/catalogo/foto", { method: "POST", body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(d?.erro || "Falha ao enviar a foto."); return; }
+      setEdEquip({ ...edEquip, fotos: [...(edEquip.fotos || []), { caminho: d.caminho, legenda: "" }] });
+    } finally {
+      setEnviandoFoto(false);
+    }
   }
 
-  const mudaEquip = (id: string, patch: Partial<Equipamento>) =>
-    setEquipamentos((p) => p.map((e) => e.id === id ? { ...e, ...patch } : e));
-  const mudaProc = (id: string, patch: Partial<Procedimento>) =>
-    setProcedimentos((p) => p.map((x) => x.id === id ? { ...x, ...patch } : x));
+  const novoEquip = (): Equipamento => ({
+    id: "", slug: `equip-${Date.now()}`, nome: "", especificacoes: [], fotos: [],
+    ordem: equipamentos.length + 1,
+  });
+  const novoProc = (): Procedimento => ({
+    id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
+  });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
 
   return (
     <div className="page-larga">
-      <header className="topo" style={{ background: "none", padding: 0, marginBottom: 16 }}>
+      <header style={{ marginBottom: 16 }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Catálogo</h1>
         <p className="detalhe" style={{ margin: "4px 0 0" }}>
           Procedimentos e equipamentos usados no Relatório Técnico. O procedimento sugere os
@@ -93,44 +127,28 @@ export default function CatalogoPage() {
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <h3 style={{ margin: 0 }}>Procedimentos ({procedimentos.length})</h3>
-          {podeEditar && <button className="btn-azul" onClick={novoProc}>+ Procedimento</button>}
+          {podeEditar && <button className="btn-azul" onClick={() => setEdProc(novoProc())}>+ Procedimento</button>}
         </div>
-        {procedimentos.map((p) => (
-          <div key={p.id} style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: 12, marginTop: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              <div><label style={rot}>Código</label>
-                <input style={campo} value={p.codigo} disabled={!podeEditar}
-                  onChange={(e) => mudaProc(p.id, { codigo: e.target.value })} /></div>
-              <div><label style={rot}>Nome</label>
-                <input style={campo} value={p.nome} disabled={!podeEditar}
-                  onChange={(e) => mudaProc(p.id, { nome: e.target.value })} /></div>
+        {procedimentos.length === 0 ? (
+          <p className="vazio" style={{ margin: "10px 0 0" }}>Nenhum procedimento cadastrado.</p>
+        ) : procedimentos.map((p) => (
+          <div key={p.id} style={linha}>
+            <div>
+              <strong style={{ color: "var(--texto)" }}>{p.codigo}</strong> — {p.nome}
+              <span className="detalhe" style={{ display: "block" }}>
+                {(p.equipamentos || []).length} equipamento(s) previsto(s)
+                {p.metodos ? " · texto de métodos definido" : " · sem texto de métodos"}
+              </span>
             </div>
-            <label style={{ ...rot, marginTop: 10 }}>Texto sugerido para “Métodos”</label>
-            <textarea style={{ ...campo, minHeight: 90 }} value={p.metodos || ""} disabled={!podeEditar}
-              onChange={(e) => mudaProc(p.id, { metodos: e.target.value })} />
-            <label style={{ ...rot, marginTop: 10 }}>Equipamentos previstos</label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 6 }}>
-              {equipamentos.map((e) => (
-                <label key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
-                  <input type="checkbox" disabled={!podeEditar} checked={(p.equipamentos || []).includes(e.slug)}
-                    onChange={(ev) => mudaProc(p.id, {
-                      equipamentos: ev.target.checked
-                        ? [...(p.equipamentos || []), e.slug]
-                        : (p.equipamentos || []).filter((s) => s !== e.slug),
-                    })} />
-                  <span>{e.nome}</span>
-                </label>
-              ))}
-            </div>
-            {podeEditar && (
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+            <span style={{ display: "flex", gap: 6 }}>
+              <button className="btn-dl btn-sec" onClick={() => setEdProc({ ...p })}>
+                {podeEditar ? "Editar" : "Ver"}
+              </button>
+              {podeEditar && (
                 <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                   onClick={() => excluir("procedimento", p.id, p.nome)}>Excluir</button>
-                <button className="btn-azul" disabled={salvando === p.id} onClick={() => salvarProc(p)}>
-                  {salvando === p.id ? "Salvando…" : "Salvar"}
-                </button>
-              </div>
-            )}
+              )}
+            </span>
           </div>
         ))}
       </div>
@@ -138,51 +156,155 @@ export default function CatalogoPage() {
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <h3 style={{ margin: 0 }}>Equipamentos ({equipamentos.length})</h3>
-          {podeEditar && <button className="btn-azul" onClick={novoEquip}>+ Equipamento</button>}
+          {podeEditar && <button className="btn-azul" onClick={() => setEdEquip(novoEquip())}>+ Equipamento</button>}
         </div>
-        {equipamentos.map((e) => (
-          <div key={e.id} style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: 12, marginTop: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              <div><label style={rot}>Nome</label>
-                <input style={campo} value={e.nome} disabled={!podeEditar}
-                  onChange={(ev) => mudaEquip(e.id, { nome: ev.target.value })} /></div>
-              <div><label style={rot}>Identificador</label>
-                <input style={campo} value={e.slug} disabled={!podeEditar}
-                  onChange={(ev) => mudaEquip(e.id, { slug: ev.target.value })} /></div>
-            </div>
-
-            <label style={{ ...rot, marginTop: 10 }}>Especificações (rótulo e valor)</label>
-            {(e.especificacoes || []).map((sp, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 6 }}>
-                <input style={campo} placeholder="Rótulo (ex.: Profundidade máxima)" value={sp.rotulo} disabled={!podeEditar}
-                  onChange={(ev) => mudaEquip(e.id, { especificacoes: e.especificacoes.map((x, k) => k === i ? { ...x, rotulo: ev.target.value } : x) })} />
-                <input style={campo} placeholder="Valor (ex.: 152 m)" value={sp.valor} disabled={!podeEditar}
-                  onChange={(ev) => mudaEquip(e.id, { especificacoes: e.especificacoes.map((x, k) => k === i ? { ...x, valor: ev.target.value } : x) })} />
-                {podeEditar && (
-                  <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626", maxWidth: 110 }}
-                    onClick={() => mudaEquip(e.id, { especificacoes: e.especificacoes.filter((_, k) => k !== i) })}>Remover</button>
-                )}
+        {equipamentos.length === 0 ? (
+          <p className="vazio" style={{ margin: "10px 0 0" }}>Nenhum equipamento cadastrado.</p>
+        ) : equipamentos.map((e) => (
+          <div key={e.id} style={linha}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {(e.fotos || [])[0] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={`/api/catalogo/foto?caminho=${encodeURIComponent(e.fotos[0].caminho)}`} alt=""
+                  style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, border: "1px solid var(--borda)" }} />
+              ) : (
+                <span style={{ width: 44, height: 44, borderRadius: 6, border: "1px dashed var(--borda)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🛠</span>
+              )}
+              <div>
+                <strong style={{ color: "var(--texto)" }}>{e.nome || "(sem nome)"}</strong>
+                <span className="detalhe" style={{ display: "block" }}>
+                  {(e.especificacoes || []).length} especificação(ões) · {(e.fotos || []).length} foto(s)
+                </span>
               </div>
-            ))}
-            {podeEditar && (
-              <button className="btn-dl btn-sec"
-                onClick={() => mudaEquip(e.id, { especificacoes: [...(e.especificacoes || []), { rotulo: "", valor: "" }] })}>
-                + Linha de especificação
+            </div>
+            <span style={{ display: "flex", gap: 6 }}>
+              <button className="btn-dl btn-sec" onClick={() => setEdEquip({ ...e })}>
+                {podeEditar ? "Editar" : "Ver"}
               </button>
-            )}
-
-            {podeEditar && (
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+              {podeEditar && (
                 <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                   onClick={() => excluir("equipamento", e.id, e.nome)}>Excluir</button>
-                <button className="btn-azul" disabled={salvando === e.id} onClick={() => salvarEquip(e)}>
-                  {salvando === e.id ? "Salvando…" : "Salvar"}
-                </button>
-              </div>
-            )}
+              )}
+            </span>
           </div>
         ))}
       </div>
+
+      {edProc && (
+        <Modal titulo={edProc.id ? "Editar procedimento" : "Novo procedimento"} onFechar={() => setEdProc(null)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={grade}>
+              <div><label style={rot}>Código *</label>
+                <input style={campo} value={edProc.codigo} disabled={!podeEditar}
+                  onChange={(ev) => setEdProc({ ...edProc, codigo: ev.target.value })} placeholder="ex.: PO 011" /></div>
+              <div><label style={rot}>Nome</label>
+                <input style={campo} value={edProc.nome} disabled={!podeEditar}
+                  onChange={(ev) => setEdProc({ ...edProc, nome: ev.target.value })} /></div>
+            </div>
+            <div><label style={rot}>Texto sugerido para “Métodos”</label>
+              <textarea style={{ ...campo, minHeight: 110 }} value={edProc.metodos || ""} disabled={!podeEditar}
+                onChange={(ev) => setEdProc({ ...edProc, metodos: ev.target.value })} /></div>
+            <div>
+              <label style={rot}>Equipamentos previstos</label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 6 }}>
+                {equipamentos.map((e) => (
+                  <label key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                    <input type="checkbox" disabled={!podeEditar} checked={edProc.equipamentos.includes(e.slug)}
+                      onChange={(ev) => setEdProc({
+                        ...edProc,
+                        equipamentos: ev.target.checked
+                          ? [...edProc.equipamentos, e.slug]
+                          : edProc.equipamentos.filter((s) => s !== e.slug),
+                      })} />
+                    <span>{e.nome}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setEdProc(null)}>Fechar</button>
+              {podeEditar && (
+                <button className="btn-azul" disabled={salvando || !edProc.codigo.trim()}
+                  onClick={() => salvar("procedimento", edProc)}>{salvando ? "Salvando…" : "Salvar"}</button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {edEquip && (
+        <Modal titulo={edEquip.id ? "Editar equipamento" : "Novo equipamento"} largo onFechar={() => setEdEquip(null)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={grade}>
+              <div><label style={rot}>Nome *</label>
+                <input style={campo} value={edEquip.nome} disabled={!podeEditar}
+                  onChange={(ev) => setEdEquip({ ...edEquip, nome: ev.target.value })}
+                  placeholder="ex.: Submarino para a Batimetria" /></div>
+              <div><label style={rot}>Identificador</label>
+                <input style={campo} value={edEquip.slug} disabled={!podeEditar}
+                  onChange={(ev) => setEdEquip({ ...edEquip, slug: ev.target.value })} /></div>
+            </div>
+
+            <div>
+              <label style={rot}>Especificações (rótulo e valor)</label>
+              {(edEquip.especificacoes || []).map((sp, i) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 6 }}>
+                  <input style={campo} placeholder="Rótulo (ex.: Profundidade máxima)" value={sp.rotulo} disabled={!podeEditar}
+                    onChange={(ev) => setEdEquip({ ...edEquip, especificacoes: edEquip.especificacoes.map((x, k) => k === i ? { ...x, rotulo: ev.target.value } : x) })} />
+                  <input style={campo} placeholder="Valor (ex.: 152 m)" value={sp.valor} disabled={!podeEditar}
+                    onChange={(ev) => setEdEquip({ ...edEquip, especificacoes: edEquip.especificacoes.map((x, k) => k === i ? { ...x, valor: ev.target.value } : x) })} />
+                  {podeEditar && (
+                    <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626", maxWidth: 110 }}
+                      onClick={() => setEdEquip({ ...edEquip, especificacoes: edEquip.especificacoes.filter((_, k) => k !== i) })}>Remover</button>
+                  )}
+                </div>
+              ))}
+              {podeEditar && (
+                <button className="btn-dl btn-sec"
+                  onClick={() => setEdEquip({ ...edEquip, especificacoes: [...(edEquip.especificacoes || []), { rotulo: "", valor: "" }] })}>
+                  + Linha de especificação
+                </button>
+              )}
+            </div>
+
+            <div>
+              <label style={rot}>Fotos do equipamento</label>
+              {podeEditar && (
+                <input type="file" accept="image/png,image/jpeg,image/webp" disabled={enviandoFoto}
+                  onChange={(ev) => { const f = ev.target.files?.[0]; if (f) enviarFoto(f); ev.target.value = ""; }} />
+              )}
+              {enviandoFoto && <span className="detalhe"> enviando…</span>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginTop: 8 }}>
+                {(edEquip.fotos || []).map((f, i) => (
+                  <div key={i} style={{ border: "1px solid var(--borda)", borderRadius: 8, padding: 6 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/catalogo/foto?caminho=${encodeURIComponent(f.caminho)}`} alt={f.legenda || ""}
+                      style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 6 }} />
+                    <input style={{ ...campo, marginTop: 6, fontSize: 12, padding: "6px 8px" }} placeholder="Legenda"
+                      value={f.legenda || ""} disabled={!podeEditar}
+                      onChange={(ev) => setEdEquip({ ...edEquip, fotos: edEquip.fotos.map((x, k) => k === i ? { ...x, legenda: ev.target.value } : x) })} />
+                    {podeEditar && (
+                      <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626", width: "100%", marginTop: 6 }}
+                        onClick={() => {
+                          fetch(`/api/catalogo/foto?caminho=${encodeURIComponent(f.caminho)}`, { method: "DELETE" }).catch(() => {});
+                          setEdEquip({ ...edEquip, fotos: edEquip.fotos.filter((_, k) => k !== i) });
+                        }}>Remover</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setEdEquip(null)}>Fechar</button>
+              {podeEditar && (
+                <button className="btn-azul" disabled={salvando || !edEquip.nome.trim()}
+                  onClick={() => salvar("equipamento", edEquip)}>{salvando ? "Salvando…" : "Salvar"}</button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

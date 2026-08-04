@@ -36,3 +36,4 @@ drop policy if exists gp_proc_write on public.gp_procedimentos;
 create policy gp_proc_write on public.gp_procedimentos for all to authenticated
   using (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'))
   with check (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'));
+alter table public.gp_equipamentos add column if not exists fotos jsonb not null default (chr(91)||chr(93))::jsonb;
