@@ -6,7 +6,7 @@
  * abaixo, os campos daquele tópico e o envio de fotos correspondente. Ao
  * desmarcar, a seção sai do documento e os números seguintes são reajustados.
  * A capa é o tópico 0 e também pode ser omitida. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
@@ -14,7 +14,7 @@ import {
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
-import { MATERIAIS_TANQUE, PROCEDIMENTOS, EQUIPAMENTOS, textoEquipamentos } from "@/lib/asp/procedimentos";
+import { MATERIAIS_TANQUE } from "@/lib/asp/procedimentos";
 
 export interface ColetaOpcao { id: string; criado_em: string; dados: any; aprovada_em?: string | null }
 
@@ -57,6 +57,24 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [coletaId, setColetaId] = useState<string>(
     (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || ""
   );
+  // Catálogo (procedimentos e equipamentos) vem do banco — aba Catálogo.
+  const [PROCEDIMENTOS, setProcedimentos] = useState<any[]>([]);
+  const [EQUIPAMENTOS, setEquipamentos] = useState<any[]>([]);
+  useEffect(() => {
+    fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
+      setProcedimentos(d.procedimentos || []);
+      setEquipamentos((d.equipamentos || []).map((e: any) => ({ ...e, id: e.slug })));
+    }).catch(() => {});
+  }, []);
+
+  /** Texto do tópico 4 a partir das fichas do catálogo (rótulo: valor). */
+  function textoEquipamentos(slugs: string[]): string {
+    return EQUIPAMENTOS.filter((e) => slugs.includes(e.slug)).map((e) => {
+      const linhas = (e.especificacoes || []).map((s: any) => `${s.rotulo}: ${s.valor}`).join("\n");
+      return linhas ? `${e.nome}\n${linhas}` : e.nome;
+    }).join("\n\n");
+  }
+
   const [gerando, setGerando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -93,14 +111,14 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
    *  de equipamentos (itens 3 e 4). */
   const proc = useMemo(
     () => PROCEDIMENTOS.find((p) => p.codigo === d.procedimento) || null,
-    [d.procedimento]
+    [d.procedimento, PROCEDIMENTOS]
   );
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
   function aplicarSugestao() {
     if (!proc) return;
-    setD((v) => ({ ...v, metodos: proc.metodos }));
+    setD((v) => ({ ...v, metodos: proc.metodos || "" }));
     setEquipIds(proc.equipamentos);
     setD((v) => ({ ...v, equipamentos: textoEquipamentos(proc.equipamentos) }));
   }
@@ -373,7 +391,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               <input style={campo} list="lista-procedimentos" value={d.procedimento || ""}
                 onChange={set("procedimento")} placeholder="ex.: PR-BAT-001" />
               <datalist id="lista-procedimentos">
-                {PROCEDIMENTOS.map((p) => <option key={p.codigo} value={p.codigo}>{p.nome}</option>)}
+                {PROCEDIMENTOS.map((p: any) => <option key={p.codigo} value={p.codigo}>{p.nome}</option>)}
               </datalist>
               <span className="detalhe">
                 {proc ? `${proc.nome} — sugere método e equipamentos nos tópicos 3 e 4.` : "Digite o código; o cadastro em banco ainda será mapeado."}
@@ -445,11 +463,11 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             Equipamentos {proc ? <span className="detalhe">— sugeridos por {proc.codigo}</span> : null}
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 6 }}>
-            {EQUIPAMENTOS.map((eq) => (
+            {EQUIPAMENTOS.map((eq: any) => (
               <label key={eq.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                <input type="checkbox" checked={equipIds.includes(eq.id)} style={{ marginTop: 3 }}
-                  onChange={(e) => alternarEquipamento(eq.id, e.target.checked)} />
-                <span>{eq.nome}<span className="detalhe" style={{ display: "block" }}>{eq.especificacao}</span></span>
+                <input type="checkbox" checked={equipIds.includes(eq.slug)} style={{ marginTop: 3 }}
+                  onChange={(e) => alternarEquipamento(eq.slug, e.target.checked)} />
+                <span>{eq.nome}<span className="detalhe" style={{ display: "block" }}>{(eq.especificacoes || []).length} especificação(ões)</span></span>
               </label>
             ))}
           </div>
