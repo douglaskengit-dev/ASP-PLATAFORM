@@ -62,7 +62,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const [coletas, agendamentos, relatorios, historico] = await Promise.all([
     supabase.from("gp_coletas").select("*").eq("inspecao_id", params.id).is("excluido_em", null).order("criado_em", { ascending: false }),
     supabase.from("gp_agendamentos").select("*").eq("inspecao_id", params.id).order("criado_em", { ascending: false }),
-    supabase.from("gp_relatorios").select("*").eq("inspecao_id", params.id).order("versao", { ascending: false }),
+    supabase.from("gp_relatorios").select("*").eq("inspecao_id", params.id).is("excluido_em", null).order("versao", { ascending: false }),
     supabase.from("gp_fase_historico").select("*, autor_perfil:gp_profiles!autor(nome_completo, email)").eq("inspecao_id", params.id).order("criado_em", { ascending: false }),
   ]);
 

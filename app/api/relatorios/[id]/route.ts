@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
-import { removerArquivos } from "@/lib/processos/arquivos";
 
 export const runtime = "nodejs";
 
@@ -60,8 +59,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ erro: "Só rascunhos podem ser excluídos." }, { status: 400 });
   }
 
-  const { error } = await supabase.from("gp_relatorios").delete().eq("id", params.id);
+  // Vai para a lixeira (recuperável por 30 dias) em vez de sumir na hora —
+  // o arquivo no storage só é apagado na exclusão definitiva.
+  const { error } = await supabase.from("gp_relatorios")
+    .update({ excluido_em: new Date().toISOString(), excluido_por: profile.id })
+    .eq("id", params.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  if (rel.arquivo_path) { try { await removerArquivos([rel.arquivo_path]); } catch { /* arquivo órfão não bloqueia */ } }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, lixeira: true });
 }

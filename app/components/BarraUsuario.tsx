@@ -83,6 +83,7 @@ export default function BarraUsuario() {
     { href: "/projetos", rotulo: "Projetos" },
     { href: "/arquivos", rotulo: "Arquivos" },
     { href: "/catalogo", rotulo: "Catálogo" },
+    { href: "/lixeira", rotulo: "Lixeira" },
   ];
 
   const linkEstilo = (ativo?: boolean): React.CSSProperties => ({
