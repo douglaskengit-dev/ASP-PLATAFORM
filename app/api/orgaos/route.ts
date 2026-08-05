@@ -14,6 +14,7 @@ interface NovoOrgaoBody {
   cnpj: string;
   cidade: string;
   uf: string;
+  endereco?: string;
   contatos?: NovoContatoInput[];
 }
 
@@ -125,6 +126,7 @@ export async function POST(req: NextRequest) {
       cnpj: cnpjDigitos,
       cidade: body.cidade.trim(),
       uf: body.uf.trim(),
+      endereco: (body.endereco || "").trim() || null,
     })
     .select("*")
     .single();

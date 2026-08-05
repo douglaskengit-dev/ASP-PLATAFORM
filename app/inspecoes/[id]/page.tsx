@@ -132,6 +132,9 @@ export default function InspecaoDetalhePage() {
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
   const [excluindoRelatorio, setExcluindoRelatorio] = useState<string | null>(null);
+  /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
+   *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
+  const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
   // Agendamento
   const [modalAgenda, setModalAgenda] = useState(false);
@@ -541,7 +544,7 @@ export default function InspecaoDetalhePage() {
     try {
       const res = await enviarArquivo(
         "/api/relatorios",
-        { inspecaoId: id, tipo: bloco, ...(rascunho ? { rascunho: "1" } : {}) },
+        { inspecaoId: id, tipo: tipoRelatorio || bloco, ...(rascunho ? { rascunho: "1" } : {}) },
         arquivo, "Relatório");
       if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
       if (!res.ok) { setErro(res.data?.erro || "Falha ao enviar o relatório."); return; }
@@ -818,9 +821,17 @@ export default function InspecaoDetalhePage() {
           <h3 style={{ margin: 0 }}>Relatórios ({relatorios.length})</h3>
           {podeRelatorio && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <select value={tipoRelatorio || bloco}
+                onChange={(e) => setTipoRelatorio(e.target.value as "inspecao" | "execucao")}
+                title="Tipo do relatório a enviar"
+                style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid var(--borda)",
+                  background: "var(--bg-card)", color: "var(--texto)", fontSize: 13 }}>
+                <option value="inspecao">Inspeção</option>
+                <option value="execucao">Execução</option>
+              </select>
               <button className="btn-azul btn-sec" onClick={() => setModalRelatorio(true)}>📄 Gerar relatório</button>
               <button className="btn-azul" onClick={() => relatorioInputRef.current?.click()} disabled={enviandoRelatorio}>
-                {enviandoRelatorio ? "Enviando…" : `Enviar relatório (${bloco})`}
+                {enviandoRelatorio ? "Enviando…" : "Enviar relatório"}
               </button>
               <input ref={relatorioInputRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) enviarRelatorio(f); }} />

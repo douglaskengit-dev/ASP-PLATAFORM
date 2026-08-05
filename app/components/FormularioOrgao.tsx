@@ -26,6 +26,7 @@ export default function FormularioOrgao({
   const [razaoSocial, setRazaoSocial] = useState("");
   const [cnpj, setCnpj] = useState("");
   const [cidade, setCidade] = useState("");
+  const [endereco, setEndereco] = useState("");
   const [uf, setUf] = useState("");
   const [contatos, setContatos] = useState<NovoContatoInput[]>([novoContatoVazio()]);
   const [salvando, setSalvando] = useState(false);
@@ -65,7 +66,7 @@ export default function FormularioOrgao({
       const resp = await fetch("/api/orgaos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, contatos: contatosPreenchidos }),
+        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, contatos: contatosPreenchidos }),
       });
       const dados = await resp.json();
       if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao cadastrar o órgão.");
@@ -102,6 +103,11 @@ export default function FormularioOrgao({
         <div className="field">
           <label>Cidade *</label>
           <input value={cidade} onChange={(e) => setCidade(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Endereço</label>
+          <input value={endereco} onChange={(e) => setEndereco(e.target.value)}
+            placeholder="Rua, número, bairro — usado como padrão nos projetos" />
         </div>
         <div className="field">
           <label>UF *</label>

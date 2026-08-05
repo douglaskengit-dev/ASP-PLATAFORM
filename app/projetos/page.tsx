@@ -45,6 +45,8 @@ interface Orgao {
   razao_social: string;
   cidade?: string | null;
   uf?: string | null;
+  /** Endereço padrão do cliente — herdado ao abrir projeto. */
+  endereco?: string | null;
 }
 
 const FORM_VAZIO = {
@@ -107,6 +109,18 @@ export default function ProjetosPage() {
 
   function atualizar(campo: keyof typeof FORM_VAZIO, valor: string) {
     setForm((f) => ({ ...f, [campo]: valor }));
+  }
+
+  /** Ao escolher o cliente, herda os dados que ele já tem cadastrados —
+   *  hoje o endereço. Só preenche campo vazio, para não sobrescrever o que
+   *  você digitou (a obra pode ficar em endereço diferente do cliente). */
+  function escolherCliente(clienteId: string) {
+    const c = orgaos.find((o) => o.id === clienteId) as any;
+    setForm((f) => ({
+      ...f,
+      clienteId,
+      endereco: f.endereco?.trim() ? f.endereco : (c?.endereco || ""),
+    }));
   }
 
   async function salvar() {
@@ -209,7 +223,7 @@ export default function ProjetosPage() {
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Cliente</label>
               <div style={{ display: "flex", gap: 8 }}>
-                <select value={form.clienteId} onChange={(e) => atualizar("clienteId", e.target.value)}>
+                <select value={form.clienteId} onChange={(e) => escolherCliente(e.target.value)}>
                   <option value="">— Selecione o cliente —</option>
                   {orgaos.map((o) => (
                     <option key={o.id} value={o.id}>
@@ -268,7 +282,7 @@ export default function ProjetosPage() {
               <FormularioOrgao
                 onCancelar={() => setCadastrarOrgao(false)}
                 onSucesso={(orgao) => {
-                  setOrgaos((prev) => [{ id: orgao.id, razao_social: orgao.razao_social, cidade: orgao.cidade, uf: orgao.uf }, ...prev]);
+                  setOrgaos((prev) => [{ id: orgao.id, razao_social: orgao.razao_social, cidade: orgao.cidade, uf: orgao.uf, endereco: (orgao as any).endereco }, ...prev]);
                   atualizar("clienteId", orgao.id);
                   setCadastrarOrgao(false);
                 }}
