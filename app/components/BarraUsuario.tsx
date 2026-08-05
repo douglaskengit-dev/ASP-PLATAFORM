@@ -118,8 +118,8 @@ export default function BarraUsuario() {
           zIndex: 50,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Link href="/" title="Voltar à página inicial" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0, flex: "1 1 auto" }}>
+          <Link href="/" title="Voltar à página inicial" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", flexShrink: 0 }}>
             <Image src="/assets/asp-badge.svg" alt="ASP" width={38} height={38} priority />
             <span className="barra-wordmark" style={{ fontFamily: "var(--fonte-titulo)", fontWeight: 800, letterSpacing: "0.14em", color: "#fff", fontSize: 10 }}>
               <span>ADVANCED</span>
@@ -195,7 +195,9 @@ export default function BarraUsuario() {
             >
               {(nome || email || "?").trim().charAt(0).toUpperCase()}
             </span>
-            {nome || email}
+            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>
+              {nome || email}
+            </span>
           </button>
           <SyncStatus />
           <FeedbackBotao />
@@ -220,7 +222,7 @@ export default function BarraUsuario() {
         </div>
 
         {/* Celular: notificações sempre à mão + menu hambúrguer com o resto. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }} className="barra-hamburguer-wrap">
+        <div className="barra-hamburguer-wrap">
           <NotificacoesBotao />
           <button className="barra-hamburguer" aria-label="Abrir menu" aria-expanded={menuAberto}
             onClick={() => setMenuAberto(true)}>☰</button>

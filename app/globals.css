@@ -597,3 +597,22 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
   .modal-caixa { max-height: calc(100dvh - 20px); border-radius: 10px; }
   .modal-caixa > div:first-child { padding: 12px 14px; }
 }
+
+/* ---- Barra superior: caber sem espremer ----
+   Com 5 abas + ações, a linha ficava apertada em telas médias. As abas
+   compactam antes de sumir, e o bloco de ações não encolhe a ponto de
+   sobrepor o logo. */
+.barra-nav-desktop { flex-wrap: nowrap; min-width: 0; }
+.barra-nav-desktop a { white-space: nowrap; }
+.barra-acoes-desktop { flex-shrink: 0; }
+.barra-hamburguer-wrap { align-items: center; gap: 8px; }
+
+@media (max-width: 1400px) {
+  .barra-nav-desktop a { padding: 7px 10px !important; font-size: 12px !important; }
+  .barra-acoes-desktop { gap: 10px; }
+}
+@media (max-width: 1200px) {
+  /* Wordmark sai antes das abas — o brasão já identifica a marca. */
+  .barra-wordmark { display: none; }
+  .barra-nav-desktop a { padding: 6px 8px !important; font-size: 11.5px !important; }
+}
