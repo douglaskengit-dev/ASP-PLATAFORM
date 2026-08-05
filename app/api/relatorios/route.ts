@@ -26,15 +26,18 @@ export async function POST(req: NextRequest) {
   // para aprovação é um segundo passo, explícito (PATCH .../enviar).
   const ehRascunho = String(form.get("rascunho") || "") === "1";
   const f = form.get("arquivo");
+  // Arquivo já enviado direto ao storage (URL assinada) — a função só registra.
+  const arquivoPath = String(form.get("arquivoPath") || "");
+  const nomeInformado = String(form.get("nomeArquivo") || "");
 
   if (!inspecaoId) {
     return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
   }
-  if (!(f instanceof Blob) || !(f as File).name) {
+  if (!arquivoPath && (!(f instanceof Blob) || !(f as File).name)) {
     return NextResponse.json({ erro: "Envie o relatório no campo 'arquivo'." }, { status: 400 });
   }
   const arquivo = f as File;
-  const nomeLower = arquivo.name.toLowerCase();
+  const nomeLower = (arquivoPath || nomeInformado || arquivo?.name || "").toLowerCase();
   const ehPdf = nomeLower.endsWith(".pdf");
   const ehDocx = nomeLower.endsWith(".docx");
   if (!ehPdf && !ehDocx) {
@@ -55,11 +58,14 @@ export async function POST(req: NextRequest) {
   const versao = (ultima?.versao || 0) + 1;
 
   const ext = ehPdf ? "pdf" : "docx";
-  const caminho = `relatorios/${inspecaoId}/${tipo}-v${versao}.${ext}`;
-  try {
-    await uploadArquivo(caminho, Buffer.from(await arquivo.arrayBuffer()), ehPdf ? "application/pdf" : DOCX_MIME);
-  } catch (e) {
-    return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar o arquivo." }, { status: 500 });
+  let caminho = arquivoPath;
+  if (!caminho) {
+    caminho = `relatorios/${inspecaoId}/${tipo}-v${versao}.${ext}`;
+    try {
+      await uploadArquivo(caminho, Buffer.from(await arquivo.arrayBuffer()), ehPdf ? "application/pdf" : DOCX_MIME);
+    } catch (e) {
+      return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar o arquivo." }, { status: 500 });
+    }
   }
 
   const { data, error } = await supabase

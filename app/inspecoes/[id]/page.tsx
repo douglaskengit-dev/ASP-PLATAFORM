@@ -545,10 +545,31 @@ export default function InspecaoDetalhePage() {
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
+      const tipo = tipoRelatorio || bloco;
+      const ext = arquivo.name.toLowerCase().endsWith(".pdf") ? "pdf"
+        : arquivo.name.toLowerCase().endsWith(".docx") ? "docx" : "";
+      if (!ext) { setErroRelatorio("Envie o relatório em PDF ou DOCX."); return; }
+
+      // Arquivos grandes não cabem no corpo da função serverless (~4,5 MB na
+      // Vercel). Enviamos direto ao storage com URL assinada e depois só
+      // registramos o caminho — sem limite prático de tamanho.
+      const rUrl = await fetch("/api/relatorios/upload-url", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inspecaoId: id, tipo, ext }),
+      });
+      const dUrl = await rUrl.json().catch(() => ({}));
+      if (!rUrl.ok) { setErroRelatorio(dUrl?.erro || "Falha ao preparar o envio."); return; }
+
+      const supabase = getSupabaseBrowserClient();
+      const up = await supabase.storage.from("gp-arquivos")
+        .uploadToSignedUrl(dUrl.caminho, dUrl.token, arquivo);
+      if (up.error) { setErroRelatorio(`Falha ao enviar o arquivo: ${up.error.message}`); return; }
+
       const res = await enviarArquivo(
         "/api/relatorios",
-        { inspecaoId: id, tipo: tipoRelatorio || bloco, ...(rascunho ? { rascunho: "1" } : {}) },
-        arquivo, "Relatório");
+        { inspecaoId: id, tipo, arquivoPath: dUrl.caminho, nomeArquivo: arquivo.name,
+          ...(rascunho ? { rascunho: "1" } : {}) },
+        new File([""], arquivo.name), "Relatório");
       if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
       if (!res.ok) { setErroRelatorio(res.data?.erro || "Falha ao enviar o relatório."); return; }
       carregar();
