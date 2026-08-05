@@ -130,7 +130,9 @@ export default function ProjetosPage() {
     // Contatos do cliente alimentam a lista de responsável; se houver só um,
     // ele já entra preenchido (é o caso mais comum).
     fetch(`/api/orgaos/${clienteId}`).then((r) => r.ok ? r.json() : {}).then((d: any) => {
-      const nomes = (d.orgao?.contatos || []).map((x: any) => x.nome).filter(Boolean);
+      const nomes = (d.orgao?.contatos || [])
+        .map((x: any) => x.nome_completo || x.nomeCompleto || x.nome)
+        .filter(Boolean);
       setSugResponsavel(nomes);
       if (nomes.length === 1) {
         setForm((f) => ({ ...f, responsavelProjeto: f.responsavelProjeto?.trim() ? f.responsavelProjeto : nomes[0] }));

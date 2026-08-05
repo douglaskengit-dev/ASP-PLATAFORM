@@ -82,9 +82,11 @@ interface EditarOrgaoBody {
   cnpj: string;
   cidade: string;
   uf: string;
+  /** Endereço da sede — vira sugestão de "Endereço da obra" nos projetos. */
+  endereco?: string;
 }
 
-/** Edita os dados cadastrais do órgão (tipo, razão social, CNPJ, cidade, UF). */
+/** Edita os dados cadastrais do órgão (tipo, razão social, CNPJ, cidade, UF, endereço). */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {
@@ -136,6 +138,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       cnpj: cnpjDigitos,
       cidade: body.cidade.trim(),
       uf: body.uf.trim(),
+      endereco: (body.endereco || "").trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", params.id)

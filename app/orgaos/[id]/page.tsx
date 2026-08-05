@@ -32,6 +32,7 @@ export default function OrgaoDetalhePage() {
   const [razaoSocial, setRazaoSocial] = useState("");
   const [cnpj, setCnpj] = useState("");
   const [cidade, setCidade] = useState("");
+  const [endereco, setEndereco] = useState("");
   const [uf, setUf] = useState("");
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [mensagemEdicao, setMensagemEdicao] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
@@ -52,6 +53,7 @@ export default function OrgaoDetalhePage() {
       setRazaoSocial(dados.orgao.razao_social);
       setCnpj(mascaraCnpj(dados.orgao.cnpj || ""));
       setCidade(dados.orgao.cidade);
+      setEndereco(dados.orgao.endereco || "");
       setUf(dados.orgao.uf);
 
       // Projetos deste cliente (novo fluxo)
@@ -89,7 +91,7 @@ export default function OrgaoDetalhePage() {
       const resp = await fetch(`/api/orgaos/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf }),
+        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco }),
       });
       const dados = await resp.json();
       if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao salvar.");
@@ -175,6 +177,8 @@ export default function OrgaoDetalhePage() {
               <br />
               <strong>Cidade/UF:</strong> {orgao.cidade}/{orgao.uf}
               <br />
+              <strong>Endereço:</strong> {(orgao as any).endereco || "— não informado"}
+              <br />
               <strong>Cadastrado em:</strong> {new Date(orgao.created_at).toLocaleString("pt-BR")}
             </p>
           ) : (
@@ -197,6 +201,11 @@ export default function OrgaoDetalhePage() {
                 <div className="field">
                   <label>Cidade *</label>
                   <input value={cidade} onChange={(e) => setCidade(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Endereço</label>
+                  <input value={endereco} onChange={(e) => setEndereco(e.target.value)}
+                    placeholder="Rua, número, bairro — sugerido nos projetos deste cliente" />
                 </div>
                 <div className="field">
                   <label>UF *</label>
