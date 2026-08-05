@@ -616,3 +616,13 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
   .barra-wordmark { display: none; }
   .barra-nav-desktop a { padding: 6px 8px !important; font-size: 11.5px !important; }
 }
+
+/* Celular: feedback, notificações e tema ficam ao lado do hambúrguer —
+   são ações de uso frequente e não devem exigir abrir o menu. */
+@media (max-width: 900px) {
+  .barra-hamburguer-wrap { gap: 6px; }
+  .barra-hamburguer-wrap > * { flex-shrink: 0; }
+}
+@media (max-width: 380px) {
+  .barra-hamburguer-wrap { gap: 4px; }
+}

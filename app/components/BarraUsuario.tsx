@@ -223,7 +223,9 @@ export default function BarraUsuario() {
 
         {/* Celular: notificações sempre à mão + menu hambúrguer com o resto. */}
         <div className="barra-hamburguer-wrap">
+          <FeedbackBotao />
           <NotificacoesBotao />
+          <ThemeToggle />
           <button className="barra-hamburguer" aria-label="Abrir menu" aria-expanded={menuAberto}
             onClick={() => setMenuAberto(true)}>☰</button>
         </div>
@@ -263,8 +265,6 @@ export default function BarraUsuario() {
 
             <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "4px 12px" }}>
               <SyncStatus />
-              <FeedbackBotao />
-              <ThemeToggle />
             </div>
 
             <button className="menu-mobile-item" style={{ color: "#e5807a" }}
