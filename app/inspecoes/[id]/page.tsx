@@ -132,6 +132,9 @@ export default function InspecaoDetalhePage() {
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
   const [excluindoRelatorio, setExcluindoRelatorio] = useState<string | null>(null);
+  /** Erro do card de Relatórios. Separado do erro geral porque este é
+   *  renderizado no topo da página — longe do botão, o usuário não via. */
+  const [erroRelatorio, setErroRelatorio] = useState<string | null>(null);
   /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
    *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
   const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
@@ -506,11 +509,11 @@ export default function InspecaoDetalhePage() {
   async function excluirRascunho(relatorioId: string) {
     if (!confirm("Excluir este rascunho de relatório? O arquivo também será apagado.")) return;
     setExcluindoRelatorio(relatorioId);
-    setErro(null);
+    setErroRelatorio(null);
     try {
       const res = await fetch(`/api/relatorios/${relatorioId}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setErro(data?.erro || "Falha ao excluir o rascunho."); return; }
+      if (!res.ok) { setErroRelatorio(data?.erro || "Falha ao excluir o rascunho."); return; }
       carregar();
     } catch {
       setErro("Sem conexão — tente novamente quando estiver online.");
@@ -522,14 +525,14 @@ export default function InspecaoDetalhePage() {
   /** Submete um rascunho já anexado à aprovação da Gerência. */
   async function enviarParaAprovacao(relatorioId: string) {
     setEnviandoRelatorio(true);
-    setErro(null);
+    setErroRelatorio(null);
     try {
       const res = await fetch(`/api/relatorios/${relatorioId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enviar: true }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setErro(data?.erro || "Falha ao enviar para aprovação."); return; }
+      if (!res.ok) { setErroRelatorio(data?.erro || "Falha ao enviar para aprovação."); return; }
       carregar();
     } catch {
       setErro("Sem conexão — tente novamente quando estiver online.");
@@ -540,14 +543,14 @@ export default function InspecaoDetalhePage() {
 
   async function enviarRelatorio(arquivo: File, rascunho = false) {
     setEnviandoRelatorio(true);
-    setErro(null);
+    setErroRelatorio(null);
     try {
       const res = await enviarArquivo(
         "/api/relatorios",
         { inspecaoId: id, tipo: tipoRelatorio || bloco, ...(rascunho ? { rascunho: "1" } : {}) },
         arquivo, "Relatório");
       if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Falha ao enviar o relatório."); return; }
+      if (!res.ok) { setErroRelatorio(res.data?.erro || "Falha ao enviar o relatório."); return; }
       carregar();
     } finally {
       setEnviandoRelatorio(false);
@@ -838,6 +841,9 @@ export default function InspecaoDetalhePage() {
             </div>
           )}
         </div>
+        {erroRelatorio && (
+          <p className="erro-texto" style={{ margin: "8px 0 0" }}>{erroRelatorio}</p>
+        )}
         <p className="detalhe" style={{ marginTop: 6 }}>Cada envio gera uma nova versão. Envio manual (PDF/DOCX); a Gerência aprova ou marca “Ajustar”.</p>
         {relatorios.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum relatório enviado.</p>
