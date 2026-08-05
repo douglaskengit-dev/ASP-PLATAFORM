@@ -65,6 +65,9 @@ export default function ProjetosPage() {
   const [modalAberto, setModalAberto] = useState(false);
   const [cadastrarOrgao, setCadastrarOrgao] = useState(false);
   const [orgaos, setOrgaos] = useState<Orgao[]>([]);
+  /** Sugestões vindas do cadastro do cliente: endereço e contatos. */
+  const [sugEndereco, setSugEndereco] = useState<string[]>([]);
+  const [sugResponsavel, setSugResponsavel] = useState<string[]>([]);
   const [form, setForm] = useState(FORM_VAZIO);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -121,6 +124,23 @@ export default function ProjetosPage() {
       clienteId,
       endereco: f.endereco?.trim() ? f.endereco : (c?.endereco || ""),
     }));
+    setSugEndereco(c?.endereco ? [c.endereco] : []);
+    setSugResponsavel([]);
+    if (!clienteId) return;
+    // Contatos do cliente alimentam a lista de responsável; se houver só um,
+    // ele já entra preenchido (é o caso mais comum).
+    fetch(`/api/orgaos/${clienteId}`).then((r) => r.ok ? r.json() : {}).then((d: any) => {
+      const nomes = (d.orgao?.contatos || []).map((x: any) => x.nome).filter(Boolean);
+      setSugResponsavel(nomes);
+      if (nomes.length === 1) {
+        setForm((f) => ({ ...f, responsavelProjeto: f.responsavelProjeto?.trim() ? f.responsavelProjeto : nomes[0] }));
+      }
+      const end = d.orgao?.endereco;
+      if (end) {
+        setSugEndereco((p) => (p.includes(end) ? p : [...p, end]));
+        setForm((f) => ({ ...f, endereco: f.endereco?.trim() ? f.endereco : end }));
+      }
+    }).catch(() => {});
   }
 
   async function salvar() {
@@ -251,13 +271,23 @@ export default function ProjetosPage() {
 
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Endereço da obra</label>
-              <input value={form.endereco} onChange={(e) => atualizar("endereco", e.target.value)} placeholder="pode diferir do endereço do cliente" />
+              <input list="sug-endereco" value={form.endereco}
+                onChange={(e) => atualizar("endereco", e.target.value)}
+                placeholder="pode diferir do endereço do cliente" />
+              <datalist id="sug-endereco">
+                {sugEndereco.map((x) => <option key={x} value={x} />)}
+              </datalist>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Responsável</label>
-                <input value={form.responsavelProjeto} onChange={(e) => atualizar("responsavelProjeto", e.target.value)} placeholder="responsável pelo projeto" />
+                <input list="sug-responsavel" value={form.responsavelProjeto}
+                  onChange={(e) => atualizar("responsavelProjeto", e.target.value)}
+                  placeholder={sugResponsavel.length ? "escolha um contato ou digite" : "responsável pelo projeto"} />
+                <datalist id="sug-responsavel">
+                  {sugResponsavel.map((x) => <option key={x} value={x} />)}
+                </datalist>
               </div>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data de abertura</label>
