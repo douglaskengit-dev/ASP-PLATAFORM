@@ -80,6 +80,9 @@ export interface DadosRelatorio {
   // Conteúdos livres
   metodos?: string;
   equipamentos?: string;
+  /** Fichas do catálogo — viram tabelas de duas colunas (rótulo | valor) no
+   *  tópico 4, no layout do relatório de referência. */
+  equipamentosFicha?: { nome: string; especificacoes: { rotulo: string; valor: string }[] }[];
   equipe?: string;
   volumeSedimento?: string;
   fotosInternas?: string;   // texto do tópico 8
@@ -219,7 +222,9 @@ function trocarTexto(xml: string, alvo: string, valor: string): string {
     const r = runs[p.idx];
     const antes = r.texto.slice(0, p.de);
     const depois = r.texto.slice(p.ate);
-    const novoTexto = k === 0 ? antes + esc(valor) + depois : antes + depois;
+    // \n no valor vira quebra de linha real (<w:br/>) dentro do mesmo run
+    const valorXml = esc(valor).replace(/\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+    const novoTexto = k === 0 ? antes + valorXml + depois : antes + depois;
     saida = saida.slice(0, r.ini) +
       `<w:t${r.attr || ' xml:space="preserve"'}>${novoTexto}</w:t>` +
       saida.slice(r.fim);
@@ -395,6 +400,24 @@ function htmlParaParagrafos(html: string): string {
   return saida;
 }
 
+/** Reduz o HTML do editor a texto puro com quebras de linha.
+ *
+ *  Campos que entram em CÉLULA de tabela (Observações, Envolvidos) não podem
+ *  receber parágrafos OOXML — e muito menos HTML cru, que era o que acontecia:
+ *  o texto do editor ia com <div>, <span> e &nbsp; direto para o documento. */
+export function htmlParaTexto(html?: string): string | undefined {
+  if (!html) return html;
+  if (!/<[a-z][\s\S]*>/i.test(html) && !/&\w+;/.test(html)) return html;   // já é texto
+  let t = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "");
+  t = t.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'");
+  return t.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** Legenda de figura: Arial 10, centralizada, entrelinha simples. */
 function legendaAbnt(texto: string, antes = false): string {
   return '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" ' +
@@ -495,6 +518,36 @@ function preencherQuadroRevisao(xml: string, valores: (string | undefined)[]): s
   return xml;
 }
 
+/** Ficha de equipamento: nome em negrito e tabela de duas colunas
+ *  (rótulo | valor), sem bordas aparentes — espelha o relatório modelo. */
+function fichaEquipamentoXml(f: { nome: string; especificacoes: { rotulo: string; valor: string }[] }): string {
+  const cab =
+    '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" w:before="120" w:after="60"/>' +
+    '<w:ind w:left="709"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr></w:pPr>' +
+    '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr>' +
+    `<w:t xml:space="preserve">${esc(f.nome)}</w:t></w:r></w:p>`;
+  if (!f.especificacoes || f.especificacoes.length === 0) return cab;
+  const cel = (txt: string, negrito: boolean, larg: number) =>
+    `<w:tc><w:tcPr><w:tcW w:w="${larg}" w:type="dxa"/></w:tcPr>` +
+    '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" w:after="0"/>' +
+    `<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>${negrito ? "<w:b/>" : ""}<w:sz w:val="20"/></w:rPr></w:pPr>` +
+    `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>${negrito ? "<w:b/>" : ""}<w:sz w:val="20"/></w:rPr>` +
+    `<w:t xml:space="preserve">${esc(txt)}</w:t></w:r></w:p></w:tc>`;
+  const linhas = f.especificacoes
+    .filter((e) => (e.rotulo || "").trim() || (e.valor || "").trim())
+    .map((e) => `<w:tr>${cel(e.rotulo || "", true, 3260)}${cel(e.valor || "", false, 5670)}</w:tr>`) 
+    .join("");
+  return cab +
+    '<w:tbl><w:tblPr><w:tblInd w:w="709" w:type="dxa"/>' +
+    '<w:tblBorders><w:top w:val="none" w:sz="0"/><w:left w:val="none" w:sz="0"/>' +
+    '<w:bottom w:val="none" w:sz="0"/><w:right w:val="none" w:sz="0"/>' +
+    '<w:insideH w:val="none" w:sz="0"/><w:insideV w:val="none" w:sz="0"/></w:tblBorders>' +
+    '<w:tblW w:w="8930" w:type="dxa"/></w:tblPr>' +
+    '<w:tblGrid><w:gridCol w:w="3260"/><w:gridCol w:w="5670"/></w:tblGrid>' +
+    linhas + "</w:tbl>" +
+    '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>';
+}
+
 /** Injeta parágrafos dentro da primeira célula de uma tabela vazia
  *  (as "caixas" do template, como a de Métodos). */
 function injetarNaCaixa(tblXml: string, paragrafos: string): string {
@@ -547,7 +600,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = aplicarMargensAbnt(xml);
 
   // 2) Marcadores simples
-  xml = trocarMarcador(xml, "[TITULO]", dados.titulo);
+  // O modelo já traz "Relatório de " antes do [TITULO]; se o usuário digitou
+  // o título completo, removemos o prefixo para não sair "Relatório de Relatório de…".
+  const titulo = (dados.titulo || "").replace(/^\s*relat[óo]rio\s+de\s+/i, "");
+  xml = trocarMarcador(xml, "[TITULO]", titulo);
   xml = trocarMarcador(xml, "[CLIENTE]", dados.cliente);
   xml = trocarMarcador(xml, "[Endereço]", dados.endereco);
   xml = trocarMarcador(xml, "[Volume de sedimento]", dados.volumeSedimento || "—");
@@ -574,8 +630,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = preencherRotulo(xml, "Capacidade Nominal: ", dados.capacidadeNominal);
   xml = preencherRotulo(xml, "Altura do tanque: ", dados.alturaTanque);
   xml = preencherRotulo(xml, "Diâmetro: ", dados.diametro);
-  xml = preencherRotulo(xml, "Observações:  ", dados.observacoesTanque);
-  xml = preencherRotulo(xml, "Envolvidos:", dados.equipe ? " " + dados.equipe : undefined);
+  xml = preencherRotulo(xml, "Observações:  ", htmlParaTexto(dados.observacoesTanque));
+  // Envolvidos: um por linha, como no relatório de referência.
+  const equipeTxt = htmlParaTexto(dados.equipe);
+  xml = preencherRotulo(xml, "Envolvidos:", equipeTxt ? "\n" + equipeTxt : undefined);
   // Bloco de assinaturas
   xml = preencherRotulo(xml, "Relatório elaborado por:", dados.elaboradoPor ? " " + dados.elaboradoPor : undefined);
   xml = preencherRotulo(xml, "Relatório revisado por:", dados.revisadoPor ? " " + dados.revisadoPor : undefined);
@@ -649,6 +707,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const addTexto = (n: number, s: string) =>
     textoDoTopico.set(n, (textoDoTopico.get(n) || "") + s);
   if (dados.metodos) addTexto(3, htmlParaParagrafos(dados.metodos));
+  for (const f of dados.equipamentosFicha || []) addTexto(4, fichaEquipamentoXml(f));
   if (dados.equipamentos) addTexto(4, htmlParaParagrafos(dados.equipamentos));
   if (dados.fotosInternas) addTexto(8, htmlParaParagrafos(dados.fotosInternas));
   if (dados.conclusao) addTexto(9, htmlParaParagrafos(dados.conclusao));

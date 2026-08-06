@@ -25,6 +25,9 @@ export async function POST(req: NextRequest) {
   // Rascunho: fica anexado ao card sem ir para a fila da Gerência. O envio
   // para aprovação é um segundo passo, explícito (PATCH .../enviar).
   const ehRascunho = String(form.get("rascunho") || "") === "1";
+  // Snapshot do formulário — permite reabrir o rascunho para edição.
+  let dadosForm: any = null;
+  try { const raw = String(form.get("dados") || ""); if (raw) dadosForm = JSON.parse(raw); } catch {}
   const f = form.get("arquivo");
   // Arquivo já enviado direto ao storage (URL assinada) — a função só registra.
   const arquivoPath = String(form.get("arquivoPath") || "");
@@ -76,6 +79,7 @@ export async function POST(req: NextRequest) {
       versao,
       arquivo_path: caminho,
       status: ehRascunho ? "rascunho" : "em_aprovacao",
+      ...(dadosForm ? { dados: dadosForm } : {}),
       enviado_por: profile.id,
       enviado_em: ehRascunho ? null : new Date().toISOString(),
     })

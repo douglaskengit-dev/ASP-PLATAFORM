@@ -28,8 +28,21 @@ interface Props {
   usuarios: UsuarioRelatorio[];
   /** Medições salvas: definem os dados automáticos (altura, diâmetro, volume). */
   coletas: ColetaOpcao[];
-  /** Anexa o .docx ao card como RASCUNHO (o envio é um passo à parte). */
-  onSalvar: (blob: Blob) => Promise<void>;
+  /** Anexa o .docx ao card como RASCUNHO (o envio é um passo à parte).
+   *  O snapshot é gravado junto para o rascunho poder ser reaberto e editado. */
+  onSalvar: (blob: Blob, snapshot: SnapshotRelatorio) => Promise<void>;
+  /** Snapshot de um rascunho salvo — reabre o formulário como estava.
+   *  As fotos não são restauradas (só o arquivo final as contém). */
+  estadoSalvo?: SnapshotRelatorio | null;
+}
+
+/** Tudo que o formulário precisa para ser reconstruído depois. */
+export interface SnapshotRelatorio {
+  d: Partial<DadosRelatorio>;
+  visiveis: Record<number, boolean>;
+  equipeIds: string[];
+  equipIds: string[];
+  coletaId: string;
 }
 
 interface FotoTopico { arquivo: File; legenda: string; topico: number; ancora?: string }
@@ -45,17 +58,19 @@ const grade: React.CSSProperties = {
 
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
 
-export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar }: Props) {
-  const [d, setD] = useState<Partial<DadosRelatorio>>(inicial);
-  const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
-    Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
+export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo }: Props) {
+  const [d, setD] = useState<Partial<DadosRelatorio>>(
+    estadoSalvo?.d ? { ...inicial, ...estadoSalvo.d } : inicial
   );
-  const [equipeIds, setEquipeIds] = useState<string[]>([]);
-  const [equipIds, setEquipIds] = useState<string[]>([]);
+  const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
+    estadoSalvo?.visiveis || Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
+  );
+  const [equipeIds, setEquipeIds] = useState<string[]>(estadoSalvo?.equipeIds || []);
+  const [equipIds, setEquipIds] = useState<string[]>(estadoSalvo?.equipIds || []);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
-    (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || ""
+    estadoSalvo?.coletaId || (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || ""
   );
   // Catálogo (procedimentos e equipamentos) vem do banco — aba Catálogo.
   const [PROCEDIMENTOS, setProcedimentos] = useState<any[]>([]);
@@ -66,14 +81,6 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
       setEquipamentos((d.equipamentos || []).map((e: any) => ({ ...e, id: e.slug })));
     }).catch(() => {});
   }, []);
-
-  /** Texto do tópico 4 a partir das fichas do catálogo (rótulo: valor). */
-  function textoEquipamentos(slugs: string[]): string {
-    return EQUIPAMENTOS.filter((e) => slugs.includes(e.slug)).map((e) => {
-      const linhas = (e.especificacoes || []).map((s: any) => `${s.rotulo}: ${s.valor}`).join("\n");
-      return linhas ? `${e.nome}\n${linhas}` : e.nome;
-    }).join("\n\n");
-  }
 
   const [gerando, setGerando] = useState(false);
   const [enviando, setEnviando] = useState(false);
@@ -120,21 +127,20 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     if (!proc) return;
     setD((v) => ({ ...v, metodos: proc.metodos || "" }));
     setEquipIds(proc.equipamentos);
-    setD((v) => ({ ...v, equipamentos: textoEquipamentos(proc.equipamentos) }));
   }
 
   /** Marca/desmarca um equipamento e reescreve o texto do tópico 4. */
   function alternarEquipamento(id: string, marcado: boolean) {
-    const novos = marcado ? [...equipIds, id] : equipIds.filter((x) => x !== id);
-    setEquipIds(novos);
-    setD((v) => ({ ...v, equipamentos: textoEquipamentos(novos) }));
+    setEquipIds((p) => (marcado ? [...p, id] : p.filter((x) => x !== id)));
   }
 
-  const nomesEquipe = useMemo(
+  const listaEquipe = useMemo(
     () => usuarios.filter((u) => equipeIds.includes(u.id))
-      .map((u) => (u.funcao ? `${u.nome} (${u.funcao})` : u.nome)).join(", "),
+      .map((u) => (u.funcao ? `${u.nome} — ${u.funcao}` : u.nome)),
     [usuarios, equipeIds]
   );
+  const nomesEquipe = listaEquipe.join(", ");        // prévia na tela
+  const equipeDoc = listaEquipe.join("\n");          // documento: um por linha
 
   function addFotos(lista: FileList | null, topico: number, restam = 20, legendaPadrao = "") {
     const fs = Array.from(lista || []).slice(0, Math.max(0, restam));
@@ -168,7 +174,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
-        equipe: nomesEquipe || d.equipe,
+        equipe: equipeDoc || d.equipe,
+        equipamentosFicha: EQUIPAMENTOS
+          .filter((e) => equipIds.includes(e.slug))
+          .map((e) => ({ nome: e.nome, especificacoes: e.especificacoes || [] })),
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
@@ -207,7 +216,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setEnviando(true);
     try {
       const blob = await montarBlob();
-      await onSalvar(blob);
+      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId });
       onFechar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao enviar o relatório.");

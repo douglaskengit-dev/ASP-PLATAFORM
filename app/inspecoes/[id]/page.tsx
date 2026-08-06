@@ -45,7 +45,7 @@ interface Historico {
   autor_perfil: { nome_completo: string | null; email: string | null } | null;
 }
 interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null }
-interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null }
+interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any }
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
   id: string; tipo: string; data_visita: string | null; data_execucao: string | null; hora: string | null;
@@ -131,6 +131,8 @@ export default function InspecaoDetalhePage() {
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
+  // Snapshot do rascunho aberto para edição — reidrata o formulário.
+  const [rascunhoEmEdicao, setRascunhoEmEdicao] = useState<any | null>(null);
   const [excluindoRelatorio, setExcluindoRelatorio] = useState<string | null>(null);
   /** Erro do card de Relatórios. Separado do erro geral porque este é
    *  renderizado no topo da página — longe do botão, o usuário não via. */
@@ -541,7 +543,7 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  async function enviarRelatorio(arquivo: File, rascunho = false) {
+  async function enviarRelatorio(arquivo: File, rascunho = false, dadosForm?: any) {
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
@@ -568,7 +570,8 @@ export default function InspecaoDetalhePage() {
       const res = await enviarArquivo(
         "/api/relatorios",
         { inspecaoId: id, tipo, arquivoPath: dUrl.caminho, nomeArquivo: arquivo.name,
-          ...(rascunho ? { rascunho: "1" } : {}) },
+          ...(rascunho ? { rascunho: "1" } : {}),
+          ...(dadosForm ? { dados: JSON.stringify(dadosForm) } : {}) },
         new File([""], arquivo.name), "Relatório");
       if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
       if (!res.ok) { setErroRelatorio(res.data?.erro || "Falha ao enviar o relatório."); return; }
@@ -888,8 +891,9 @@ export default function InspecaoDetalhePage() {
                         onClick={() => enviarParaAprovacao(r.id)}>
                         {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
                       </button>
-                      <button className="btn-dl btn-sec" title="Refazer o documento (gera uma nova versão)"
-                        onClick={() => setModalRelatorio(true)}>Editar</button>
+                      <button className="btn-dl btn-sec"
+                        title={r.dados ? "Reabrir o formulário com os dados salvos" : "Refazer o documento (gera uma nova versão)"}
+                        onClick={() => { setRascunhoEmEdicao(r.dados || null); setModalRelatorio(true); }}>Editar</button>
                       <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                         disabled={excluindoRelatorio === r.id} onClick={() => excluirRascunho(r.id)}>
                         {excluindoRelatorio === r.id ? "…" : "Excluir"}
@@ -1065,16 +1069,17 @@ export default function InspecaoDetalhePage() {
 
       {modalRelatorio && (
         <GerarRelatorio
-          onFechar={() => setModalRelatorio(false)}
+          onFechar={() => { setModalRelatorio(false); setRascunhoEmEdicao(null); }}
+          estadoSalvo={rascunhoEmEdicao}
           nomeArquivo={`Relatorio-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
           coletas={coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0)}
-          onSalvar={async (blob) => {
+          onSalvar={async (blob, snapshot) => {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "inspecao"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             });
-            await enviarRelatorio(arquivo, true);   // true = rascunho
+            await enviarRelatorio(arquivo, true, snapshot);   // true = rascunho
           }}
         />
       )}
