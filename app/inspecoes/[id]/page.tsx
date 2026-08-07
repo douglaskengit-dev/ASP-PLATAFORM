@@ -131,8 +131,9 @@ export default function InspecaoDetalhePage() {
   // Relatório
   const [enviandoRelatorio, setEnviandoRelatorio] = useState(false);
   const [modalRelatorio, setModalRelatorio] = useState(false);
-  // Snapshot do rascunho aberto para edição — reidrata o formulário.
-  const [rascunhoEmEdicao, setRascunhoEmEdicao] = useState<any | null>(null);
+  // Rascunho aberto para edição — snapshot reidrata o formulário e o id faz
+  // o salvamento sobrescrever o registro (mesma versão), sem empilhar cópias.
+  const [rascunhoEmEdicao, setRascunhoEmEdicao] = useState<{ id: string; dados: any | null } | null>(null);
   const [excluindoRelatorio, setExcluindoRelatorio] = useState<string | null>(null);
   /** Erro do card de Relatórios. Separado do erro geral porque este é
    *  renderizado no topo da página — longe do botão, o usuário não via. */
@@ -543,7 +544,7 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  async function enviarRelatorio(arquivo: File, rascunho = false, dadosForm?: any) {
+  async function enviarRelatorio(arquivo: File, rascunho = false, dadosForm?: any, substituirId?: string) {
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
@@ -571,7 +572,8 @@ export default function InspecaoDetalhePage() {
         "/api/relatorios",
         { inspecaoId: id, tipo, arquivoPath: dUrl.caminho, nomeArquivo: arquivo.name,
           ...(rascunho ? { rascunho: "1" } : {}),
-          ...(dadosForm ? { dados: JSON.stringify(dadosForm) } : {}) },
+          ...(dadosForm ? { dados: JSON.stringify(dadosForm) } : {}),
+          ...(substituirId ? { substituirId } : {}) },
         new File([""], arquivo.name), "Relatório");
       if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
       if (!res.ok) { setErroRelatorio(res.data?.erro || "Falha ao enviar o relatório."); return; }
@@ -893,7 +895,7 @@ export default function InspecaoDetalhePage() {
                       </button>
                       <button className="btn-dl btn-sec"
                         title={r.dados ? "Reabrir o formulário com os dados salvos" : "Refazer o documento (gera uma nova versão)"}
-                        onClick={() => { setRascunhoEmEdicao(r.dados || null); setModalRelatorio(true); }}>Editar</button>
+                        onClick={() => { setRascunhoEmEdicao({ id: r.id, dados: r.dados || null }); setModalRelatorio(true); }}>Editar</button>
                       <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                         disabled={excluindoRelatorio === r.id} onClick={() => excluirRascunho(r.id)}>
                         {excluindoRelatorio === r.id ? "…" : "Excluir"}
@@ -1070,7 +1072,7 @@ export default function InspecaoDetalhePage() {
       {modalRelatorio && (
         <GerarRelatorio
           onFechar={() => { setModalRelatorio(false); setRascunhoEmEdicao(null); }}
-          estadoSalvo={rascunhoEmEdicao}
+          estadoSalvo={rascunhoEmEdicao?.dados || null}
           nomeArquivo={`Relatorio-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
@@ -1079,7 +1081,7 @@ export default function InspecaoDetalhePage() {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "inspecao"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             });
-            await enviarRelatorio(arquivo, true, snapshot);   // true = rascunho
+            await enviarRelatorio(arquivo, true, snapshot, rascunhoEmEdicao?.id);   // true = rascunho
           }}
         />
       )}

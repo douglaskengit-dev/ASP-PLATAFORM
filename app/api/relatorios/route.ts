@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { uploadArquivo, DOCX_MIME } from "@/lib/processos/arquivos";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
+
+const BUCKET = "gp-arquivos";
 
 export const runtime = "nodejs";
 
@@ -28,6 +31,9 @@ export async function POST(req: NextRequest) {
   // Snapshot do formulário — permite reabrir o rascunho para edição.
   let dadosForm: any = null;
   try { const raw = String(form.get("dados") || ""); if (raw) dadosForm = JSON.parse(raw); } catch {}
+  // Editar rascunho: salva EM CIMA do registro existente (mesma versão),
+  // trocando o arquivo — em vez de empilhar uma versão nova a cada salvamento.
+  const substituirId = String(form.get("substituirId") || "");
   const f = form.get("arquivo");
   // Arquivo já enviado direto ao storage (URL assinada) — a função só registra.
   const arquivoPath = String(form.get("arquivoPath") || "");
@@ -69,6 +75,25 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar o arquivo." }, { status: 500 });
     }
+  }
+
+  if (substituirId && ehRascunho) {
+    const { data: alvo } = await supabase
+      .from("gp_relatorios").select("id, status, arquivo_path")
+      .eq("id", substituirId).eq("inspecao_id", inspecaoId).maybeSingle();
+    if (alvo && alvo.status === "rascunho") {
+      const { data: atualizado, error: eUp } = await supabase
+        .from("gp_relatorios")
+        .update({ arquivo_path: caminho, ...(dadosForm ? { dados: dadosForm } : {}) })
+        .eq("id", alvo.id).select("*").single();
+      if (eUp) return NextResponse.json({ erro: eUp.message }, { status: 500 });
+      // arquivo antigo sai do storage (o novo tem outro nome, não colide)
+      if (alvo.arquivo_path && alvo.arquivo_path !== caminho) {
+        await getSupabaseAdmin().storage.from(BUCKET).remove([alvo.arquivo_path]).catch(() => {});
+      }
+      return NextResponse.json({ ok: true, relatorio: atualizado, substituido: true });
+    }
+    // rascunho sumiu ou já foi enviado: cai no fluxo normal e cria versão nova
   }
 
   const { data, error } = await supabase
