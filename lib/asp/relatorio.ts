@@ -11,7 +11,7 @@
  *   2. substituição dos marcadores ([TITULO], [CLIENTE], …);
  *   3. remoção dos tópicos desmarcados (e renumeração dos que ficaram);
  *   4. preenchimento dos rótulos das tabelas ("Cliente...:" → "Cliente...: X");
- *   5. inserção das imagens (mapa de calor, 3D, fotos) com legenda ABNT.
+ *   5. inserção das imagens (mapa de calor, 3D, fotos) com legenda abaixo.
  *
  * Roda no navegador (o template é um arquivo estático em /templates), o que
  * evita depender do sistema de arquivos da função serverless.
@@ -32,9 +32,9 @@ export interface ImagemRelatorio {
   dados: ArrayBuffer;
   /** "png" | "jpeg" */
   extensao: "png" | "jpeg";
-  /** Legenda ABNT — vai ACIMA da figura ("Figura N – …"). */
+  /** Legenda — vai ABAIXO da figura ("Figura N – …"). */
   legenda: string;
-  /** Fonte da figura — vai ABAIXO ("Fonte: …"). */
+  /** Fonte da figura — vai abaixo da legenda ("Fonte: …"). */
   fonte?: string;
   /** Largura em cm (padrão 15, cabe na mancha ABNT de 16 cm). */
   larguraCm?: number;
@@ -897,9 +897,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     const largura = img.larguraCm || 15;
     // Proporção real do arquivo — o fator fixo de antes achatava as fotos.
     const altura = alturaProporcional(img, largura);
+    // Legenda ABAIXO da figura (padrão adotado pela ASP), seguida da fonte.
     const bloco =
-      legendaAbnt(`Figura ${MARCA_FIG} – ${img.legenda}`, true) +
       figuraXml(rId, i + 1, largura, altura) +
+      legendaAbnt(`Figura ${MARCA_FIG} – ${img.legenda}`, true) +
       legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`);
     if (img.ancora) {
       figurasDaAncora.set(img.ancora, (figurasDaAncora.get(img.ancora) || "") + bloco);
