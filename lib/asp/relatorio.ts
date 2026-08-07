@@ -447,11 +447,53 @@ function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: numb
 
 // ── Preenchimento das tabelas ────────────────────────────────────────────────
 
-/** Acrescenta o valor logo após um rótulo de célula ("Cliente...: " → "…: ACME").
- *  Usa a troca que atravessa runs, pois os rótulos também vêm fragmentados. */
+/**
+ * Acrescenta o valor logo após um rótulo de célula ("Cliente...: " → "…: ACME").
+ *
+ * O valor entra como um RUN PRÓPRIO, com o negrito explicitamente desligado:
+ * no modelo o rótulo é negrito, e emendar o valor no mesmo run faria o dado
+ * sair em negrito também. Herda o resto da formatação (fonte, tamanho, cor)
+ * para o dado não destoar do rótulo.
+ */
 function preencherRotulo(xml: string, rotulo: string, valor?: string): string {
   if (!valor) return xml;
-  return trocarTexto(xml, rotulo, rotulo + valor);
+
+  // Runs completos (<w:r>…</w:r>) com o texto que cada um contribui.
+  const reRun = /<w:r\b[^>]*>(?:(?!<\/w:r>)[\s\S])*<\/w:r>/g;
+  const runs: { ini: number; fim: number; xml: string; texto: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = reRun.exec(xml)) !== null) {
+    const texto = Array.from(m[0].matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g))
+      .map((t) => t[1]).join("");
+    runs.push({ ini: m.index, fim: m.index + m[0].length, xml: m[0], texto });
+  }
+  if (runs.length === 0) return trocarTexto(xml, rotulo, rotulo + valor);
+
+  const concat = runs.map((r) => r.texto).join("");
+  const pos = concat.indexOf(rotulo);
+  if (pos === -1) return xml;
+  const fimRotulo = pos + rotulo.length;
+
+  // Run onde o rótulo TERMINA — o valor entra logo depois dele.
+  let acc = 0, alvo = -1;
+  for (let i = 0; i < runs.length; i++) {
+    const fim = acc + runs[i].texto.length;
+    if (fimRotulo <= fim && fimRotulo > acc) { alvo = i; break; }
+    acc = fim;
+  }
+  if (alvo === -1) return trocarTexto(xml, rotulo, rotulo + valor);
+
+  // Formatação do rótulo, sem o negrito.
+  const mPr = runs[alvo].xml.match(/<w:rPr>([\s\S]*?)<\/w:rPr>/);
+  const interno = (mPr ? mPr[1] : "")
+    .replace(/<w:b\/>|<w:b\s[^>]*\/>/g, "")
+    .replace(/<w:bCs\/>|<w:bCs\s[^>]*\/>/g, "");
+  const rPrValor = `<w:rPr><w:b w:val="0"/><w:bCs w:val="0"/>${interno}</w:rPr>`;
+
+  const texto = esc(valor).replace(/\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+  const runValor = `<w:r>${rPrValor}<w:t xml:space="preserve">${texto}</w:t></w:r>`;
+
+  return xml.slice(0, runs[alvo].fim) + runValor + xml.slice(runs[alvo].fim);
 }
 
 /** Preenche a célula ao lado de um rótulo de linha (tabela "Dados do Tanque":
