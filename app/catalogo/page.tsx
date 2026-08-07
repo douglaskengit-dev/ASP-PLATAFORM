@@ -8,6 +8,10 @@
  * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
+import { TOPICOS_PADRAO, TOPICO_CAPA } from "@/lib/asp/relatorio";
+
+/** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
+const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
 
 interface Espec { rotulo: string; valor: string }
 interface Foto { caminho: string; legenda?: string }
@@ -18,6 +22,8 @@ interface Equipamento {
 interface Procedimento {
   id: string; codigo: string; nome: string; metodos: string | null;
   equipamentos: string[]; ordem: number;
+  /** Tópicos do relatório para este procedimento. null = todos. */
+  topicos: number[] | null;
 }
 
 const campo: React.CSSProperties = {
@@ -49,7 +55,10 @@ export default function CatalogoPage() {
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {})
       .then((d: any) => {
         setEquipamentos((d.equipamentos || []).map((e: any) => ({ ...e, especificacoes: e.especificacoes || [], fotos: e.fotos || [] })));
-        setProcedimentos((d.procedimentos || []).map((p: any) => ({ ...p, equipamentos: p.equipamentos || [] })));
+        setProcedimentos((d.procedimentos || []).map((p: any) => ({
+          ...p, equipamentos: p.equipamentos || [],
+          topicos: Array.isArray(p.topicos) ? p.topicos : null,
+        })));
         setPodeEditar(!!d.podeEditar);
       })
       .finally(() => setCarregando(false));
@@ -71,7 +80,8 @@ export default function CatalogoPage() {
     setSalvando(true);
     const dados = tipo === "equipamento"
       ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
-      : { codigo: item.codigo, nome: item.nome, metodos: item.metodos, equipamentos: item.equipamentos, ordem: item.ordem };
+      : { codigo: item.codigo, nome: item.nome, metodos: item.metodos,
+          equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos };
     const r = item.id
       ? await api("PATCH", { tipo, id: item.id, dados })
       : await api("POST", { tipo, dados });
@@ -108,6 +118,7 @@ export default function CatalogoPage() {
   });
   const novoProc = (): Procedimento => ({
     id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
+    topicos: null,
   });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -204,6 +215,39 @@ export default function CatalogoPage() {
             <div><label style={rot}>Texto sugerido para “Métodos”</label>
               <textarea style={{ ...campo, minHeight: 110 }} value={edProc.metodos || ""} disabled={!podeEditar}
                 onChange={(ev) => setEdProc({ ...edProc, metodos: ev.target.value })} /></div>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <label style={{ ...rot, marginBottom: 0 }}>Tópicos do relatório</label>
+                {podeEditar && (
+                  <button type="button" className="btn-dl btn-sec"
+                    onClick={() => setEdProc({ ...edProc, topicos: null })}>Usar todos</button>
+                )}
+              </div>
+              <p className="detalhe" style={{ margin: "2px 0 6px" }}>
+                Define o formato do relatório deste procedimento. Sem nenhuma marcação, entram todos.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 6 }}>
+                {TODOS_TOPICOS.map((t) => {
+                  const marcados = edProc.topicos;
+                  const ativo = marcados === null || marcados.includes(t.numero);
+                  return (
+                    <label key={t.numero} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                      <input type="checkbox" disabled={!podeEditar} checked={ativo}
+                        onChange={(ev) => {
+                          // null (= todos) vira lista explícita ao primeiro clique
+                          const base = marcados === null ? TODOS_TOPICOS.map((x) => x.numero) : marcados;
+                          const novos = ev.target.checked
+                            ? [...base, t.numero].sort((a, b) => a - b)
+                            : base.filter((n) => n !== t.numero);
+                          setEdProc({ ...edProc, topicos: novos });
+                        }} />
+                      <span>{t.numero === 0 ? "Capa" : `${t.numero}. ${t.titulo}`}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label style={rot}>Equipamentos previstos</label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 6 }}>

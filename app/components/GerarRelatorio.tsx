@@ -127,6 +127,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     () => PROCEDIMENTOS.find((p) => p.codigo === d.procedimento) || null,
     [d.procedimento, PROCEDIMENTOS]
   );
+  /** Quantos tópicos o procedimento escolhido prevê (null = todos). */
+  const topicosDoProc: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
@@ -134,6 +136,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     if (!proc) return;
     setD((v) => ({ ...v, metodos: proc.metodos || "" }));
     setEquipIds(proc.equipamentos);
+    // O procedimento define o FORMATO do relatório: quais tópicos entram.
+    // Sem configuração (null), mantém o que estiver marcado hoje.
+    if (Array.isArray(proc.topicos)) {
+      const lista: number[] = proc.topicos;
+      setVisiveis(Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, lista.includes(t.numero)])));
+    }
   }
 
   /** Marca/desmarca um equipamento e reescreve o texto do tópico 4. */
@@ -499,7 +507,11 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               ✨ Usar sugestão do procedimento
             </button>
             <span className="detalhe" style={{ margin: 0 }}>
-              {proc ? `Baseada em ${proc.codigo} — ${proc.nome}.` : "Escolha o procedimento na capa para habilitar a sugestão."}
+              {!proc ? "Escolha o procedimento na capa para habilitar a sugestão."
+                : `Baseada em ${proc.codigo} — ${proc.nome}.` +
+                  (topicosDoProc !== null
+                    ? ` Este procedimento usa ${topicosDoProc} de ${TODOS_TOPICOS.length} tópicos — a seleção será ajustada.`
+                    : " Mantém os tópicos como estão.")}
             </span>
           </div>
           <EditorTexto valor={d.metodos || ""} onChange={(v) => setD((x) => ({ ...x, metodos: v }))} altura={130} />
