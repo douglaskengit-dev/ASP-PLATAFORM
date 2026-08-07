@@ -91,6 +91,10 @@ export interface DadosRelatorio {
   equipe?: string;
   volumeSedimento?: string;
   fotosInternas?: string;   // texto do tópico 8
+  /** Subtópicos do tópico 8 (8.1, 8.2, …), criados pelo usuário. A numeração
+   *  é automática e acompanha o número final do tópico 8. As fotos de cada um
+   *  chegam em `imagens` com ancora "sub8-<índice>". */
+  subtopicos8?: { titulo: string }[];
   conclusao?: string;       // tópico 9
   recomendacoes?: string;   // tópico 10
   // Bloco de assinaturas (fim do documento)
@@ -691,6 +695,14 @@ function fichaEquipamentoXml(
     celulaFoto + "</w:tr></w:tbl>" + espaco();
 }
 
+/** Título de subtópico (8.1, 8.2 …): Arial 12 em negrito, como no modelo. */
+function tituloSubtopico(numero: string, titulo: string): string {
+  return '<w:p><w:pPr><w:spacing w:before="180" w:after="60" w:line="240" w:lineRule="auto"/>' +
+    '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr></w:pPr>' +
+    '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr>' +
+    `<w:t xml:space="preserve">${esc(numero)} ${esc(titulo)}</w:t></w:r></w:p>`;
+}
+
 /** Parágrafo vazio de respiro entre fichas. */
 function espaco(): string {
   return '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>';
@@ -912,6 +924,23 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   TOPICOS_PADRAO.forEach((t) => {
     if (!ocultos.has(t.numero)) novoNumero.set(t.numero, ++seq);
   });
+
+  // Tópico 8 — subtópicos criados pelo usuário (8.1, 8.2 …), cada um com o
+  // seu título e as suas fotos. A numeração segue o número FINAL do tópico,
+  // para continuar certa quando algum tópico anterior é ocultado.
+  if (!ocultos.has(8) && (dados.subtopicos8 || []).length > 0) {
+    const n8 = novoNumero.get(8) ?? 8;
+    let bloco8 = "";
+    (dados.subtopicos8 || []).forEach((st, i) => {
+      const ancora = `sub8-${i}`;
+      const figs = figurasDaAncora.get(ancora) || "";
+      if (!st.titulo?.trim() && !figs) return;      // subtópico vazio: ignora
+      bloco8 += tituloSubtopico(`${n8}.${i + 1}`, st.titulo || "");
+      bloco8 += figs;
+      figurasDaAncora.delete(ancora);
+    });
+    if (bloco8) addTexto(8, bloco8);
+  }
 
   let saida = "";
   // Capa (tópico 0): se desmarcada, começamos direto no título "1.".

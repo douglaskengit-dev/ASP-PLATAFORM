@@ -39,6 +39,7 @@ interface Props {
 /** Tudo que o formulário precisa para ser reconstruído depois. */
 export interface SnapshotRelatorio {
   d: Partial<DadosRelatorio>;
+  subs8?: { titulo: string }[];
   visiveis: Record<number, boolean>;
   equipeIds: string[];
   equipIds: string[];
@@ -67,6 +68,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   );
   const [equipeIds, setEquipeIds] = useState<string[]>(estadoSalvo?.equipeIds || []);
   const [equipIds, setEquipIds] = useState<string[]>(estadoSalvo?.equipIds || []);
+  // Subtópicos do tópico 8 (8.1, 8.2 …) — título livre, fotos próprias.
+  const [subs8, setSubs8] = useState<{ titulo: string }[]>(estadoSalvo?.subs8 || []);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
@@ -201,6 +204,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         equipamentosFicha: fichasComFoto,
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
+        subtopicos8: subs8,
         elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
         topicos: TODOS_TOPICOS.map((t) => ({ ...t, visivel: ativo(t.numero) })),
         imagens: imgs,
@@ -237,7 +241,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setEnviando(true);
     try {
       const blob = await montarBlob();
-      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId });
+      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId, subs8 });
       onFechar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao enviar o relatório.");
@@ -567,6 +571,40 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
         {Topico({ numero: 8, titulo: "Foto da Inspeção Visual Interna", maxFotos: 5, legendaFoto: "Inspeção visual interna", children: <>
           <EditorTexto valor={d.fotosInternas || ""} onChange={(v) => setD((x) => ({ ...x, fotosInternas: v }))} altura={80} />
+
+          <div style={{ marginTop: 12, borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 12.5 }}>Subtópicos <span className="detalhe">(8.1, 8.2 … numeração automática)</span></strong>
+              <button type="button" className="btn-dl btn-sec"
+                onClick={() => setSubs8((p) => [...p, { titulo: "" }])}>+ Subtópico</button>
+            </div>
+            {subs8.length === 0 && (
+              <p className="detalhe" style={{ margin: "6px 0 0" }}>
+                Nenhum subtópico. Use para separar as fotos por região do tanque (Teto, Costado, Fundo…).
+              </p>
+            )}
+            {subs8.map((st, i) => (
+              <div key={i} style={{ marginTop: 10, padding: 10, border: "1px solid var(--borda)", borderRadius: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>8.{i + 1}</strong>
+                  <input style={{ ...campo, flex: 1, minWidth: 160 }} placeholder="Título do subtópico (ex.: Teto)"
+                    value={st.titulo}
+                    onChange={(e) => setSubs8((p) => p.map((x, k) => k === i ? { titulo: e.target.value } : x))} />
+                  <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                    onClick={() => {
+                      // remove o subtópico e as fotos dele; reindexa os seguintes
+                      setFotos((p) => p.filter((f) => f.ancora !== `sub8-${i}`)
+                        .map((f) => {
+                          const m = /^sub8-(\d+)$/.exec(f.ancora || "");
+                          return m && Number(m[1]) > i ? { ...f, ancora: `sub8-${Number(m[1]) - 1}` } : f;
+                        }));
+                      setSubs8((p) => p.filter((_, k) => k !== i));
+                    }}>Remover</button>
+                </div>
+                {BlocoFotosAncora({ ancora: `sub8-${i}`, legendaPadrao: st.titulo || "Inspeção visual interna", max: 10 })}
+              </div>
+            ))}
+          </div>
         </> })}
 
         {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
