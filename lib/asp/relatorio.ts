@@ -82,7 +82,12 @@ export interface DadosRelatorio {
   equipamentos?: string;
   /** Fichas do catálogo — viram tabelas de duas colunas (rótulo | valor) no
    *  tópico 4, no layout do relatório de referência. */
-  equipamentosFicha?: { nome: string; especificacoes: { rotulo: string; valor: string }[] }[];
+  equipamentosFicha?: {
+    nome: string;
+    especificacoes: { rotulo: string; valor: string }[];
+    /** Foto do catálogo — entra ao lado da ficha, à direita. */
+    foto?: { dados: ArrayBuffer; extensao: "png" | "jpeg" };
+  }[];
   equipe?: string;
   volumeSedimento?: string;
   fotosInternas?: string;   // texto do tópico 8
@@ -427,6 +432,38 @@ function legendaAbnt(texto: string, antes = false): string {
     `<w:t xml:space="preserve">${esc(texto)}</w:t></w:r></w:p>`;
 }
 
+/** Dimensões reais da imagem, para preservar a proporção.
+ *  PNG: cabeçalho IHDR. JPEG: primeiro marcador SOF. */
+function dimensoesImagem(dados: ArrayBuffer, ext: "png" | "jpeg"): { w: number; h: number } | null {
+  const b = new Uint8Array(dados);
+  try {
+    if (ext === "png") {
+      if (b.length < 24 || b[0] !== 0x89 || b[1] !== 0x50) return null;
+      const ler = (o: number) => (b[o] << 24 | b[o + 1] << 16 | b[o + 2] << 8 | b[o + 3]) >>> 0;
+      return { w: ler(16), h: ler(20) };
+    }
+    if (b[0] !== 0xff || b[1] !== 0xd8) return null;
+    let i = 2;
+    while (i < b.length - 9) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const marca = b[i + 1];
+      // SOF0..SOF15, exceto DHT(c4), JPG(c8) e DAC(cc)
+      if (marca >= 0xc0 && marca <= 0xcf && marca !== 0xc4 && marca !== 0xc8 && marca !== 0xcc) {
+        return { h: (b[i + 5] << 8) | b[i + 6], w: (b[i + 7] << 8) | b[i + 8] };
+      }
+      i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+    }
+  } catch { /* imagem ilegível: cai no padrão */ }
+  return null;
+}
+
+/** Altura que mantém a proporção da imagem dentro de uma largura em cm. */
+function alturaProporcional(img: { dados: ArrayBuffer; extensao: "png" | "jpeg" }, larguraCm: number): number {
+  const d = dimensoesImagem(img.dados, img.extensao);
+  const razao = d && d.w > 0 ? d.h / d.w : 0.72;      // 0,72 = padrão antigo
+  return Math.round(larguraCm * razao * 100) / 100;
+}
+
 /** Figura centralizada. cx/cy em EMU (1 cm = 360000). */
 function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: number): string {
   const cx = Math.round(larguraCm * 360000);
@@ -588,32 +625,75 @@ function preencherQuadroRevisao(xml: string, valores: (string | undefined)[]): s
 
 /** Ficha de equipamento: nome em negrito e tabela de duas colunas
  *  (rótulo | valor), sem bordas aparentes — espelha o relatório modelo. */
-function fichaEquipamentoXml(f: { nome: string; especificacoes: { rotulo: string; valor: string }[] }): string {
+function fichaEquipamentoXml(
+  f: { nome: string; especificacoes: { rotulo: string; valor: string }[]; foto?: { dados: ArrayBuffer; extensao: "png" | "jpeg" } },
+  rIdFoto?: string,
+  idImg = 1,
+): string {
   const cab =
     '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" w:before="120" w:after="60"/>' +
     '<w:ind w:left="709"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr></w:pPr>' +
     '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr>' +
     `<w:t xml:space="preserve">${esc(f.nome)}</w:t></w:r></w:p>`;
-  if (!f.especificacoes || f.especificacoes.length === 0) return cab;
+
+  const especs = f.especificacoes || [];
+  const temFoto = !!(f.foto && rIdFoto);
+  if (especs.length === 0 && !temFoto) return cab;
+
+  const semBorda =
+    '<w:tblBorders><w:top w:val="none" w:sz="0"/><w:left w:val="none" w:sz="0"/>' +
+    '<w:bottom w:val="none" w:sz="0"/><w:right w:val="none" w:sz="0"/>' +
+    '<w:insideH w:val="none" w:sz="0"/><w:insideV w:val="none" w:sz="0"/></w:tblBorders>';
+
   const cel = (txt: string, negrito: boolean, larg: number) =>
     `<w:tc><w:tcPr><w:tcW w:w="${larg}" w:type="dxa"/></w:tcPr>` +
     '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" w:after="0"/>' +
     `<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>${negrito ? "<w:b/>" : ""}<w:sz w:val="20"/></w:rPr></w:pPr>` +
     `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>${negrito ? "<w:b/>" : ""}<w:sz w:val="20"/></w:rPr>` +
     `<w:t xml:space="preserve">${esc(txt)}</w:t></w:r></w:p></w:tc>`;
-  const linhas = f.especificacoes
+
+  // Larguras: com foto, a ficha ocupa ~60% e a imagem ~40%.
+  const larguraFotoCm = 6.2;
+  const colEspec = temFoto ? [2600, 2900] : [3260, 5670];
+  const larguraFicha = colEspec[0] + colEspec[1];
+
+  const linhas = especs
     .filter((e) => (e.rotulo || "").trim() || (e.valor || "").trim())
-    .map((e) => `<w:tr>${cel(e.rotulo || "", true, 3260)}${cel(e.valor || "", false, 5670)}</w:tr>`) 
+    .map((e) => `<w:tr>${cel(e.rotulo || "", true, colEspec[0])}${cel(e.valor || "", false, colEspec[1])}</w:tr>`)
     .join("");
+
+  const tabelaEspecs =
+    `<w:tbl><w:tblPr>${semBorda}<w:tblW w:w="${larguraFicha}" w:type="dxa"/></w:tblPr>` +
+    `<w:tblGrid><w:gridCol w:w="${colEspec[0]}"/><w:gridCol w:w="${colEspec[1]}"/></w:tblGrid>` +
+    linhas + "</w:tbl>";
+
+  if (!temFoto) {
+    return cab +
+      `<w:tbl><w:tblPr><w:tblInd w:w="709" w:type="dxa"/>${semBorda}` +
+      `<w:tblW w:w="${larguraFicha}" w:type="dxa"/></w:tblPr>` +
+      `<w:tblGrid><w:gridCol w:w="${colEspec[0]}"/><w:gridCol w:w="${colEspec[1]}"/></w:tblGrid>` +
+      linhas + "</w:tbl>" + espaco();
+  }
+
+  // Tabela externa: ficha à esquerda, foto à direita (centrada verticalmente).
+  const alturaFoto = alturaProporcional(f.foto!, larguraFotoCm);
+  const colFoto = Math.round(larguraFotoCm * 567) + 120;
+  const celulaFoto =
+    `<w:tc><w:tcPr><w:tcW w:w="${colFoto}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>` +
+    figuraXml(rIdFoto!, idImg, larguraFotoCm, alturaFoto) + "</w:tc>";
+
   return cab +
-    '<w:tbl><w:tblPr><w:tblInd w:w="709" w:type="dxa"/>' +
-    '<w:tblBorders><w:top w:val="none" w:sz="0"/><w:left w:val="none" w:sz="0"/>' +
-    '<w:bottom w:val="none" w:sz="0"/><w:right w:val="none" w:sz="0"/>' +
-    '<w:insideH w:val="none" w:sz="0"/><w:insideV w:val="none" w:sz="0"/></w:tblBorders>' +
-    '<w:tblW w:w="8930" w:type="dxa"/></w:tblPr>' +
-    '<w:tblGrid><w:gridCol w:w="3260"/><w:gridCol w:w="5670"/></w:tblGrid>' +
-    linhas + "</w:tbl>" +
-    '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>';
+    `<w:tbl><w:tblPr><w:tblInd w:w="709" w:type="dxa"/>${semBorda}` +
+    `<w:tblW w:w="${larguraFicha + colFoto}" w:type="dxa"/></w:tblPr>` +
+    `<w:tblGrid><w:gridCol w:w="${larguraFicha}"/><w:gridCol w:w="${colFoto}"/></w:tblGrid>` +
+    `<w:tr><w:tc><w:tcPr><w:tcW w:w="${larguraFicha}" w:type="dxa"/></w:tcPr>` +
+    tabelaEspecs + '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p></w:tc>' +
+    celulaFoto + "</w:tr></w:tbl>" + espaco();
+}
+
+/** Parágrafo vazio de respiro entre fichas. */
+function espaco(): string {
+  return '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>';
 }
 
 /** Injeta parágrafos dentro da primeira célula de uma tabela vazia
@@ -722,16 +802,27 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   }
 
   // 4) Imagens: registra no ZIP + relationships + content types
+  // Fotos das fichas de equipamento entram na mesma fila de registro das
+  // figuras — o ZIP e o arquivo de relações são únicos.
+  const fotosFicha = (dados.equipamentosFicha || [])
+    .map((f, i) => ({ i, foto: f.foto }))
+    .filter((x): x is { i: number; foto: { dados: ArrayBuffer; extensao: "png" | "jpeg" } } => !!x.foto);
+  const rIdDaFicha = new Map<number, string>();
+
   const rels: { rId: string; nome: string }[] = [];
-  if (dados.imagens && dados.imagens.length > 0) {
+  const paraRegistrar: { dados: ArrayBuffer; extensao: "png" | "jpeg" }[] = [
+    ...(dados.imagens || []),
+    ...fotosFicha.map((x) => x.foto),
+  ];
+  if (paraRegistrar.length > 0) {
     const relsPath = "word/_rels/document.xml.rels";
     const relsFile = zip.file(relsPath);
     let relsXml = relsFile ? await relsFile.async("string") : "";
     let ctXml = (await zip.file("[Content_Types].xml")?.async("string")) || "";
 
     let proximo = 900;
-    for (let i = 0; i < dados.imagens.length; i++) {
-      const img = dados.imagens[i];
+    for (let i = 0; i < paraRegistrar.length; i++) {
+      const img = paraRegistrar[i];
       const nome = `asp${i + 1}.${img.extensao}`;
       zip.file(`word/media/${nome}`, img.dados);
       const rId = `rIdASP${proximo++}`;
@@ -751,6 +842,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     }
     zip.file(relsPath, relsXml);
     if (ctXml) zip.file("[Content_Types].xml", ctXml);
+    // as fotos de ficha vêm depois das figuras na fila de registro
+    const base = (dados.imagens || []).length;
+    fotosFicha.forEach((x, k) => rIdDaFicha.set(x.i, rels[base + k].rId));
   }
 
   // 5) Tópicos: montar blocos, aplicar conteúdo, ocultar e renumerar
@@ -773,7 +867,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const addTexto = (n: number, s: string) =>
     textoDoTopico.set(n, (textoDoTopico.get(n) || "") + s);
   if (dados.metodos) addTexto(3, htmlParaParagrafos(dados.metodos));
-  for (const f of dados.equipamentosFicha || []) addTexto(4, fichaEquipamentoXml(f));
+  (dados.equipamentosFicha || []).forEach((f, i) =>
+    addTexto(4, fichaEquipamentoXml(f, rIdDaFicha.get(i), 500 + i)));
   if (dados.equipamentos) addTexto(4, htmlParaParagrafos(dados.equipamentos));
   if (dados.fotosInternas) addTexto(8, htmlParaParagrafos(dados.fotosInternas));
   if (dados.conclusao) addTexto(9, htmlParaParagrafos(dados.conclusao));
@@ -788,7 +883,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     const rId = rels[i]?.rId;
     if (!rId) return;
     const largura = img.larguraCm || 15;
-    const altura = Math.round(largura * 0.72 * 100) / 100;
+    // Proporção real do arquivo — o fator fixo de antes achatava as fotos.
+    const altura = alturaProporcional(img, largura);
     const bloco =
       legendaAbnt(`Figura ${MARCA_FIG} – ${img.legenda}`, true) +
       figuraXml(rId, i + 1, largura, altura) +
