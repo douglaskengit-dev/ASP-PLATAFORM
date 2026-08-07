@@ -40,6 +40,7 @@ interface Props {
 export interface SnapshotRelatorio {
   d: Partial<DadosRelatorio>;
   subs8?: { titulo: string }[];
+  textosExtras?: Record<number, string>;
   visiveis: Record<number, boolean>;
   equipeIds: string[];
   equipIds: string[];
@@ -74,6 +75,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [equipIds, setEquipIds] = useState<string[]>(estadoSalvo?.equipIds || []);
   // Subtópicos do tópico 8 (8.1, 8.2 …) — título livre, fotos próprias.
   const [subs8, setSubs8] = useState<{ titulo: string }[]>(estadoSalvo?.subs8 || []);
+  // Texto das seções extras do procedimento, por índice. O título é do Catálogo.
+  const [textosExtras, setTextosExtras] = useState<Record<number, string>>(estadoSalvo?.textosExtras || {});
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
@@ -129,6 +132,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   );
   /** Quantos tópicos o procedimento escolhido prevê (null = todos). */
   const topicosDoProc: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
+  /** Seções extras definidas no Catálogo para o procedimento escolhido. */
+  const extras: { titulo: string }[] = Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
@@ -217,6 +222,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         subtopicos8: subs8,
+        topicosExtras: extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "" })),
+        templateUrl: proc?.template_path
+          ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
+          : undefined,
         elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
         topicos: TODOS_TOPICOS.map((t) => ({ ...t, visivel: ativo(t.numero) })),
         imagens: imgs,
@@ -253,7 +262,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setEnviando(true);
     try {
       const blob = await montarBlob();
-      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId, subs8 });
+      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras });
       onFechar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao enviar o relatório.");
@@ -631,6 +640,24 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             ))}
           </div>
         </> })}
+
+        {/* Seções extras do procedimento: entram aqui, antes da Conclusão,
+            exatamente como sairão no documento. O título vem do Catálogo. */}
+        {extras.length > 0 && (
+          <div className="card" style={{ margin: 0 }}>
+            <strong style={{ fontSize: 13.5 }}>
+              Seções de {proc?.codigo} <span className="detalhe">(definidas no Catálogo)</span>
+            </strong>
+            {extras.map((t, i) => (
+              <div key={i} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
+                <strong style={{ fontSize: 12.5 }}>{t.titulo || `Seção ${i + 1}`}</strong>
+                <EditorTexto valor={textosExtras[i] || ""} altura={100}
+                  onChange={(v) => setTextosExtras((p) => ({ ...p, [i]: v }))} />
+                {BlocoFotosAncora({ ancora: `extra-${i}`, legendaPadrao: t.titulo || "", max: 10, topico: 9 })}
+              </div>
+            ))}
+          </div>
+        )}
 
         {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />

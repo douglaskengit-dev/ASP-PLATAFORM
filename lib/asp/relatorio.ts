@@ -100,6 +100,12 @@ export interface DadosRelatorio {
   // Bloco de assinaturas (fim do documento)
   elaboradoPor?: string;   // usuário de Operações
   revisadoPor?: string;    // usuário da Gerência
+  /** Tópicos genéricos do procedimento: título + texto + fotos. Entram antes
+   *  da Conclusão e são numerados na sequência dos demais. As fotos chegam em
+   *  `imagens` com ancora "extra-<índice>". */
+  topicosExtras?: { titulo: string; texto?: string }[];
+  /** Modelo .docx a usar. Vazio = modelo padrão da ASP. */
+  templateUrl?: string;
   // Estrutura
   topicos: TopicoRelatorio[];
   imagens?: ImagemRelatorio[];
@@ -706,6 +712,14 @@ function fichaEquipamentoXml(
     celulaFoto + "</w:tr></w:tbl>" + espaco();
 }
 
+/** Título de tópico ("11. Ensaio…"): Arial 12 negrito, como no modelo. */
+function tituloTopico(numero: number, titulo: string): string {
+  return '<w:p><w:pPr><w:spacing w:before="240" w:after="120" w:line="240" w:lineRule="auto"/>' +
+    '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr></w:pPr>' +
+    '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr>' +
+    `<w:t xml:space="preserve">${numero}. ${esc(titulo)}:</w:t></w:r></w:p>`;
+}
+
 /** Título de subtópico (8.1, 8.2 …): Arial 12 em negrito, como no modelo. */
 function tituloSubtopico(numero: string, titulo: string): string {
   return '<w:p><w:pPr><w:spacing w:before="180" w:after="60" w:line="240" w:lineRule="auto"/>' +
@@ -759,7 +773,8 @@ function numeroTopico(texto: string): number | null {
 export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
 
-  const resp = await fetch("/templates/relatorio-asp-v3.docx");
+  // Cada procedimento pode ter o seu modelo; sem isso, usa o padrão da ASP.
+  const resp = await fetch(dados.templateUrl || "/templates/relatorio-asp-v3.docx");
   if (!resp.ok) throw new Error("Não foi possível carregar o modelo do relatório.");
   const zip = await JSZip.loadAsync(await resp.arrayBuffer());
 
@@ -931,11 +946,29 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   });
 
   // novo número de cada tópico visível (renumeração sequencial)
+  // Tópicos extras do procedimento entram ANTES da Conclusão — é onde novas
+  // seções de conteúdo pertencem. Sem Conclusão nem Recomendações, vão ao fim.
+  const extras = (dados.topicosExtras || []).filter((e) => e?.titulo?.trim() || e?.texto?.trim());
+  const ancoraExtras = [9, 10].find((n) => !ocultos.has(n)) ?? null;
+
   const novoNumero = new Map<number, number>();
+  const numeroExtra = new Map<number, number>();
   let seq = 0;
   TOPICOS_PADRAO.forEach((t) => {
+    if (ancoraExtras === t.numero) extras.forEach((_, i) => numeroExtra.set(i, ++seq));
     if (!ocultos.has(t.numero)) novoNumero.set(t.numero, ++seq);
   });
+  if (ancoraExtras === null) extras.forEach((_, i) => numeroExtra.set(i, ++seq));
+
+  /** Bloco XML de um tópico extra: título numerado, texto e fotos. */
+  const xmlExtra = (i: number): string => {
+    const e = extras[i];
+    const ancora = `extra-${i}`;
+    const figs = figurasDaAncora.get(ancora) || "";
+    figurasDaAncora.delete(ancora);
+    return tituloTopico(numeroExtra.get(i) ?? 0, e.titulo || "") +
+      (e.texto ? htmlParaParagrafos(e.texto) : "") + figs;
+  };
 
   // Tópico 8 — subtópicos criados pelo usuário (8.1, 8.2 …), cada um com o
   // seu título e as suas fotos. A numeração segue o número FINAL do tópico,
@@ -962,6 +995,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     const nTop = numeroTopico(blocos[idx].texto);
     if (nTop !== null && inicioDoTopico.get(nTop) === idx) {
       const fim = fimDoTopico.get(nTop) ?? blocos.length;
+      // os extras vêm imediatamente antes da seção-âncora (Conclusão)
+      if (nTop === ancoraExtras) extras.forEach((_, i) => { saida += xmlExtra(i); });
       if (ocultos.has(nTop)) { idx = fim; continue; }          // tópico oculto: pula tudo
       const novo = novoNumero.get(nTop) ?? nTop;
       const figuras = figurasDoTopico.get(nTop);
@@ -1010,6 +1045,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // O <w:sectPr> final (margens + referência a cabeçalho/rodapé) fica no fim do
   // body e NÃO é um bloco w:p/w:tbl — precisa ser recolocado, senão o documento
   // perde o timbre e volta às margens padrão.
+  // Sem Conclusão nem Recomendações, os extras fecham o documento.
+  if (ancoraExtras === null) extras.forEach((_, i) => { saida += xmlExtra(i); });
+
   const fimUltimoBloco = blocos.length > 0 ? blocos[blocos.length - 1].fim : 0;
   saida += body.slice(fimUltimoBloco);
 

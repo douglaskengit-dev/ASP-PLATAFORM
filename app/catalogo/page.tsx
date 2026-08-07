@@ -24,6 +24,10 @@ interface Procedimento {
   equipamentos: string[]; ordem: number;
   /** Tópicos do relatório para este procedimento. null = todos. */
   topicos: number[] | null;
+  /** Modelo .docx próprio (storage). Vazio = modelo padrão da ASP. */
+  template_path: string | null;
+  /** Seções genéricas acrescentadas: título + texto + fotos no formulário. */
+  topicos_extras: { titulo: string }[];
 }
 
 const campo: React.CSSProperties = {
@@ -47,6 +51,7 @@ export default function CatalogoPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [enviandoFoto, setEnviandoFoto] = useState(false);
+  const [enviandoModelo, setEnviandoModelo] = useState(false);
   // Item aberto no modal (cópia local — só grava ao salvar).
   const [edEquip, setEdEquip] = useState<Equipamento | null>(null);
   const [edProc, setEdProc] = useState<Procedimento | null>(null);
@@ -58,6 +63,8 @@ export default function CatalogoPage() {
         setProcedimentos((d.procedimentos || []).map((p: any) => ({
           ...p, equipamentos: p.equipamentos || [],
           topicos: Array.isArray(p.topicos) ? p.topicos : null,
+          template_path: p.template_path || null,
+          topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
         })));
         setPodeEditar(!!d.podeEditar);
       })
@@ -81,7 +88,8 @@ export default function CatalogoPage() {
     const dados = tipo === "equipamento"
       ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
       : { codigo: item.codigo, nome: item.nome, metodos: item.metodos,
-          equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos };
+          equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos,
+          template_path: item.template_path || null, topicos_extras: item.topicos_extras || [] };
     const r = item.id
       ? await api("PATCH", { tipo, id: item.id, dados })
       : await api("POST", { tipo, dados });
@@ -112,13 +120,31 @@ export default function CatalogoPage() {
     }
   }
 
+  /** Envia o modelo .docx deste procedimento e guarda o caminho. */
+  async function enviarModelo(arquivo: File) {
+    if (!edProc) return;
+    setEnviandoModelo(true);
+    setErro(null);
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", arquivo);
+      fd.append("codigo", edProc.codigo || "procedimento");
+      const res = await fetch("/api/catalogo/template", { method: "POST", body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(d?.erro || "Falha ao enviar o modelo."); return; }
+      setEdProc({ ...edProc, template_path: d.caminho });
+    } finally {
+      setEnviandoModelo(false);
+    }
+  }
+
   const novoEquip = (): Equipamento => ({
     id: "", slug: `equip-${Date.now()}`, nome: "", especificacoes: [], fotos: [],
     ordem: equipamentos.length + 1,
   });
   const novoProc = (): Procedimento => ({
     id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
-    topicos: null,
+    topicos: null, template_path: null, topicos_extras: [],
   });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -216,6 +242,29 @@ export default function CatalogoPage() {
               <textarea style={{ ...campo, minHeight: 110 }} value={edProc.metodos || ""} disabled={!podeEditar}
                 onChange={(ev) => setEdProc({ ...edProc, metodos: ev.target.value })} /></div>
             <div>
+              <label style={rot}>Modelo do relatório (.docx)</label>
+              <p className="detalhe" style={{ margin: "2px 0 6px" }}>
+                Deixe em branco para usar o modelo padrão da ASP. Envie um arquivo próprio quando
+                este procedimento gerar um tipo de relatório diferente.
+              </p>
+              {edProc.template_path ? (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="detalhe" style={{ margin: 0 }}>
+                    Modelo próprio: {edProc.template_path.split("/").pop()}
+                  </span>
+                  {podeEditar && (
+                    <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                      onClick={() => setEdProc({ ...edProc, template_path: null })}>Voltar ao padrão</button>
+                  )}
+                </div>
+              ) : podeEditar && (
+                <input type="file" accept=".docx" disabled={enviandoModelo}
+                  onChange={(ev) => { const f = ev.target.files?.[0]; if (f) enviarModelo(f); ev.target.value = ""; }} />
+              )}
+              {enviandoModelo && <span className="detalhe">Enviando modelo…</span>}
+            </div>
+
+            <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ ...rot, marginBottom: 0 }}>Tópicos do relatório</label>
                 {podeEditar && (
@@ -246,6 +295,42 @@ export default function CatalogoPage() {
                   );
                 })}
               </div>
+            </div>
+
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <label style={{ ...rot, marginBottom: 0 }}>Seções extras deste procedimento</label>
+                {podeEditar && (
+                  <button type="button" className="btn-dl btn-sec"
+                    onClick={() => setEdProc({ ...edProc, topicos_extras: [...edProc.topicos_extras, { titulo: "" }] })}>
+                    + Seção
+                  </button>
+                )}
+              </div>
+              <p className="detalhe" style={{ margin: "2px 0 6px" }}>
+                Seções de texto e fotos que só este procedimento tem. Entram antes da Conclusão,
+                numeradas na sequência dos demais tópicos.
+              </p>
+              {edProc.topicos_extras.length === 0 && (
+                <p className="detalhe" style={{ margin: 0 }}>Nenhuma seção extra.</p>
+              )}
+              {edProc.topicos_extras.map((t, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                  <input style={campo} value={t.titulo} disabled={!podeEditar}
+                    placeholder="Título da seção (ex.: Ensaio de estanqueidade)"
+                    onChange={(ev) => setEdProc({
+                      ...edProc,
+                      topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { titulo: ev.target.value } : x),
+                    })} />
+                  {podeEditar && (
+                    <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                      onClick={() => setEdProc({
+                        ...edProc,
+                        topicos_extras: edProc.topicos_extras.filter((_, k) => k !== i),
+                      })}>Remover</button>
+                  )}
+                </div>
+              ))}
             </div>
 
             <div>
