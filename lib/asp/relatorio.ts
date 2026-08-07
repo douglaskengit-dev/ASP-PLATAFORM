@@ -427,6 +427,17 @@ export function htmlParaTexto(html?: string): string | undefined {
   return t.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Legenda da figura: "Figura N" em NEGRITO e a descrição em texto normal.
+ *  Arial 10, centralizada — o número é trocado depois, na ordem do documento. */
+function legendaFigura(descricao: string): string {
+  const fonte = '<w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/>';
+  return '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" w:before="120" w:after="0"/>' +
+    `<w:jc w:val="center"/><w:rPr>${fonte}</w:rPr></w:pPr>` +
+    `<w:r><w:rPr>${fonte}<w:b/></w:rPr><w:t xml:space="preserve">Figura ${MARCA_FIG}</w:t></w:r>` +
+    `<w:r><w:rPr>${fonte}</w:rPr>` +
+    `<w:t xml:space="preserve"> – ${esc(descricao)}</w:t></w:r></w:p>`;
+}
+
 /** Legenda de figura: Arial 10, centralizada, entrelinha simples. */
 function legendaAbnt(texto: string, antes = false): string {
   return '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" ' +
@@ -900,7 +911,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     // Legenda ABAIXO da figura (padrão adotado pela ASP), seguida da fonte.
     const bloco =
       figuraXml(rId, i + 1, largura, altura) +
-      legendaAbnt(`Figura ${MARCA_FIG} – ${img.legenda}`, true) +
+      legendaFigura(img.legenda) +
       legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`);
     if (img.ancora) {
       figurasDaAncora.set(img.ancora, (figurasDaAncora.get(img.ancora) || "") + bloco);

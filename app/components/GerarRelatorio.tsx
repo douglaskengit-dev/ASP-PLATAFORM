@@ -46,7 +46,11 @@ export interface SnapshotRelatorio {
   coletaId: string;
 }
 
-interface FotoTopico { arquivo: File; legenda: string; topico: number; ancora?: string }
+interface FotoTopico {
+  arquivo: File; legenda: string; topico: number; ancora?: string;
+  /** Crédito da imagem — sai como "Fonte: …" abaixo da legenda. */
+  fonte?: string;
+}
 
 const campo: React.CSSProperties = {
   width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid var(--borda)",
@@ -184,7 +188,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           dados: await f.arquivo.arrayBuffer(),
           extensao: ext as "png" | "jpeg",
           legenda: f.legenda || f.arquivo.name.replace(/\.[^.]+$/, ""),
-          topico: f.topico, ancora: f.ancora,
+          topico: f.topico, ancora: f.ancora, fonte: f.fonte?.trim() || undefined,
         });
       }
       return gerarRelatorioDocx({
@@ -258,7 +262,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
   /** Fotos de um subtópico (6.1, 6.2, 6.3), com limite de quantidade.
    *  Cada envio abre uma nova linha com legenda própria. */
-  function BlocoFotosAncora({ ancora, legendaPadrao, max }: { ancora: string; legendaPadrao: string; max: number }) {
+  function BlocoFotosAncora({ ancora, legendaPadrao, max, topico = 6 }:
+      { ancora: string; legendaPadrao: string; max: number; topico?: number }) {
     const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.ancora === ancora);
     const cheio = minhas.length >= max;
     return (
@@ -267,20 +272,29 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           <input type="file" accept="image/png,image/jpeg" multiple={max > 1}
             onChange={(e) => {
               const fs = Array.from(e.target.files || []).slice(0, max - minhas.length);
-              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: legendaPadrao, topico: 6, ancora }))]);
+              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: legendaPadrao, topico, ancora }))]);
               e.target.value = "";
             }} />
         )}
         {cheio && <span className="detalhe">Limite de {max} foto(s) atingido.</span>}
-        {minhas.map(({ f, i }) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginTop: 6, alignItems: "center" }}>
-            <span className="detalhe" style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.arquivo.name}</span>
-            <input style={campo} placeholder="Legenda" value={f.legenda}
-              onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
-            <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-              onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
-          </div>
-        ))}
+        {minhas.map(({ f, i }) => LinhaFoto(f, i))}
+      </div>
+    );
+  }
+
+  /** Linha de edição de uma foto: nome do arquivo, legenda, fonte e remover.
+   *  A FONTE é o crédito da imagem — nossa, do cliente ou de terceiro. */
+  function LinhaFoto(f: FotoTopico, i: number) {
+    return (
+      <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginTop: 6, alignItems: "center" }}>
+        <span className="detalhe" style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.arquivo.name}</span>
+        <input style={campo} placeholder="Legenda" value={f.legenda}
+          onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
+        <input style={campo} list="sug-fonte-figura" placeholder="Fonte (padrão: ASP)"
+          value={f.fonte ?? ""}
+          onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, fonte: e.target.value } : x))} />
+        <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+          onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
       </div>
     );
   }
@@ -299,15 +313,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {cheio ? <span className="detalhe">Limite de {limite} foto(s) atingido.</span> : (
         <input type="file" accept="image/png,image/jpeg" multiple
           onChange={(e) => { addFotos(e.target.files, topico, limite - minhas.length, legendaPadrao); e.target.value = ""; }} />)}
-        {minhas.map(({ f, i }) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginTop: 6, alignItems: "center" }}>
-            <span className="detalhe" style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.arquivo.name}</span>
-            <input style={campo} placeholder="Legenda da figura" value={f.legenda}
-              onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
-            <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-              onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
-          </div>
-        ))}
+        {minhas.map(({ f, i }) => LinhaFoto(f, i))}
       </div>
     );
   }
@@ -339,6 +345,13 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
   return (
     <Modal titulo="📄 Gerar Relatório Técnico" largo onFechar={onFechar}>
+      {/* Sugestões de crédito das figuras: a nossa e a do cliente do projeto.
+          O campo é livre — dá para creditar um terceiro. */}
+      <datalist id="sug-fonte-figura">
+        <option value="ASP Serviços Industriais" />
+        {d.cliente && <option value={d.cliente} />}
+        <option value="Desenho fornecido pelo cliente." />
+      </datalist>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="detalhe" style={{ margin: 0 }}>
           Preenche o modelo oficial da ASP mantendo timbre, cabeçalho e rodapé. Formatação conforme
@@ -601,7 +614,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                       setSubs8((p) => p.filter((_, k) => k !== i));
                     }}>Remover</button>
                 </div>
-                {BlocoFotosAncora({ ancora: `sub8-${i}`, legendaPadrao: st.titulo || "Inspeção visual interna", max: 10 })}
+                {BlocoFotosAncora({ ancora: `sub8-${i}`, legendaPadrao: st.titulo || "Inspeção visual interna", max: 10, topico: 8 })}
               </div>
             ))}
           </div>
