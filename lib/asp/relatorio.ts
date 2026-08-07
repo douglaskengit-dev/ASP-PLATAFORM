@@ -600,10 +600,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = aplicarMargensAbnt(xml);
 
   // 2) Marcadores simples
-  // O modelo já traz "Relatório de " antes do [TITULO]; se o usuário digitou
-  // o título completo, removemos o prefixo para não sair "Relatório de Relatório de…".
-  const titulo = (dados.titulo || "").replace(/^\s*relat[óo]rio\s+de\s+/i, "");
-  xml = trocarMarcador(xml, "[TITULO]", titulo);
+  // O título vai inteiro, como digitado — o modelo não traz mais prefixo.
+  xml = trocarMarcador(xml, "[TITULO]", dados.titulo);
   xml = trocarMarcador(xml, "[CLIENTE]", dados.cliente);
   xml = trocarMarcador(xml, "[Endereço]", dados.endereco);
   xml = trocarMarcador(xml, "[Volume de sedimento]", dados.volumeSedimento || "—");
