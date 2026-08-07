@@ -100,10 +100,11 @@ export interface DadosRelatorio {
   // Bloco de assinaturas (fim do documento)
   elaboradoPor?: string;   // usuário de Operações
   revisadoPor?: string;    // usuário da Gerência
-  /** Tópicos genéricos do procedimento: título + texto + fotos. Entram antes
-   *  da Conclusão e são numerados na sequência dos demais. As fotos chegam em
-   *  `imagens` com ancora "extra-<índice>". */
-  topicosExtras?: { titulo: string; texto?: string }[];
+  /** Tópicos próprios do procedimento: título + texto + fotos. Podem ficar em
+   *  qualquer posição — `apos` é o número do tópico padrão depois do qual ele
+   *  entra (0 = logo após a capa). São numerados junto com os demais. As fotos
+   *  chegam em `imagens` com ancora "extra-<índice>". */
+  topicosExtras?: { titulo: string; texto?: string; apos?: number }[];
   /** Modelo .docx a usar. Vazio = modelo padrão da ASP. */
   templateUrl?: string;
   // Estrutura
@@ -946,19 +947,21 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   });
 
   // novo número de cada tópico visível (renumeração sequencial)
-  // Tópicos extras do procedimento entram ANTES da Conclusão — é onde novas
-  // seções de conteúdo pertencem. Sem Conclusão nem Recomendações, vão ao fim.
+  // Tópicos próprios do procedimento: cada um sabe depois de qual tópico
+  // padrão entra (`apos`), então podem ficar no meio dos demais.
   const extras = (dados.topicosExtras || []).filter((e) => e?.titulo?.trim() || e?.texto?.trim());
-  const ancoraExtras = [9, 10].find((n) => !ocultos.has(n)) ?? null;
+  const aposDo = (i: number) => Math.max(0, Math.min(10, extras[i].apos ?? 10));
+  const extrasApos = (k: number) =>
+    extras.map((_, i) => i).filter((i) => aposDo(i) === k);
 
   const novoNumero = new Map<number, number>();
   const numeroExtra = new Map<number, number>();
   let seq = 0;
+  extrasApos(0).forEach((i) => numeroExtra.set(i, ++seq));
   TOPICOS_PADRAO.forEach((t) => {
-    if (ancoraExtras === t.numero) extras.forEach((_, i) => numeroExtra.set(i, ++seq));
     if (!ocultos.has(t.numero)) novoNumero.set(t.numero, ++seq);
+    extrasApos(t.numero).forEach((i) => numeroExtra.set(i, ++seq));
   });
-  if (ancoraExtras === null) extras.forEach((_, i) => numeroExtra.set(i, ++seq));
 
   /** Bloco XML de um tópico extra: título numerado, texto e fotos. */
   const xmlExtra = (i: number): string => {
@@ -987,7 +990,18 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     if (bloco8) addTexto(8, bloco8);
   }
 
+  const extrasEmitidos = new Set<number>();
   let saida = "";
+  /** Emite os tópicos próprios cuja posição já passou (até `ate`, inclusive). */
+  const emitirExtrasAte = (ate: number) => {
+    extras.forEach((_, i) => {
+      if (!extrasEmitidos.has(i) && aposDo(i) <= ate) {
+        saida += xmlExtra(i);
+        extrasEmitidos.add(i);
+      }
+    });
+  };
+
   // Capa (tópico 0): se desmarcada, começamos direto no título "1.".
   const capaOculta = dados.topicos.some((t) => t.numero === 0 && !t.visivel);
   let idx = capaOculta ? (inicioDoTopico.get(1) ?? 0) : 0;
@@ -995,8 +1009,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     const nTop = numeroTopico(blocos[idx].texto);
     if (nTop !== null && inicioDoTopico.get(nTop) === idx) {
       const fim = fimDoTopico.get(nTop) ?? blocos.length;
-      // os extras vêm imediatamente antes da seção-âncora (Conclusão)
-      if (nTop === ancoraExtras) extras.forEach((_, i) => { saida += xmlExtra(i); });
+      // tudo que devia entrar ANTES deste tópico (inclusive de tópicos ocultos)
+      emitirExtrasAte(nTop - 1);
       if (ocultos.has(nTop)) { idx = fim; continue; }          // tópico oculto: pula tudo
       const novo = novoNumero.get(nTop) ?? nTop;
       const figuras = figurasDoTopico.get(nTop);
@@ -1035,6 +1049,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       }
       // figuras de tópicos sem marcador próprio entram ao final da seção
       if (figuras && !figurasUsadas) saida += figuras;
+      emitirExtrasAte(nTop);                    // os que vêm logo depois dele
       idx = fim;
       continue;
     }
@@ -1045,8 +1060,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // O <w:sectPr> final (margens + referência a cabeçalho/rodapé) fica no fim do
   // body e NÃO é um bloco w:p/w:tbl — precisa ser recolocado, senão o documento
   // perde o timbre e volta às margens padrão.
-  // Sem Conclusão nem Recomendações, os extras fecham o documento.
-  if (ancoraExtras === null) extras.forEach((_, i) => { saida += xmlExtra(i); });
+  emitirExtrasAte(10);                        // o que sobrou fecha o documento
 
   const fimUltimoBloco = blocos.length > 0 ? blocos[blocos.length - 1].fim : 0;
   saida += body.slice(fimUltimoBloco);

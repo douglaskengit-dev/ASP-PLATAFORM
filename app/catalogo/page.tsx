@@ -26,8 +26,8 @@ interface Procedimento {
   topicos: number[] | null;
   /** Modelo .docx próprio (storage). Vazio = modelo padrão da ASP. */
   template_path: string | null;
-  /** Seções genéricas acrescentadas: título + texto + fotos no formulário. */
-  topicos_extras: { titulo: string }[];
+  /** Tópicos próprios deste procedimento: título + posição (`apos`). */
+  topicos_extras: { titulo: string; apos?: number }[];
 }
 
 const campo: React.CSSProperties = {
@@ -275,13 +275,20 @@ export default function CatalogoPage() {
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>
                 Define o formato do relatório deste procedimento. Sem nenhuma marcação, entram todos.
               </p>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 6 }}>
-                {TODOS_TOPICOS.map((t) => {
+              <div style={{ border: "1px solid var(--borda)", borderRadius: 8, overflow: "hidden" }}>
+                {TODOS_TOPICOS.map((t, k) => {
                   const marcados = edProc.topicos;
                   const ativo = marcados === null || marcados.includes(t.numero);
                   return (
-                    <label key={t.numero} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                    <label key={t.numero} style={{
+                      display: "flex", gap: 10, alignItems: "center", fontSize: 13,
+                      padding: "7px 10px", cursor: podeEditar ? "pointer" : "default",
+                      borderTop: k === 0 ? "none" : "1px solid var(--borda)",
+                      background: ativo ? "transparent" : "var(--bg-suave)",
+                      opacity: ativo ? 1 : 0.6,
+                    }}>
                       <input type="checkbox" disabled={!podeEditar} checked={ativo}
+                        style={{ width: 16, height: 16, flexShrink: 0 }}
                         onChange={(ev) => {
                           // null (= todos) vira lista explícita ao primeiro clique
                           const base = marcados === null ? TODOS_TOPICOS.map((x) => x.numero) : marcados;
@@ -290,7 +297,10 @@ export default function CatalogoPage() {
                             : base.filter((n) => n !== t.numero);
                           setEdProc({ ...edProc, topicos: novos });
                         }} />
-                      <span>{t.numero === 0 ? "Capa" : `${t.numero}. ${t.titulo}`}</span>
+                      <span style={{ width: 26, flexShrink: 0, fontWeight: 600, color: "var(--texto-suave)" }}>
+                        {t.numero === 0 ? "—" : `${t.numero}.`}
+                      </span>
+                      <span>{t.numero === 0 ? "Capa" : t.titulo}</span>
                     </label>
                   );
                 })}
@@ -299,29 +309,40 @@ export default function CatalogoPage() {
 
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <label style={{ ...rot, marginBottom: 0 }}>Seções extras deste procedimento</label>
+                <label style={{ ...rot, marginBottom: 0 }}>Tópicos próprios deste procedimento</label>
                 {podeEditar && (
                   <button type="button" className="btn-dl btn-sec"
-                    onClick={() => setEdProc({ ...edProc, topicos_extras: [...edProc.topicos_extras, { titulo: "" }] })}>
-                    + Seção
+                    onClick={() => setEdProc({ ...edProc, topicos_extras: [...edProc.topicos_extras, { titulo: "", apos: 10 }] })}>
+                    + Tópico
                   </button>
                 )}
               </div>
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>
-                Seções de texto e fotos que só este procedimento tem. Entram antes da Conclusão,
-                numeradas na sequência dos demais tópicos.
+                Tópicos que só este procedimento tem. Escolha em que posição entram — a numeração
+                de todos se ajusta sozinha.
               </p>
               {edProc.topicos_extras.length === 0 && (
-                <p className="detalhe" style={{ margin: 0 }}>Nenhuma seção extra.</p>
+                <p className="detalhe" style={{ margin: 0 }}>Nenhum tópico próprio.</p>
               )}
               {edProc.topicos_extras.map((t, i) => (
-                <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", marginTop: 6 }}>
                   <input style={campo} value={t.titulo} disabled={!podeEditar}
-                    placeholder="Título da seção (ex.: Ensaio de estanqueidade)"
+                    placeholder="Título do tópico (ex.: Ensaio de estanqueidade)"
                     onChange={(ev) => setEdProc({
                       ...edProc,
-                      topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { titulo: ev.target.value } : x),
+                      topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { ...x, titulo: ev.target.value } : x),
                     })} />
+                  <select style={{ ...campo, width: "auto", minWidth: 190 }} disabled={!podeEditar}
+                    value={String(t.apos ?? 10)}
+                    onChange={(ev) => setEdProc({
+                      ...edProc,
+                      topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { ...x, apos: Number(ev.target.value) } : x),
+                    })}>
+                    <option value="0">Logo após a capa</option>
+                    {TOPICOS_PADRAO.map((tp) => (
+                      <option key={tp.numero} value={String(tp.numero)}>Depois de “{tp.titulo}”</option>
+                    ))}
+                  </select>
                   {podeEditar && (
                     <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                       onClick={() => setEdProc({

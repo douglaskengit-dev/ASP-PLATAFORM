@@ -132,8 +132,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   );
   /** Quantos tópicos o procedimento escolhido prevê (null = todos). */
   const topicosDoProc: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
-  /** Seções extras definidas no Catálogo para o procedimento escolhido. */
-  const extras: { titulo: string }[] = Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
+  /** Tópicos próprios do procedimento escolhido (definidos no Catálogo). */
+  const extras: { titulo: string; apos?: number }[] =
+    Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
@@ -222,7 +223,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         subtopicos8: subs8,
-        topicosExtras: extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "" })),
+        topicosExtras: extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "", apos: t.apos })),
         templateUrl: proc?.template_path
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,
@@ -646,7 +647,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {extras.length > 0 && (
           <div className="card" style={{ margin: 0 }}>
             <strong style={{ fontSize: 13.5 }}>
-              Seções de {proc?.codigo} <span className="detalhe">(definidas no Catálogo)</span>
+              Tópicos de {proc?.codigo} <span className="detalhe">(definidos no Catálogo)</span>
             </strong>
             {extras.map((t, i) => (
               <div key={i} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
