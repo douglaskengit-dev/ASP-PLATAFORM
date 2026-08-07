@@ -148,8 +148,31 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: legendaPadrao, topico }))]);
   }
 
+  /** Baixa a primeira foto do equipamento no Catálogo para embutir na ficha.
+   *  Sem foto (ou falha no download) a ficha sai só com as especificações. */
+  async function fotoDoEquipamento(e: any): Promise<{ dados: ArrayBuffer; extensao: "png" | "jpeg" } | undefined> {
+    const caminho = e?.fotos?.[0]?.caminho;
+    if (!caminho) return undefined;
+    try {
+      const r = await fetch(`/api/catalogo/foto?caminho=${encodeURIComponent(caminho)}`);
+      if (!r.ok) return undefined;
+      const buf = await r.arrayBuffer();
+      const ext = caminho.toLowerCase().endsWith(".png") ? "png" : "jpeg";
+      return { dados: buf, extensao: ext as "png" | "jpeg" };
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Monta o .docx com o que está no formulário. */
   async function montarBlob(): Promise<Blob> {
+      const fichasComFoto = await Promise.all(
+        EQUIPAMENTOS.filter((e) => equipIds.includes(e.slug)).map(async (e) => ({
+          nome: e.nome,
+          especificacoes: e.especificacoes || [],
+          foto: await fotoDoEquipamento(e),
+        }))
+      );
       const imgs: ImagemRelatorio[] = [];
       for (const f of fotos) {
         if (!ativo(f.topico)) continue;               // tópico oculto: ignora a foto
@@ -175,9 +198,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
         equipe: equipeDoc || d.equipe,
-        equipamentosFicha: EQUIPAMENTOS
-          .filter((e) => equipIds.includes(e.slug))
-          .map((e) => ({ nome: e.nome, especificacoes: e.especificacoes || [] })),
+        equipamentosFicha: fichasComFoto,
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
