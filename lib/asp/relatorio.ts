@@ -490,10 +490,36 @@ function preencherRotulo(xml: string, rotulo: string, valor?: string): string {
     .replace(/<w:bCs\/>|<w:bCs\s[^>]*\/>/g, "");
   const rPrValor = `<w:rPr><w:b w:val="0"/><w:bCs w:val="0"/>${interno}</w:rPr>`;
 
-  const texto = esc(valor).replace(/\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
-  const runValor = `<w:r>${rPrValor}<w:t xml:space="preserve">${texto}</w:t></w:r>`;
+  // Valor com várias linhas vira PARÁGRAFOS de verdade, não <w:br/>.
+  // Num parágrafo justificado, a linha que termina em quebra manual é
+  // esticada até a margem (buracos entre as palavras); parágrafos separados
+  // não sofrem disso e ainda respeitam o espaçamento do modelo.
+  const linhas = String(valor).split(/\n+/).filter((l) => l.trim() !== "");
+  if (linhas.length === 0) return xml;
 
-  return xml.slice(0, runs[alvo].fim) + runValor + xml.slice(runs[alvo].fim);
+  const runDe = (t: string) =>
+    `<w:r>${rPrValor}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
+
+  let saida = xml.slice(0, runs[alvo].fim) + runDe(linhas[0]) + xml.slice(runs[alvo].fim);
+  if (linhas.length === 1) return saida;
+
+  // Parágrafo que contém o rótulo: os demais trechos entram como irmãos dele,
+  // herdando o mesmo <w:pPr> (alinhamento, espaçamento).
+  const posRun = runs[alvo].fim + runDe(linhas[0]).length;
+  const iniP = saida.lastIndexOf("<w:p", saida.lastIndexOf("<w:p", posRun) + 1) >= 0
+    ? saida.lastIndexOf("<w:p", posRun) : -1;
+  const fimP = saida.indexOf("</w:p>", posRun);
+  if (iniP === -1 || fimP === -1) {
+    // sem parágrafo identificável: cai para quebras simples
+    return xml.slice(0, runs[alvo].fim) +
+      `<w:r>${rPrValor}<w:t xml:space="preserve">${esc(linhas[0])}</w:t>` +
+      linhas.slice(1).map((l) => `<w:br/><w:t xml:space="preserve">${esc(l)}</w:t>`).join("") +
+      "</w:r>" + xml.slice(runs[alvo].fim);
+  }
+  const mPPr = saida.slice(iniP, fimP).match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+  const pPr = mPPr ? mPPr[0] : "";
+  const extras = linhas.slice(1).map((l) => `<w:p>${pPr}${runDe(l)}</w:p>`).join("");
+  return saida.slice(0, fimP + 6) + extras + saida.slice(fimP + 6);
 }
 
 /** Preenche a célula ao lado de um rótulo de linha (tabela "Dados do Tanque":
