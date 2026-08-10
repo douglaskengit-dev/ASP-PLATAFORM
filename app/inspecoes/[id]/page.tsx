@@ -140,6 +140,10 @@ export default function InspecaoDetalhePage() {
   const [erroRelatorio, setErroRelatorio] = useState<string | null>(null);
   /** Contato do cliente (cadastro), para preencher o tópico 1 do relatório. */
   const [contatoCliente, setContatoCliente] = useState("");
+  // Renomear a inspeção: o título vira TAG no relatório e nome dos arquivos.
+  const [editandoTitulo, setEditandoTitulo] = useState(false);
+  const [tituloNovo, setTituloNovo] = useState("");
+  const [salvandoTitulo, setSalvandoTitulo] = useState(false);
   /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
    *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
   const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
@@ -278,6 +282,7 @@ export default function InspecaoDetalhePage() {
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "");
+  const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "");
   const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao });
 
   async function aplicar(acao: string, motivoTexto?: string) {
@@ -334,6 +339,28 @@ export default function InspecaoDetalhePage() {
       setErro("Sem conexão — tente novamente quando estiver online.");
     } finally {
       setAprovandoColeta(null);
+    }
+  }
+
+  /** Renomeia a inspeção. */
+  async function salvarTitulo() {
+    const titulo = tituloNovo.trim();
+    if (!titulo || titulo === insp?.identificacao) { setEditandoTitulo(false); return; }
+    setSalvandoTitulo(true);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/inspecoes/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identificacao: titulo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(data?.erro || "Falha ao renomear a inspeção."); return; }
+      setEditandoTitulo(false);
+      carregar();
+    } catch {
+      setErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setSalvandoTitulo(false);
     }
   }
 
@@ -684,8 +711,33 @@ export default function InspecaoDetalhePage() {
 
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
-          <div>
-            <h2 style={{ margin: 0 }}>{insp.identificacao}</h2>
+          <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+            {editandoTitulo ? (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <input autoFocus value={tituloNovo} maxLength={160} disabled={salvandoTitulo}
+                  onChange={(e) => setTituloNovo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") salvarTitulo();
+                    if (e.key === "Escape") setEditandoTitulo(false);
+                  }}
+                  style={{ flex: "1 1 220px", minWidth: 0, padding: "8px 10px", borderRadius: 8,
+                    border: "1px solid var(--borda)", background: "var(--bg-card)",
+                    color: "var(--texto)", fontSize: 18, fontWeight: 700 }} />
+                <button className="btn-dl" disabled={salvandoTitulo} onClick={salvarTitulo}>
+                  {salvandoTitulo ? "Salvando…" : "Salvar"}
+                </button>
+                <button className="btn-dl btn-sec" disabled={salvandoTitulo}
+                  onClick={() => setEditandoTitulo(false)}>Cancelar</button>
+              </div>
+            ) : (
+              <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>{insp.identificacao}</span>
+                {podeRenomear && (
+                  <button className="fu-icone-btn" title="Renomear a inspeção"
+                    onClick={() => { setTituloNovo(insp.identificacao); setEditandoTitulo(true); }}>✎</button>
+                )}
+              </h2>
+            )}
             <p className="detalhe" style={{ marginTop: 4 }}>
               {insp.projeto?.cliente?.razao_social || ""}
               {insp.projeto?.endereco ? ` · ${insp.projeto.endereco}` : ""}

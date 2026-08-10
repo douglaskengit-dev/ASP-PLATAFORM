@@ -5,12 +5,36 @@ import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
 
-/** Restaurar da lixeira: PATCH { restaurar: true }. */
+/** PATCH: restaurar da lixeira ({ restaurar: true }) ou renomear a inspeção
+ *  ({ identificacao }). O título é usado no relatório (campo TAG) e nos nomes
+ *  dos arquivos gerados, por isso vale corrigi-lo sem refazer a inspeção. */
+const PERFIS_EDICAO = ["admin", "operacoes", "gerencia", "comercial"];
+
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Sem permissão." }, { status: 403 });
   const body = await req.json();
+
+  if (typeof body.identificacao === "string") {
+    if (!PERFIS_EDICAO.includes(profile.perfil)) {
+      return NextResponse.json({ erro: "Sem permissão para renomear a inspeção." }, { status: 403 });
+    }
+    const titulo = body.identificacao.trim();
+    if (!titulo) return NextResponse.json({ erro: "Informe o título da inspeção." }, { status: 400 });
+    if (titulo.length > 160) {
+      return NextResponse.json({ erro: "Título muito longo (máx. 160 caracteres)." }, { status: 400 });
+    }
+    const { data, error } = await getSupabaseAdmin()
+      .from("gp_inspecoes")
+      .update({ identificacao: titulo, atualizado_em: new Date().toISOString() })
+      .eq("id", params.id)
+      .select("id, identificacao")
+      .single();
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, inspecao: data });
+  }
+
+  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Sem permissão." }, { status: 403 });
   if (!body.restaurar) return NextResponse.json({ ok: true });
   const { error } = await getSupabaseAdmin()
     .from("gp_inspecoes")
