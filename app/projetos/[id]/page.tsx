@@ -62,6 +62,9 @@ export default function ProjetoDetalhePage() {
   const [naoEncontrado, setNaoEncontrado] = useState(false);
   const [modalAberto, setModalAberto] = useState(false);
   const [identificacao, setIdentificacao] = useState("");
+  // Procedimento do Catálogo: define o formato do relatório desta inspeção.
+  const [procedimento, setProcedimento] = useState("");
+  const [procedimentos, setProcedimentos] = useState<any[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   // Edição do projeto
@@ -90,6 +93,8 @@ export default function ProjetoDetalhePage() {
 
   useEffect(() => {
     carregar();
+    fetch("/api/catalogo").then((r) => (r.ok ? r.json() : {}))
+      .then((d: any) => setProcedimentos(d.procedimentos || [])).catch(() => {});
 
     const supabase = getSupabaseBrowserClient();
     supabase.auth.getUser().then(async ({ data }) => {
@@ -148,7 +153,7 @@ export default function ProjetoDetalhePage() {
       const r = await fetch("/api/inspecoes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projetoId: id, identificacao }),
+        body: JSON.stringify({ projetoId: id, identificacao, procedimento }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -157,6 +162,7 @@ export default function ProjetoDetalhePage() {
       }
       setInspecoes((prev) => [...prev, d.inspecao]);
       setIdentificacao("");
+      setProcedimento("");
       setModalAberto(false);
     } catch {
       setErro("Falha de rede ao salvar.");
@@ -357,6 +363,18 @@ export default function ProjetoDetalhePage() {
                 onKeyDown={(e) => { if (e.key === "Enter") criarInspecao(); }}
               />
               <small style={{ color: "var(--cinza)" }}>A inspeção começa na fase 2 (Agendamento). Coleta padrão: medidor de sedimento.</small>
+            </div>
+            <div>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Procedimento</label>
+              <select value={procedimento} onChange={(e) => setProcedimento(e.target.value)}>
+                <option value="">— definir depois —</option>
+                {procedimentos.map((p) => (
+                  <option key={p.id} value={p.codigo}>{p.codigo} — {p.nome}</option>
+                ))}
+              </select>
+              <small style={{ color: "var(--cinza)" }}>
+                Define o formato do relatório (tópicos, seções e modelo). Pode ser alterado depois.
+              </small>
             </div>
             {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>

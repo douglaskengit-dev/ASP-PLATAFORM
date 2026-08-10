@@ -11,6 +11,8 @@ interface NovaInspecaoBody {
   projetoId: string;
   identificacao: string;
   ferramentaColeta?: string;
+  /** Código do procedimento do Catálogo — define o formato do relatório. */
+  procedimento?: string;
 }
 
 /** Lista inspeções de um projeto. ?lixeira=1 lista as excluídas. Limpeza
@@ -59,6 +61,7 @@ export async function POST(req: NextRequest) {
       identificacao: body.identificacao.trim(),
       fase: PRIMEIRA_FASE_INSPECAO,
       ferramenta_coleta: body.ferramentaColeta?.trim() || "sedimento",
+      procedimento: body.procedimento?.trim() || null,
       criado_por: profile.id,
     })
     .select("*")

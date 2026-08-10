@@ -28,6 +28,8 @@ interface Projeto {
 interface Inspecao {
   id: string;
   identificacao: string;
+  /** Código do procedimento do Catálogo — define o formato do relatório. */
+  procedimento?: string | null;
   fase: number;
   ferramenta_coleta: string;
   status_relatorio_inspecao: string;
@@ -140,6 +142,8 @@ export default function InspecaoDetalhePage() {
   const [erroRelatorio, setErroRelatorio] = useState<string | null>(null);
   /** Contato do cliente (cadastro), para preencher o tópico 1 do relatório. */
   const [contatoCliente, setContatoCliente] = useState("");
+  const [procedimentos, setProcedimentos] = useState<any[]>([]);
+  const [salvandoProc, setSalvandoProc] = useState(false);
   // Renomear a inspeção: o título vira TAG no relatório e nome dos arquivos.
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [tituloNovo, setTituloNovo] = useState("");
@@ -189,6 +193,7 @@ export default function InspecaoDetalhePage() {
       setNomeUsuarioAtual((p as any)?.nome_completo || data.user.email || "");
     });
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
+    fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => setProcedimentos(d.procedimentos || [])).catch(() => {});
   }, [carregar]);
 
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
@@ -264,6 +269,7 @@ export default function InspecaoDetalhePage() {
         : "",
       dataExecucao: formatarData(dataServico) || "",
       contato: contatoCliente,
+      procedimento: insp?.procedimento || "",
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
       alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : "",
@@ -339,6 +345,23 @@ export default function InspecaoDetalhePage() {
       setErro("Sem conexão — tente novamente quando estiver online.");
     } finally {
       setAprovandoColeta(null);
+    }
+  }
+
+  /** Troca o procedimento da inspeção (formato do relatório). */
+  async function salvarProcedimento(codigo: string) {
+    setSalvandoProc(true);
+    setErro(null);
+    try {
+      const res = await fetch(`/api/inspecoes/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ procedimento: codigo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(data?.erro || "Falha ao alterar o procedimento."); return; }
+      carregar();
+    } finally {
+      setSalvandoProc(false);
     }
   }
 
@@ -742,6 +765,26 @@ export default function InspecaoDetalhePage() {
               {insp.projeto?.cliente?.razao_social || ""}
               {insp.projeto?.endereco ? ` · ${insp.projeto.endereco}` : ""}
             </p>
+            {/* Procedimento: define o formato do relatório (tópicos, seções
+                próprias e modelo). Fica aqui, no topo, porque é o que
+                caracteriza o serviço desta inspeção. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              <span className="detalhe" style={{ margin: 0 }}>Procedimento:</span>
+              {podeRenomear ? (
+                <select value={insp.procedimento || ""} disabled={salvandoProc}
+                  onChange={(e) => salvarProcedimento(e.target.value)}
+                  style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--borda)",
+                    background: "var(--bg-card)", color: "var(--texto)", fontSize: 13, maxWidth: 320 }}>
+                  <option value="">— não definido —</option>
+                  {procedimentos.map((p) => (
+                    <option key={p.id} value={p.codigo}>{p.codigo} — {p.nome}</option>
+                  ))}
+                </select>
+              ) : (
+                <strong style={{ fontSize: 13 }}>{insp.procedimento || "não definido"}</strong>
+              )}
+              {salvandoProc && <span className="detalhe" style={{ margin: 0 }}>salvando…</span>}
+            </div>
           </div>
           <span className={`fu-badge ${def?.bloco === "execucao" ? "manual" : "auto"}`}>
             Fase {insp.fase} · {def?.area || "—"}

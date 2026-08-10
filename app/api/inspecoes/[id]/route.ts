@@ -15,6 +15,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   const body = await req.json();
 
+  if (typeof body.procedimento === "string") {
+    if (!PERFIS_EDICAO.includes(profile.perfil)) {
+      return NextResponse.json({ erro: "Sem permissão para alterar o procedimento." }, { status: 403 });
+    }
+    const { data, error } = await getSupabaseAdmin()
+      .from("gp_inspecoes")
+      .update({ procedimento: body.procedimento.trim() || null, atualizado_em: new Date().toISOString() })
+      .eq("id", params.id)
+      .select("id, procedimento")
+      .single();
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, inspecao: data });
+  }
+
   if (typeof body.identificacao === "string") {
     if (!PERFIS_EDICAO.includes(profile.perfil)) {
       return NextResponse.json({ erro: "Sem permissão para renomear a inspeção." }, { status: 403 });
