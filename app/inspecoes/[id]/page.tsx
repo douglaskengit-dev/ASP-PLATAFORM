@@ -759,8 +759,8 @@ export default function InspecaoDetalhePage() {
             coletas.map((c) => {
               const temMedicao = c.dados && Object.keys(c.dados).length > 0;
               return (
-                <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6 }}>
-                  <span className="detalhe" style={{ margin: 0 }}>
+                <div key={c.id} className="linha-item">
+                  <span className="detalhe linha-texto" style={{ margin: 0 }}>
                     {temMedicao ? "📋 Relatório Técnico interno" : `📎 ${c.tipo}`} · {formatar(c.criado_em)}
                     {c.aprovada_em && (
                       <strong style={{ display: "block", color: "#16a34a" }}>
@@ -768,7 +768,7 @@ export default function InspecaoDetalhePage() {
                       </strong>
                     )}
                   </span>
-                  <span style={{ display: "flex", gap: 6 }}>
+                  <span className="linha-acoes">
                     {podeColeta && temMedicao && (
                       <button className="btn-dl btn-sec" onClick={() => abrirMedidorEdicao(c)}>Editar</button>
                     )}
@@ -876,8 +876,9 @@ export default function InspecaoDetalhePage() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {relatorios.map((r) => (
-              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, borderLeft: "3px solid var(--borda)", paddingLeft: 12 }}>
-                <div>
+              <div key={r.id} className="linha-item"
+                style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12, marginTop: 0 }}>
+                <div className="linha-texto">
                   <div style={{ color: "var(--texto)" }}>
                     <strong style={{ textTransform: "capitalize" }}>{r.tipo}</strong> v{r.versao} —{" "}
                     <span style={{ color: corStatus(r.status) }}>{rotuloStatus(r.status)}</span>
@@ -885,7 +886,7 @@ export default function InspecaoDetalhePage() {
                   {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {r.motivo_ajuste}</div>}
                   {r.enviado_em && <div className="detalhe" style={{ margin: 0 }}>Enviado em {formatar(r.enviado_em)}</div>}
                 </div>
-                <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <span className="linha-acoes">
                   {podeRelatorio && r.status === "rascunho" && (
                     <>
                       <button className="btn-dl" disabled={enviandoRelatorio}

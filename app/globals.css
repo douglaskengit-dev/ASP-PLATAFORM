@@ -360,6 +360,24 @@ textarea {
 .btn-doc.destaque { background:var(--primaria); color:var(--escuro); border:1px solid var(--primaria); }
 .downloads { display:flex; gap:12px; flex-wrap:wrap; margin-top:4px; }
 
+/* Linha de item com ações (Coletas, Relatórios, Arquivos).
+   O texto toma o espaço livre e os botões QUEBRAM para a linha de baixo em vez
+   de vazar do card. Os botões aqui são menores que o .btn-dl padrão: são ações
+   secundárias de uma lista, não o botão principal da tela.
+   A especificidade (.linha-acoes .btn-dl) vence a regra de mobile que aumenta
+   o padding — lá o alvo é o botão isolado, aqui é o de lista. */
+.linha-item { display:flex; justify-content:space-between; align-items:center;
+  gap:8px; margin-top:6px; flex-wrap:wrap; }
+.linha-item > .linha-texto { flex:1 1 220px; min-width:0; }
+.linha-acoes { display:flex; gap:6px; flex-wrap:wrap; flex-shrink:0; }
+.linha-acoes .btn-dl { padding:6px 12px; font-size:13px; line-height:1.3; }
+@media (max-width: 640px) {
+  /* Sem espaço para o texto e os botões lado a lado: os botões ganham a
+     largura toda e se dividem igualmente, ficando fáceis de acertar no dedo. */
+  .linha-acoes { width:100%; }
+  .linha-acoes .btn-dl { flex:1 1 auto; text-align:center; padding:8px 10px; font-size:12.5px; }
+}
+
 /* D52: página inicial pública (landing enxuta, identidade grupobrid.com) —
    sempre escura, independente do tema escolhido no app. */
 .landing {
