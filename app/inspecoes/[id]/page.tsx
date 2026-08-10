@@ -144,6 +144,10 @@ export default function InspecaoDetalhePage() {
   const [contatoCliente, setContatoCliente] = useState("");
   const [procedimentos, setProcedimentos] = useState<any[]>([]);
   const [salvandoProc, setSalvandoProc] = useState(false);
+  /** Erro do seletor de procedimento. Separado do `erro` geral, que é
+   *  renderizado num card bem abaixo — ali a falha passava despercebida e o
+   *  campo parecia simplesmente "não salvar". */
+  const [erroProc, setErroProc] = useState<string | null>(null);
   // Renomear a inspeção: o título vira TAG no relatório e nome dos arquivos.
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [tituloNovo, setTituloNovo] = useState("");
@@ -351,15 +355,26 @@ export default function InspecaoDetalhePage() {
   /** Troca o procedimento da inspeção (formato do relatório). */
   async function salvarProcedimento(codigo: string) {
     setSalvandoProc(true);
-    setErro(null);
+    setErroProc(null);
+    // Otimista: o campo mostra a escolha na hora; se falhar, volta ao valor
+    // anterior — assim o seletor nunca exibe algo que não foi gravado.
+    const anterior = insp?.procedimento ?? "";
+    setInsp((p) => (p ? { ...p, procedimento: codigo } : p));
     try {
       const res = await fetch(`/api/inspecoes/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ procedimento: codigo }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setErro(data?.erro || "Falha ao alterar o procedimento."); return; }
+      if (!res.ok) {
+        setInsp((p) => (p ? { ...p, procedimento: anterior } : p));
+        setErroProc(data?.erro || `Falha ao salvar o procedimento (HTTP ${res.status}).`);
+        return;
+      }
       carregar();
+    } catch {
+      setInsp((p) => (p ? { ...p, procedimento: anterior } : p));
+      setErroProc("Sem conexão — tente novamente quando estiver online.");
     } finally {
       setSalvandoProc(false);
     }
@@ -784,6 +799,9 @@ export default function InspecaoDetalhePage() {
                 <strong style={{ fontSize: 13 }}>{insp.procedimento || "não definido"}</strong>
               )}
               {salvandoProc && <span className="detalhe" style={{ margin: 0 }}>salvando…</span>}
+              {erroProc && (
+                <span className="erro-texto" style={{ margin: 0, flexBasis: "100%" }}>{erroProc}</span>
+              )}
             </div>
           </div>
           <span className={`fu-badge ${def?.bloco === "execucao" ? "manual" : "auto"}`}>
