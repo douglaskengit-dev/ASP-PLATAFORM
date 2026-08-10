@@ -791,9 +791,17 @@ export default function InspecaoDetalhePage() {
                   style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--borda)",
                     background: "var(--bg-card)", color: "var(--texto)", fontSize: 13, maxWidth: 320 }}>
                   <option value="">— não definido —</option>
+                  {/* Procedimento sem código não pode ser escolhido: o valor
+                      vazio se confunde com "não definido" e nada seria salvo. */}
                   {procedimentos.map((p) => (
-                    <option key={p.id} value={p.codigo}>{p.codigo} — {p.nome}</option>
+                    <option key={p.id} value={p.codigo || ""} disabled={!p.codigo}>
+                      {p.codigo ? `${p.codigo} — ${p.nome}` : `${p.nome} (sem código — corrija no Catálogo)`}
+                    </option>
                   ))}
+                  {/* Valor salvo que não existe mais no Catálogo continua visível. */}
+                  {insp.procedimento && !procedimentos.some((p) => p.codigo === insp.procedimento) && (
+                    <option value={insp.procedimento}>{insp.procedimento} (fora do Catálogo)</option>
+                  )}
                 </select>
               ) : (
                 <strong style={{ fontSize: 13 }}>{insp.procedimento || "não definido"}</strong>

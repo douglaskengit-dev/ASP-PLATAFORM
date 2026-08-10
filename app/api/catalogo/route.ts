@@ -11,6 +11,20 @@ function tabelaDe(t: any): string | null {
   return t === "equipamento" || t === "procedimento" ? TABELA[t as Tipo] : null;
 }
 
+/** O CÓDIGO do procedimento é a chave usada em toda parte: é ele que a
+ *  inspeção guarda e que o relatório imprime. Sem código, o procedimento fica
+ *  indistinguível de "não definido" nos seletores — por isso é obrigatório.
+ *  Também aparamos espaços, que causariam desencontro na comparação. */
+function validarProcedimento(dados: any): string | null {
+  if (!dados) return "Dados do procedimento ausentes.";
+  if (typeof dados.codigo !== "string" || !dados.codigo.trim()) {
+    return "Informe o código do procedimento (ex.: PO 011). Ele identifica o procedimento na inspeção e no relatório.";
+  }
+  dados.codigo = dados.codigo.trim();
+  if (typeof dados.nome === "string") dados.nome = dados.nome.trim();
+  return null;
+}
+
 /** Catálogo completo (procedimentos + equipamentos) para telas e relatório. */
 export async function GET() {
   const profile = await getProfileAtual();
@@ -38,6 +52,10 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const tabela = tabelaDe(body?.tipo);
   if (!tabela) return NextResponse.json({ erro: "Tipo inválido." }, { status: 400 });
+  if (body.tipo === "procedimento") {
+    const problema = validarProcedimento(body.dados);
+    if (problema) return NextResponse.json({ erro: problema }, { status: 400 });
+  }
 
   const { data, error } = await getSupabaseRouteClient()
     .from(tabela).insert(body.dados || {}).select("*").single();
@@ -55,6 +73,10 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const tabela = tabelaDe(body?.tipo);
   if (!tabela || !body?.id) return NextResponse.json({ erro: "Tipo ou id inválido." }, { status: 400 });
+  if (body.tipo === "procedimento") {
+    const problema = validarProcedimento(body.dados);
+    if (problema) return NextResponse.json({ erro: problema }, { status: 400 });
+  }
 
   const { data, error } = await getSupabaseRouteClient()
     .from(tabela).update({ ...body.dados, atualizado_em: new Date().toISOString() })

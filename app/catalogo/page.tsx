@@ -84,6 +84,12 @@ export default function CatalogoPage() {
   }
 
   async function salvar(tipo: "equipamento" | "procedimento", item: any) {
+    // O código identifica o procedimento na inspeção e no relatório. Sem ele,
+    // o item aparece nos seletores como se fosse "não definido".
+    if (tipo === "procedimento" && !String(item.codigo || "").trim()) {
+      setErro("Informe o código do procedimento (ex.: PO 011) — é por ele que a inspeção e o relatório o identificam.");
+      return;
+    }
     setSalvando(true);
     const dados = tipo === "equipamento"
       ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
