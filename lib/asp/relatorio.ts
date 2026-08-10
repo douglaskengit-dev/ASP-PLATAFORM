@@ -43,6 +43,9 @@ export interface ImagemRelatorio {
   /** Subtópico de destino ("6.1", "6.2", "6.3"). A figura entra logo abaixo
    *  daquele subtítulo, em vez de no fim da seção. */
   ancora?: string;
+  /** true = ocupa uma VAGA do modelo ([imagem], [IMAGEM DO LAUDO]). Nesse
+   *  caso a legenda e a fonte não são geradas: já estão escritas no modelo. */
+  vaga?: boolean;
 }
 
 export interface DadosRelatorio {
@@ -55,6 +58,9 @@ export interface DadosRelatorio {
   dataRevisao?: string;      // dd/mm/aaaa
   preparadoPor?: string;
   checadoPor?: string;
+  /** Coluna "REVISADO POR" do quadro da capa — existe no modelo do POP 001.
+   *  Não confundir com `revisadoPor`, que é o bloco de assinaturas do fim. */
+  revisadoPorCapa?: string;
   aprovadoPor?: string;
   relatorioCodigo?: string;  // automático: "<código do projeto> Rev<revisão>"
   codigoProjeto?: string;    // só para compor o campo acima (não vai ao doc)
@@ -71,6 +77,27 @@ export interface DadosRelatorio {
   alturaTanque?: string;
   diametro?: string;
   observacoesTanque?: string;
+  /** Campos do POP 001 (limpeza). Preenchidos por rótulo: se o modelo não
+   *  tiver o rótulo, o campo simplesmente não aparece no documento. */
+  historico?: string;
+  nivelAgua?: string;
+  comprimento?: string;
+  largura?: string;
+  /** Marcadores [data] e [horario] do texto padrão de Observações do POP 001.
+   *  Os quatro horários são, em ordem: chegada, início, fim e saída. */
+  dataOperacao?: string;
+  horarios?: string[];
+  /** Conteúdo do tópico "Anexos" — injetado pelo TÍTULO, não pelo número,
+   *  porque a posição desse tópico muda de um modelo para o outro. */
+  anexos?: string;
+  /** Valores medidos em campo que aparecem nas legendas das figuras do
+   *  tópico "Coletas" do POP 001. */
+  cloroAntes?: string;
+  cloroDepois?: string;
+  phAntes?: string;
+  phDepois?: string;
+  /** Altura média de sedimento — marcador [altura de sedimento] do POP 001. */
+  alturaSedimento?: string;
   // Tópico 6 — quadro "Dados do Tanque"
   equipamentoTanque?: string;   // tipo/uso do tanque (manual)
   capacidadeTanque?: string;    // volume calculado (automático)
@@ -121,9 +148,14 @@ export function camposDaMedicao(medicao: any): Partial<DadosRelatorio> {
   const num = (v: any, casas = 2) =>
     v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
   const res = medicao.resultado;
+  // Em tanque nao circular a dimensao principal e o COMPRIMENTO e existe
+  // largura - caso dos reservatorios de limpeza (POP 001).
+  const circular = (medicao.formato || "circulo") === "circulo";
   return {
     alturaTanque: medicao.height ? `${num(medicao.height)} ${un}` : "",
-    diametro: medicao.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
+    diametro: circular && medicao.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
+    comprimento: !circular && medicao.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
+    largura: medicao.largura ? `${num(medicao.largura)} ${un}` : "",
     capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
     volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
     volumeMin: res?.volSedM3 != null ? num(res.volSedM3 * 0.95, 2) : "",
@@ -506,6 +538,23 @@ function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: numb
 
 // ── Preenchimento das tabelas ────────────────────────────────────────────────
 
+/** Limites do <w:p> que contém a posição dada. Cuidado: "<w:p" também casa
+ *  com "<w:pPr", por isso conferimos o caractere seguinte. */
+function limitesParagrafo(xml: string, pos: number): { ini: number; fim: number } | null {
+  let i = pos;
+  while (i >= 0) {
+    const a = xml.lastIndexOf("<w:p", i);
+    if (a === -1) return null;
+    const c = xml[a + 4];
+    if (c === ">" || c === " ") {
+      const fim = xml.indexOf("</w:p>", a);
+      return fim !== -1 && fim >= pos ? { ini: a, fim: fim + 6 } : null;
+    }
+    i = a - 1;
+  }
+  return null;
+}
+
 /**
  * Acrescenta o valor logo após um rótulo de célula ("Cliente...: " → "…: ACME").
  *
@@ -514,8 +563,11 @@ function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: numb
  * sair em negrito também. Herda o resto da formatação (fonte, tamanho, cor)
  * para o dado não destoar do rótulo.
  */
-function preencherRotulo(xml: string, rotulo: string, valor?: string): string {
+function preencherRotulo(xml: string, rotuloBruto: string, valor?: string): string {
   if (!valor) return xml;
+  // Os modelos variam nos espaços depois dos dois-pontos ("Unidade.: " vs
+  // "Unidade.:  "), então casamos o rótulo sem o espaço final.
+  const rotulo = rotuloBruto.replace(/\s+$/, "");
 
   // Runs completos (<w:r>…</w:r>) com o texto que cada um contribui.
   const reRun = /<w:r\b[^>]*>(?:(?!<\/w:r>)[\s\S])*<\/w:r>/g;
@@ -559,21 +611,59 @@ function preencherRotulo(xml: string, rotulo: string, valor?: string): string {
   const runDe = (t: string) =>
     `<w:r>${rPrValor}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
 
-  let saida = xml.slice(0, runs[alvo].fim) + runDe(linhas[0]) + xml.slice(runs[alvo].fim);
+  // Alguns modelos já trazem um valor escrito depois do rótulo (ex.:
+  // "Relatório: 47/MG/26"). Apagamos o que vem depois DENTRO DO MESMO
+  // PARÁGRAFO — cada rótulo é um parágrafo próprio — para não emendar o valor
+  // novo no antigo. Sem isso saía "Relatório: 47/MG/26 Rev047/MG/26".
+  // Alguns modelos já trazem um valor escrito depois do rótulo (ex.:
+  // "Relatório: 47/MG/26"). É preciso apagá-lo, senão o valor novo sai
+  // emendado no antigo ("Relatório: 47/MG/26 Rev047/MG/26").
+  //
+  // A ORDEM importa: primeiro limpamos os runs seguintes, de trás para
+  // frente (assim os deslocamentos dos anteriores continuam válidos) e só
+  // depois reescrevemos o run do rótulo. Fazer o inverso invalida todos os
+  // índices e corrompe o XML.
+  let base = xml;
+  const par = limitesParagrafo(xml, runs[alvo].ini);
+  if (par) {
+    for (let k = runs.length - 1; k > alvo; k--) {
+      const r = runs[k];
+      if (r.ini < par.ini || r.fim > par.fim) continue;      // fora do parágrafo
+      if (!r.texto) continue;
+      base = base.slice(0, r.ini) +
+        r.xml.replace(/<w:t(\s[^>]*)?>[^<]*<\/w:t>/g, '<w:t xml:space="preserve"></w:t>') +
+        base.slice(r.fim);
+    }
+  }
+
+  // O run do próprio rótulo pode carregar texto DEPOIS dele ("Procedimento: "
+  // e "PO" no mesmo run): cortamos o excedente.
+  const inicioAlvo = runs.slice(0, alvo).reduce((a, r) => a + r.texto.length, 0);
+  let posInsercao = runs[alvo].fim;
+  if (runs[alvo].texto.length > fimRotulo - inicioAlvo) {
+    const soRotulo = runs[alvo].texto.slice(0, fimRotulo - inicioAlvo);
+    const novoRun = runs[alvo].xml
+      .replace(/<w:t(\s[^>]*)?>[^<]*<\/w:t>/g, "")
+      .replace("</w:r>", `<w:t xml:space="preserve">${esc(soRotulo)}</w:t></w:r>`);
+    base = base.slice(0, runs[alvo].ini) + novoRun + base.slice(runs[alvo].fim);
+    posInsercao = runs[alvo].ini + novoRun.length;
+  }
+
+  let saida = base.slice(0, posInsercao) + runDe(" " + linhas[0]) + base.slice(posInsercao);
   if (linhas.length === 1) return saida;
 
   // Parágrafo que contém o rótulo: os demais trechos entram como irmãos dele,
   // herdando o mesmo <w:pPr> (alinhamento, espaçamento).
-  const posRun = runs[alvo].fim + runDe(linhas[0]).length;
+  const posRun = posInsercao + runDe(" " + linhas[0]).length;
   const iniP = saida.lastIndexOf("<w:p", saida.lastIndexOf("<w:p", posRun) + 1) >= 0
     ? saida.lastIndexOf("<w:p", posRun) : -1;
   const fimP = saida.indexOf("</w:p>", posRun);
   if (iniP === -1 || fimP === -1) {
     // sem parágrafo identificável: cai para quebras simples
-    return xml.slice(0, runs[alvo].fim) +
-      `<w:r>${rPrValor}<w:t xml:space="preserve">${esc(linhas[0])}</w:t>` +
+    return base.slice(0, posInsercao) +
+      `<w:r>${rPrValor}<w:t xml:space="preserve"> ${esc(linhas[0])}</w:t>` +
       linhas.slice(1).map((l) => `<w:br/><w:t xml:space="preserve">${esc(l)}</w:t>`).join("") +
-      "</w:r>" + xml.slice(runs[alvo].fim);
+      "</w:r>" + base.slice(posInsercao);
   }
   const mPPr = saida.slice(iniP, fimP).match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
   const pPr = mPPr ? mPPr[0] : "";
@@ -764,10 +854,15 @@ export const TOPICOS_PADRAO: { numero: number; titulo: string }[] = [
 
 /** Detecta o número do tópico de nível 1 num bloco ("7. Batimetria:" → 7). */
 function numeroTopico(texto: string): number | null {
-  const m = texto.match(/^(\d{1,2})\.\s/);
+  // Os modelos são irregulares: "1. Identificação", "8.Sanitização" (sem
+  // espaço) e "11 Imagens" (sem ponto) são todos títulos de tópico. Já
+  // "9.1 Imagens" é SUBtópico e não pode casar — daí o cuidado de exigir que
+  // depois do separador venha algo que não seja dígito.
+  const m = texto.match(/^(\d{1,2})(?:\.\s*|\s+)(?=[^\d\s])/);
   if (!m) return null;
   const n = parseInt(m[1], 10);
-  return n >= 1 && n <= 10 ? n : null;
+  // O modelo do POP 001 vai até 14; não limitamos mais a 10.
+  return n >= 1 && n <= 30 ? n : null;
 }
 
 /** Gera o .docx preenchido. Devolve um Blob pronto para download. */
@@ -783,21 +878,95 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   if (!docFile) throw new Error("Modelo inválido: falta word/document.xml.");
   let xml = await docFile.async("string");
 
-  // 1) Margens ABNT
+  // 1) Margens ABNT.
+  //
+  // Antes disso, ancoramos as imagens de cabeçalho/rodapé à PÁGINA. Elas
+  // costumam vir ancoradas à COLUNA de texto: ao mudarmos a margem esquerda
+  // para o padrão ABNT, todas escorregariam para a direita e o logo da borda
+  // sairia do papel. Convertendo o deslocamento (somando a margem ORIGINAL),
+  // a posição fica independente das margens — vale para qualquer modelo
+  // enviado no Catálogo, não só para os nossos.
+  const margemOriginal = Number(xml.match(/<w:pgMar\b[^>]*w:left="(\d+)"/)?.[1] || 0);
+  if (margemOriginal) {
+    const emuMargem = margemOriginal * 635;                 // 1 twip = 635 EMU
+    for (const nome of Object.keys(zip.files)) {
+      if (!/^word\/(header|footer)\d*\.xml$/.test(nome)) continue;
+      const arq = zip.file(nome);
+      if (!arq) continue;
+      let hx = await arq.async("string");
+      const antes = hx;
+      hx = hx.replace(
+        /<wp:positionH relativeFrom="column"><wp:posOffset>(-?\d+)<\/wp:posOffset>/g,
+        (_m, off) => `<wp:positionH relativeFrom="page"><wp:posOffset>${Number(off) + emuMargem}</wp:posOffset>`
+      );
+      if (hx !== antes) zip.file(nome, hx);
+    }
+  }
+
   xml = aplicarMargensAbnt(xml);
 
   // 2) Marcadores simples
   // O título vai inteiro, como digitado — o modelo não traz mais prefixo.
   xml = trocarMarcador(xml, "[TITULO]", dados.titulo);
-  xml = trocarMarcador(xml, "[CLIENTE]", dados.cliente);
-  xml = trocarMarcador(xml, "[Endereço]", dados.endereco);
+  // Os modelos escrevem os marcadores com caixas diferentes ([CLIENTE] num,
+  // [Cliente] noutro) — cobrimos as variantes.
+  for (const m of ["[CLIENTE]", "[Cliente]", "[cliente]"]) xml = trocarMarcador(xml, m, dados.cliente);
+  for (const m of ["[Endereço]", "[ENDEREÇO]", "[endereço]", "[Endereco]"]) {
+    xml = trocarMarcador(xml, m, dados.endereco);
+  }
   xml = trocarMarcador(xml, "[Volume de sedimento]", dados.volumeSedimento || "—");
   xml = trocarMarcador(xml, "[data de realização do relatorio]", dados.dataRelatorio || "");
+  // Texto padrão do POP 001: data da operação e os quatro horários, na ordem
+  // em que aparecem (chegada, início, fim, saída).
+  if (dados.dataOperacao) xml = trocarMarcador(xml, "[data]", dados.dataOperacao);
+  (dados.horarios || []).forEach((h) => {
+    if (h) xml = trocarTexto(xml, "[horario]", h);      // troca uma ocorrência por vez
+  });
+  // Tópico "Limpeza robotizada" do POP 001.
+  xml = trocarMarcador(xml, "[volume do sedimento]", dados.volumeSedimento || "");
+  xml = trocarMarcador(xml, "[altura de sedimento]", dados.alturaSedimento || "");
+  xml = trocarMarcador(xml, "[data de realização]", dados.dataExecucao || "");
+
+  // Valores das coletas: a troca é DIRIGIDA pela legenda, não pela ordem —
+  // "[dado coletado]" aparece dezenas de vezes no modelo (tabelas do laudo) e
+  // uma substituição sequencial acertaria a ocorrência errada.
+  const valorNaLegenda = (trecho: string, valor?: string) => {
+    if (!valor) return;
+    // Procuramos pelo TEXTO VISÍVEL do parágrafo: o Word fragmenta a legenda
+    // em vários runs, então casar no XML cru não funcionaria.
+    const re = /<w:p\b[\s\S]*?<\/w:p>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) {
+      const texto = textoDe(m[0]);
+      if (!texto.includes("[dado coletado]")) continue;
+      if (!texto.toLowerCase().includes(trecho.toLowerCase())) continue;
+      const novoP = trocarTexto(m[0], "[dado coletado]", valor);
+      xml = xml.slice(0, m.index) + novoP + xml.slice(m.index + m[0].length);
+      return;
+    }
+  };
+  valorNaLegenda("cloro livre antes", dados.cloroAntes);
+  valorNaLegenda("cloro livre depois", dados.cloroDepois);
+  valorNaLegenda("pH antes", dados.phAntes);
+  valorNaLegenda("pH depois", dados.phDepois);
+
+  // A unidade/cliente aparece no texto padrão; aceita marcador e também o nome
+  // que veio escrito no modelo original.
+  const unidadeTexto = dados.unidade || dados.cliente || "";
+  if (unidadeTexto) {
+    xml = trocarMarcador(xml, "[unidade]", unidadeTexto);
+    xml = trocarMarcador(xml, "Dow Hortolândia", unidadeTexto);
+  }
 
   // 3) Quadro de controle de revisão (capa), na ordem dos rótulos
+  // O quadro tem 6 colunas no modelo de batimetria e 7 no do POP 001, que
+  // acrescenta "REVISADO POR" entre CHECADO e APROVADO. Passamos as 7 e a
+  // função ignora as que sobram quando a tabela é menor.
   xml = preencherQuadroRevisao(xml, [
     dados.revisao, dados.statusRevisao, dados.dataRevisao,
-    dados.preparadoPor, dados.checadoPor, dados.aprovadoPor,
+    dados.preparadoPor, dados.checadoPor,
+    ...(dados.revisadoPorCapa ? [dados.revisadoPorCapa] : []),
+    dados.aprovadoPor,
   ]);
   xml = preencherRotulo(xml, "Relatório: ", dados.relatorioCodigo);
   xml = preencherRotulo(xml, "Procedimento: ", dados.procedimento);
@@ -814,7 +983,12 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = preencherRotulo(xml, "Material: ", dados.material);
   xml = preencherRotulo(xml, "Capacidade Nominal: ", dados.capacidadeNominal);
   xml = preencherRotulo(xml, "Altura do tanque: ", dados.alturaTanque);
+  xml = preencherRotulo(xml, "Altura: ", dados.alturaTanque);      // rótulo curto do POP 001
   xml = preencherRotulo(xml, "Diâmetro: ", dados.diametro);
+  xml = preencherRotulo(xml, "Histórico: ", dados.historico);
+  xml = preencherRotulo(xml, "Nível da água: ", dados.nivelAgua);
+  xml = preencherRotulo(xml, "Comprimento: ", dados.comprimento);
+  xml = preencherRotulo(xml, "Largura: ", dados.largura);
   xml = preencherRotulo(xml, "Observações:  ", htmlParaTexto(dados.observacoesTanque));
   // Envolvidos: um por linha, como no relatório de referência.
   const equipeTxt = htmlParaTexto(dados.equipe);
@@ -825,6 +999,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // Tópico 6 — quadro "Dados do Tanque": células vazias ao lado dos rótulos.
   xml = preencherCelulaVizinha(xml, "Altura", dados.alturaTanque);
   xml = preencherCelulaVizinha(xml, "Diâmetro", dados.diametro);
+  xml = preencherCelulaVizinha(xml, "Comprimento", dados.comprimento);
+  xml = preencherCelulaVizinha(xml, "Largura", dados.largura);
   xml = preencherCelulaVizinha(xml, "Capacidade", dados.capacidadeTanque || dados.capacidadeNominal);
   // A linha "Equipamento" vem preenchida no modelo: trocamos pelo tipo informado.
   if (dados.equipamentoTanque) {
@@ -905,6 +1081,17 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const textoDoTopico = new Map<number, string>();
   const addTexto = (n: number, s: string) =>
     textoDoTopico.set(n, (textoDoTopico.get(n) || "") + s);
+  // "Anexos" existe só no modelo do POP 001 e numa posição diferente da do
+  // outro modelo, por isso é localizado pelo TÍTULO. Se o modelo não tiver
+  // esse tópico, o conteúdo simplesmente não é usado.
+  if (dados.anexos?.trim()) {
+    const alvo = blocos.findIndex((b) => /^\s*\d+\.?\s*Anexos\b/i.test(b.texto));
+    if (alvo !== -1) {
+      const n = numeroTopico(blocos[alvo].texto);
+      if (n !== null) addTexto(n, htmlParaParagrafos(dados.anexos));
+    }
+  }
+
   if (dados.metodos) addTexto(3, htmlParaParagrafos(dados.metodos));
   (dados.equipamentosFicha || []).forEach((f, i) =>
     addTexto(4, fichaEquipamentoXml(f, rIdDaFicha.get(i), 500 + i)));
@@ -917,6 +1104,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.
   const figurasDoTopico = new Map<number, string>();
   const figurasDaAncora = new Map<string, string>();
+  /** Fotos destinadas às VAGAS do modelo, na ordem, por tópico. Ficam sem
+   *  legenda gerada porque o modelo já traz a legenda de cada vaga. */
+  const vagasDoTopico = new Map<number, string[]>();
   (dados.imagens || []).forEach((img, i) => {
     if (ocultos.has(img.topico)) return;
     const rId = rels[i]?.rId;
@@ -929,7 +1119,14 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       figuraXml(rId, i + 1, largura, altura) +
       legendaFigura(img.legenda) +
       legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`);
-    if (img.ancora) {
+    if (img.vaga) {
+      // Vai para uma vaga do modelo: só a figura, sem legenda nem fonte —
+      // o modelo já traz a legenda escrita logo abaixo da vaga.
+      const so = figuraXml(rId, i + 1, largura, altura);
+      const lista = vagasDoTopico.get(img.topico) || [];
+      lista.push(so);
+      vagasDoTopico.set(img.topico, lista);
+    } else if (img.ancora) {
       figurasDaAncora.set(img.ancora, (figurasDaAncora.get(img.ancora) || "") + bloco);
     } else {
       figurasDoTopico.set(img.topico, (figurasDoTopico.get(img.topico) || "") + bloco);
@@ -937,6 +1134,14 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   });
 
   const MARCADOR_IMAGENS = "[Imagens grafica da batimetria]";
+
+  /** Um parágrafo é uma VAGA de imagem quando seu texto é só um marcador:
+   *  [imagem], [Imagem2], [imagem3], [IMAGEM DO LAUDO]… O modelo do POP 001
+   *  usa isso para fixar a posição — e a legenda logo abaixo já vem escrita. */
+  const ehVagaDeImagem = (t: string) => /^\[\s*(imagem\s*\d*|imagem do laudo)\s*\]$/i.test(t.trim());
+  /** Legenda que acompanha uma vaga ("Figura 7- …"). Some junto com a vaga
+   *  quando não há foto, para não sobrar legenda órfã. */
+  const ehLegendaDeFigura = (t: string) => /^figura\s*\d+\s*[-–]/i.test(t.trim());
 
   // reconstrói o corpo bloco a bloco
   const ordem = Array.from(inicioDoTopico.entries()).sort((a, b) => a[1] - b[1]);
@@ -1025,6 +1230,41 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
         // o marcador de imagens dá lugar às figuras (some se não houver)
         if (t.includes(MARCADOR_IMAGENS)) {
           if (figuras) { saida += figuras; figurasUsadas = true; }
+          continue;
+        }
+        // Vagas DENTRO de uma tabela (a grade 2×2 da sanitização): cada
+        // célula tem seu marcador, então trocamos parágrafo a parágrafo.
+        if (bx.startsWith("<w:tbl>") && /\[\s*(imagem\s*\d*|imagem do laudo)\s*\]/i.test(t)) {
+          const lista = vagasDoTopico.get(nTop) || [];
+          bx = bx.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (par) => {
+            if (!ehVagaDeImagem(textoDe(par))) return par;
+            const foto = lista.shift();
+            if (!foto) return '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>';
+            figurasUsadas = true;
+            return foto;
+          });
+          vagasDoTopico.set(nTop, lista);
+          saida += bx;
+          continue;
+        }
+        // Vaga de imagem do modelo: entra a próxima foto deste tópico, SEM
+        // legenda gerada — a legenda já está escrita no modelo, logo abaixo.
+        // Sem foto, a vaga e a legenda dela são removidas.
+        if (ehVagaDeImagem(t)) {
+          const vaga = vagasDoTopico.get(nTop);
+          const proxima = vaga && vaga.length > 0 ? vaga.shift() : null;
+          if (proxima) { saida += proxima; figurasUsadas = true; }
+          else {
+            // a legenda pode vir 1 ou 2 blocos adiante (há parágrafos de
+            // respiro no modelo): descartamos a primeira que aparecer.
+            for (let j = k + 1; j < Math.min(k + 3, fim); j++) {
+              if (ehLegendaDeFigura(blocos[j].texto)) {
+                for (let z = k + 1; z <= j; z++) if (z !== j) saida += blocos[z].xml;
+                k = j;
+                break;
+              }
+            }
+          }
           continue;
         }
         // Caixa vazia logo após o título (ex.: Métodos): o texto entra DENTRO

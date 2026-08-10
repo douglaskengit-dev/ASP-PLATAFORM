@@ -49,6 +49,8 @@ export interface SnapshotRelatorio {
 
 interface FotoTopico {
   arquivo: File; legenda: string; topico: number; ancora?: string;
+  /** Ocupa uma vaga do modelo — legenda e fonte vêm do próprio .docx. */
+  vaga?: boolean;
   /** Crédito da imagem — sai como "Fonte: …" abaixo da legenda. */
   fonte?: string;
 }
@@ -75,6 +77,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [equipIds, setEquipIds] = useState<string[]>(estadoSalvo?.equipIds || []);
   // Subtópicos do tópico 8 (8.1, 8.2 …) — título livre, fotos próprias.
   const [subs8, setSubs8] = useState<{ titulo: string }[]>(estadoSalvo?.subs8 || []);
+  // Modal de valores medidos em campo (POP 001): alimentam as legendas das
+  // figuras de coleta. Fica em modal por ser digitação pontual de 4 números.
+  const [modalColetas, setModalColetas] = useState(false);
   // Texto das seções extras do procedimento, por índice. O título é do Catálogo.
   const [textosExtras, setTextosExtras] = useState<Record<number, string>>(estadoSalvo?.textosExtras || {});
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
@@ -203,6 +208,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           extensao: ext as "png" | "jpeg",
           legenda: f.legenda || f.arquivo.name.replace(/\.[^.]+$/, ""),
           topico: f.topico, ancora: f.ancora, fonte: f.fonte?.trim() || undefined,
+          vaga: f.vaga,
         });
       }
       return gerarRelatorioDocx({
@@ -215,6 +221,14 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         tag: d.tag, area: d.area, material: d.material,
         capacidadeNominal: d.capacidadeNominal, alturaTanque: d.alturaTanque, diametro: d.diametro,
         observacoesTanque: d.observacoesTanque,
+        revisadoPorCapa: d.revisadoPorCapa,
+        historico: d.historico, nivelAgua: d.nivelAgua,
+        comprimento: d.comprimento, largura: d.largura,
+        dataOperacao: d.dataOperacao, horarios: d.horarios,
+        anexos: d.anexos,
+        cloroAntes: d.cloroAntes, cloroDepois: d.cloroDepois,
+        phAntes: d.phAntes, phDepois: d.phDepois,
+        alturaSedimento: d.alturaSedimento,
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
@@ -317,6 +331,34 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     );
   }
 
+  /** Fotos que ocupam as VAGAS do modelo, na ordem. Sem campo de legenda:
+   *  ela já está escrita no .docx, ao lado de cada vaga. */
+  function BlocoVagas(topico: number, max: number) {
+    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.vaga && x.f.topico === topico);
+    return (
+      <div style={{ marginTop: 6 }}>
+        {minhas.length < max && (
+          <input type="file" accept="image/png,image/jpeg" multiple
+            onChange={(e) => {
+              const fs = Array.from(e.target.files || []).slice(0, max - minhas.length);
+              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: "", topico, vaga: true }))]);
+              e.target.value = "";
+            }} />
+        )}
+        <span className="detalhe" style={{ display: "block" }}>{minhas.length} de {max} vaga(s)</span>
+        {minhas.map(({ f, i }, ordem) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+            <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {ordem + 1}. {f.arquivo.name}
+            </span>
+            <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+              onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   /** Bloco de fotos de um tópico. */
   function BlocoFotos({ topico, max, legendaPadrao }: { topico: number; max?: number; legendaPadrao?: string }) {
     const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.topico === topico && !x.f.ancora);
@@ -370,6 +412,27 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {d.cliente && <option value={d.cliente} />}
         <option value="Desenho fornecido pelo cliente." />
       </datalist>
+      {modalColetas && (
+        <Modal titulo="Valores das coletas — POP 001" onFechar={() => setModalColetas(false)}>
+          <p className="detalhe" style={{ marginTop: 0 }}>
+            Entram nas legendas das figuras de coleta do modelo.
+          </p>
+          <div style={grade}>
+            <div><label style={rotulo}>Cloro livre — antes (PPM)</label>
+              <input style={campo} value={d.cloroAntes || ""} onChange={set("cloroAntes")} /></div>
+            <div><label style={rotulo}>Cloro livre — depois (PPM)</label>
+              <input style={campo} value={d.cloroDepois || ""} onChange={set("cloroDepois")} /></div>
+            <div><label style={rotulo}>pH — antes</label>
+              <input style={campo} value={d.phAntes || ""} onChange={set("phAntes")} /></div>
+            <div><label style={rotulo}>pH — depois</label>
+              <input style={campo} value={d.phDepois || ""} onChange={set("phDepois")} /></div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <button className="btn-azul" onClick={() => setModalColetas(false)}>Pronto</button>
+          </div>
+        </Modal>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="detalhe" style={{ margin: 0 }}>
           Preenche o modelo oficial da ASP mantendo timbre, cabeçalho e rodapé. Formatação conforme
@@ -434,6 +497,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             {([
               ["preparadoPor", "Preparado por"],
               ["checadoPor", "Checado por"],
+              // Coluna do quadro da capa que existe no modelo do POP 001. Sai
+              // do documento quando o modelo nao tem essa coluna.
+              ["revisadoPorCapa", "Revisado por"],
               ["aprovadoPor", "Aprovado por"],
             ] as const).map(([chave, label]) => (
               <div key={chave}>
@@ -508,6 +574,40 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>Altura do tanque</label><input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} /></div>
             <div><label style={rotulo}>Diâmetro</label><input style={campo} value={d.diametro || ""} onChange={set("diametro")} /></div>
           </div>
+          <div style={grade}>
+            <div><label style={rotulo}>Histórico</label>
+              <input style={campo} value={d.historico || ""} onChange={set("historico")}
+                placeholder="ex.: última limpeza em 03/2025" /></div>
+            <div><label style={rotulo}>Nível da água</label>
+              <input style={campo} value={d.nivelAgua || ""} onChange={set("nivelAgua")} /></div>
+            <div><label style={rotulo}>Comprimento <span className="detalhe">(medição)</span></label>
+              <input style={campo} value={d.comprimento || ""} onChange={set("comprimento")} /></div>
+            <div><label style={rotulo}>Largura <span className="detalhe">(medição)</span></label>
+              <input style={campo} value={d.largura || ""} onChange={set("largura")} /></div>
+          </div>
+
+          {/* Horários da operação: alimentam o texto padrão de Observações do
+              POP 001, na ordem em que os marcadores aparecem no modelo. */}
+          <div style={{ border: "1px solid var(--borda)", borderRadius: 8, padding: 10 }}>
+            <strong style={{ fontSize: 12.5 }}>Horários da operação <span className="detalhe">(texto padrão do POP 001)</span></strong>
+            <div style={{ ...grade, marginTop: 6 }}>
+              <div><label style={rotulo}>Data</label>
+                <input style={campo} value={d.dataOperacao || ""} onChange={set("dataOperacao")}
+                  placeholder="dd/mm/aaaa" /></div>
+              {["Chegada ao site", "Início da limpeza", "Conclusão", "Saída do site"].map((rot, i) => (
+                <div key={i}>
+                  <label style={rotulo}>{rot}</label>
+                  <input style={campo} type="time" value={(d.horarios || [])[i] || ""}
+                    onChange={(e) => setD((v) => {
+                      const h = [...(v.horarios || ["", "", "", ""])];
+                      h[i] = e.target.value;
+                      return { ...v, horarios: h };
+                    })} />
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div><label style={rotulo}>Observações</label>
             <EditorTexto valor={d.observacoesTanque || ""} onChange={(v) => setD((x) => ({ ...x, observacoesTanque: v }))} altura={70} /></div>
         </> })}
@@ -544,6 +644,16 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           <label style={rotulo}>Texto que irá para o relatório</label>
           <EditorTexto valor={d.equipamentos || ""} onChange={(v) => setD((x) => ({ ...x, equipamentos: v }))} altura={100} />
         </> })}
+
+        {/* Anexos existe só no modelo do POP 001 e numa posição diferente da do
+            modelo de batimetria, por isso não entra na lista numerada: o
+            gerador o localiza pelo título. Em modelo sem "Anexos", é ignorado. */}
+        <div className="card" style={{ margin: 0 }}>
+          <strong style={{ fontSize: 13.5 }}>
+            Anexos <span className="detalhe">(usado quando o modelo tem o tópico “Anexos”)</span>
+          </strong>
+          <EditorTexto valor={d.anexos || ""} onChange={(v) => setD((x) => ({ ...x, anexos: v }))} altura={90} />
+        </div>
 
         {Topico({ numero: 5, titulo: "Equipe de trabalho", children: <>
           <label style={rotulo}>Envolvidos — selecione entre os usuários cadastrados</label>
@@ -660,6 +770,42 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             ))}
           </div>
         )}
+
+        {/* Blocos do POP 001. As legendas e as posições das figuras já estão
+            no modelo — aqui só entram os valores medidos e as fotos, na ordem
+            das vagas. Em modelo sem essas vagas, nada disso é usado. */}
+        <div className="card" style={{ margin: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 13.5 }}>
+              Limpeza robotizada <span className="detalhe">(modelos com vagas de figura, ex.: POP 001)</span>
+            </strong>
+            <button type="button" className="btn-dl btn-sec" onClick={() => setModalColetas(true)}>
+              Valores das coletas
+            </button>
+          </div>
+          <p className="detalhe" style={{ margin: "4px 0 8px" }}>
+            As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
+            figura vem do próprio modelo; vaga sem foto é removida do documento.
+          </p>
+          <div style={grade}>
+            <div><label style={rotulo}>Altura de sedimento <span className="detalhe">(medição)</span></label>
+              <input style={campo} value={d.alturaSedimento || ""} onChange={set("alturaSedimento")} /></div>
+            <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(medição)</span></label>
+              <input style={campo} value={d.volumeSedimento || ""} onChange={set("volumeSedimento")} /></div>
+          </div>
+          {([
+            [8, "Sanitização — 4 fotos", 4],
+            [9, "Coletas — imagens", 12],
+            [10, "Limpeza robotizada — imagens", 12],
+            [11, "Depois da limpeza — imagens", 8],
+            [12, "Análise — prints do laudo (antes e depois)", 2],
+          ] as const).map(([num, rot, max]) => (
+            <div key={num} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
+              <strong style={{ fontSize: 12.5 }}>{rot}</strong>
+              {BlocoVagas(num, max)}
+            </div>
+          ))}
+        </div>
 
         {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
