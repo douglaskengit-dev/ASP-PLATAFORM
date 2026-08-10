@@ -138,6 +138,8 @@ export default function InspecaoDetalhePage() {
   /** Erro do card de Relatórios. Separado do erro geral porque este é
    *  renderizado no topo da página — longe do botão, o usuário não via. */
   const [erroRelatorio, setErroRelatorio] = useState<string | null>(null);
+  /** Contato do cliente (cadastro), para preencher o tópico 1 do relatório. */
+  const [contatoCliente, setContatoCliente] = useState("");
   /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
    *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
   const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
@@ -186,6 +188,18 @@ export default function InspecaoDetalhePage() {
   }, [carregar]);
 
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
+
+  // Contato do cliente: preenche o campo "Contato" do tópico 1 do relatório.
+  // Usa o primeiro contato cadastrado (o principal); o campo segue editável.
+  const clienteId = insp?.projeto?.cliente?.id;
+  useEffect(() => {
+    if (!clienteId) { setContatoCliente(""); return; }
+    fetch(`/api/orgaos/${clienteId}`).then((r) => (r.ok ? r.json() : {})).then((d: any) => {
+      const c = (d.orgao?.contatos || [])[0];
+      const nome = c?.nome_completo || c?.nome || "";
+      setContatoCliente(nome && c?.cargo ? `${nome} (${c.cargo})` : nome);
+    }).catch(() => {});
+  }, [clienteId]);
 
   // Arquivos do projeto desta inspeção (mesma fonte da aba Arquivos).
   const projetoId = insp?.projeto?.id;
@@ -245,6 +259,7 @@ export default function InspecaoDetalhePage() {
         ? `${proj?.codigo_projeto || proj?.pedido_compra} Rev${reprovacoes}`
         : "",
       dataExecucao: formatarData(dataServico) || "",
+      contato: contatoCliente,
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
       alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : "",
@@ -258,7 +273,7 @@ export default function InspecaoDetalhePage() {
       volumeMax: res?.volSedM3 != null ? num(res.volSedM3 * 1.05, 2) : "",
       equipe: (ag?.equipe || []).map((m) => m.nome).join(", "),
     };
-  }, [insp, coletas, agendamentos, relatorios]);
+  }, [insp, coletas, agendamentos, relatorios, contatoCliente]);
   const bloco: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");

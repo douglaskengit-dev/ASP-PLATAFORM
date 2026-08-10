@@ -476,8 +476,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               <input style={campo} value={d.cliente || ""} onChange={set("cliente")} /></div>
             <div><label style={rotulo}>Unidade</label>
               <input style={campo} value={d.unidade || ""} onChange={set("unidade")} /></div>
-            <div><label style={rotulo}>Contato</label>
-              <input style={campo} value={d.contato || ""} onChange={set("contato")} /></div>
+            <div><label style={rotulo}>Contato <span className="detalhe">(cadastro do cliente)</span></label>
+              <input style={campo} value={d.contato || ""} onChange={set("contato")}
+                placeholder="sem contato cadastrado" /></div>
           </div>
           <div style={grade}>
             <div>
