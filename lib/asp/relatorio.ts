@@ -98,6 +98,11 @@ export interface DadosRelatorio {
   phDepois?: string;
   /** Altura média de sedimento — marcador [altura de sedimento] do POP 001. */
   alturaSedimento?: string;
+  /** Valores do laudo: uma linha por parâmetro, colunas Valor, Incerteza,
+   *  LQ, LD e Limite. Preenchem as células "[dado coletado]" das duas
+   *  tabelas do tópico de Análise. */
+  laudoAntes?: string[][];
+  laudoDepois?: string[][];
   // Tópico 6 — quadro "Dados do Tanque"
   equipamentoTanque?: string;   // tipo/uso do tanque (manual)
   capacidadeTanque?: string;    // volume calculado (automático)
@@ -836,6 +841,49 @@ function injetarNaCaixa(tblXml: string, paragrafos: string): string {
 
 /** A capa é o tópico 0: tudo que vem antes do título "1." (título do relatório,
  *  cliente, endereço e o quadro de controle de revisão). Pode ser omitida. */
+/** Parâmetros das tabelas de laudo, na ordem em que estão no modelo. */
+export const LAUDO_PARAMETROS = [
+  "Cor Aparente (mg Pt-Co/L)",
+  "Turbidez (NTU)",
+  "Coliformes Totais (P/A)",
+  "Escherichia coli (P/A)",
+  "Bactérias Heterotróficas (UFC/mL)",
+];
+/** Colunas de cada parâmetro, na ordem das células da tabela. */
+export const LAUDO_COLUNAS = ["Valor", "Incerteza", "LQ", "LD", "Limite"];
+
+/** Preenche as células "[dado coletado]" de uma tabela de laudo.
+ *  A tabela é localizada pelo texto do cabeçalho ("Antes da Limpeza"). */
+function preencherLaudo(xml: string, cabecalho: string, valores?: string[][]): string {
+  if (!valores || valores.length === 0) return xml;
+  const reTbl = /<w:tbl>[\s\S]*?<\/w:tbl>/g;
+  let m: RegExpExecArray | null;
+  while ((m = reTbl.exec(xml)) !== null) {
+    const tbl = m[0];
+    if (!textoDe(tbl).toLowerCase().includes(cabecalho.toLowerCase())) continue;
+    const linhas = tbl.match(/<w:tr\b[\s\S]*?<\/w:tr>/g);
+    if (!linhas) continue;
+    let nova = tbl;
+    // linha 0 é o cabeçalho; a partir daí, uma linha por parâmetro
+    linhas.slice(1).forEach((linha, i) => {
+      const dados = valores[i];
+      if (!dados) return;
+      const celulas = linha.match(/<w:tc\b[\s\S]*?<\/w:tc>/g);
+      if (!celulas) return;
+      let linhaNova = linha;
+      // célula 0 é o nome do parâmetro; as seguintes recebem os valores
+      celulas.slice(1).forEach((cel, j) => {
+        const v = dados[j];
+        if (!v || !textoDe(cel).includes("[dado coletado]")) return;
+        linhaNova = linhaNova.replace(cel, trocarTexto(cel, "[dado coletado]", v));
+      });
+      nova = nova.replace(linha, linhaNova);
+    });
+    return xml.slice(0, m.index) + nova + xml.slice(m.index + tbl.length);
+  }
+  return xml;
+}
+
 export const TOPICO_CAPA = { numero: 0, titulo: "Capa e controle de revisão" };
 
 /** Títulos originais do template, na ordem. Usados para localizar as seções. */
@@ -949,6 +997,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   valorNaLegenda("cloro livre depois", dados.cloroDepois);
   valorNaLegenda("pH antes", dados.phAntes);
   valorNaLegenda("pH depois", dados.phDepois);
+
+  xml = preencherLaudo(xml, "Antes da Limpeza", dados.laudoAntes);
+  xml = preencherLaudo(xml, "Após a Limpeza", dados.laudoDepois);
 
   // A unidade/cliente aparece no texto padrão; aceita marcador e também o nome
   // que veio escrito no modelo original.

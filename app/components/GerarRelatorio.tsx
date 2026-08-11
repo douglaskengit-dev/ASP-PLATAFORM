@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
-  gerarRelatorioDocx, TOPICOS_PADRAO, TOPICO_CAPA,
+  gerarRelatorioDocx, LAUDO_COLUNAS, LAUDO_PARAMETROS, TOPICOS_PADRAO, TOPICO_CAPA,
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -60,11 +60,26 @@ const campo: React.CSSProperties = {
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
 };
 const rotulo: React.CSSProperties = { fontWeight: 600, fontSize: 12.5, display: "block", marginBottom: 4 };
+const celLaudo: React.CSSProperties = {
+  border: "1px solid var(--borda)", padding: "3px 5px", textAlign: "left",
+};
 const grade: React.CSSProperties = {
   display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10,
 };
 
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
+
+/** Procedimento de limpeza robotizada. O relatório dele tem blocos que não
+ *  existem nos demais (valores de coleta, horários da operação e figuras em
+ *  vagas fixas do modelo), então esses campos só aparecem quando ele está
+ *  escolhido — nos outros procedimentos apenas poluiriam o formulário.
+ *
+ *  A comparação ignora espaços e acentuação de caixa para tolerar variações
+ *  de digitação do código ("CVS 6" / "CVS6"). */
+const COD_LIMPEZA = "cvs6de12/01/2011";
+function ehLimpezaRobotizada(codigo?: string): boolean {
+  return (codigo || "").toLowerCase().replace(/\s+/g, "") === COD_LIMPEZA;
+}
 
 export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo }: Props) {
   const [d, setD] = useState<Partial<DadosRelatorio>>(
@@ -138,6 +153,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   /** Quantos tópicos o procedimento escolhido prevê (null = todos). */
   const topicosDoProc: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
   /** Tópicos próprios do procedimento escolhido (definidos no Catálogo). */
+  /** Formulário adaptado ao procedimento de limpeza robotizada. */
+  const limpeza = ehLimpezaRobotizada(d.procedimento);
   const extras: { titulo: string; apos?: number }[] =
     Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
 
@@ -229,6 +246,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         cloroAntes: d.cloroAntes, cloroDepois: d.cloroDepois,
         phAntes: d.phAntes, phDepois: d.phDepois,
         alturaSedimento: d.alturaSedimento,
+        laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois,
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
@@ -413,7 +431,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         <option value="Desenho fornecido pelo cliente." />
       </datalist>
       {modalColetas && (
-        <Modal titulo="Valores das coletas — POP 001" onFechar={() => setModalColetas(false)}>
+        <Modal titulo="Valores das coletas e do laudo" largo onFechar={() => setModalColetas(false)}>
           <p className="detalhe" style={{ marginTop: 0 }}>
             Entram nas legendas das figuras de coleta do modelo.
           </p>
@@ -427,6 +445,44 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>pH — depois</label>
               <input style={campo} value={d.phDepois || ""} onChange={set("phDepois")} /></div>
           </div>
+          {(["laudoAntes", "laudoDepois"] as const).map((chave) => (
+            <div key={chave} style={{ marginTop: 14 }}>
+              <strong style={{ fontSize: 13 }}>
+                {chave === "laudoAntes" ? "Laudo — antes da limpeza" : "Laudo — após a limpeza"}
+              </strong>
+              <div style={{ overflowX: "auto", marginTop: 6 }}>
+                <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+                  <thead>
+                    <tr>
+                      <th style={celLaudo}>Parâmetro</th>
+                      {LAUDO_COLUNAS.map((c) => <th key={c} style={celLaudo}>{c}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {LAUDO_PARAMETROS.map((par, i) => (
+                      <tr key={par}>
+                        <td style={{ ...celLaudo, whiteSpace: "nowrap" }}>{par}</td>
+                        {LAUDO_COLUNAS.map((_, j) => (
+                          <td key={j} style={celLaudo}>
+                            <input style={{ ...campo, padding: "5px 7px", fontSize: 12.5, minWidth: 84 }}
+                              value={(d[chave] as string[][] | undefined)?.[i]?.[j] || ""}
+                              onChange={(e) => setD((v) => {
+                                const base = (v[chave] as string[][] | undefined) || [];
+                                const grade = LAUDO_PARAMETROS.map((_, li) =>
+                                  LAUDO_COLUNAS.map((__, cj) => base[li]?.[cj] || ""));
+                                grade[i][j] = e.target.value;
+                                return { ...v, [chave]: grade };
+                              })} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
             <button className="btn-azul" onClick={() => setModalColetas(false)}>Pronto</button>
           </div>
@@ -578,8 +634,6 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>Histórico</label>
               <input style={campo} value={d.historico || ""} onChange={set("historico")}
                 placeholder="ex.: última limpeza em 03/2025" /></div>
-            <div><label style={rotulo}>Nível da água</label>
-              <input style={campo} value={d.nivelAgua || ""} onChange={set("nivelAgua")} /></div>
             <div><label style={rotulo}>Comprimento <span className="detalhe">(medição)</span></label>
               <input style={campo} value={d.comprimento || ""} onChange={set("comprimento")} /></div>
             <div><label style={rotulo}>Largura <span className="detalhe">(medição)</span></label>
@@ -588,8 +642,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
           {/* Horários da operação: alimentam o texto padrão de Observações do
               POP 001, na ordem em que os marcadores aparecem no modelo. */}
+          {limpeza && (
           <div style={{ border: "1px solid var(--borda)", borderRadius: 8, padding: 10 }}>
-            <strong style={{ fontSize: 12.5 }}>Horários da operação <span className="detalhe">(texto padrão do POP 001)</span></strong>
+            <strong style={{ fontSize: 12.5 }}>Horários da operação <span className="detalhe">(texto padrão do procedimento)</span></strong>
             <div style={{ ...grade, marginTop: 6 }}>
               <div><label style={rotulo}>Data</label>
                 <input style={campo} value={d.dataOperacao || ""} onChange={set("dataOperacao")}
@@ -607,6 +662,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               ))}
             </div>
           </div>
+          )}
 
           <div><label style={rotulo}>Observações</label>
             <EditorTexto valor={d.observacoesTanque || ""} onChange={(v) => setD((x) => ({ ...x, observacoesTanque: v }))} altura={70} /></div>
@@ -774,13 +830,14 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {/* Blocos do POP 001. As legendas e as posições das figuras já estão
             no modelo — aqui só entram os valores medidos e as fotos, na ordem
             das vagas. Em modelo sem essas vagas, nada disso é usado. */}
+        {limpeza && (
         <div className="card" style={{ margin: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ fontSize: 13.5 }}>
-              Limpeza robotizada <span className="detalhe">(modelos com vagas de figura, ex.: POP 001)</span>
+              Limpeza robotizada <span className="detalhe">— {d.procedimento}</span>
             </strong>
             <button type="button" className="btn-dl btn-sec" onClick={() => setModalColetas(true)}>
-              Valores das coletas
+              Valores das coletas e do laudo
             </button>
           </div>
           <p className="detalhe" style={{ margin: "4px 0 8px" }}>
@@ -806,6 +863,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             </div>
           ))}
         </div>
+        )}
 
         {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />

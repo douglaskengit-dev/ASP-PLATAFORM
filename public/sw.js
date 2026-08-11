@@ -3,8 +3,20 @@
  * - GET /api/*: network-first com fallback de cache (leitura offline do que
  *   já foi carregado). NUNCA intercepta POST/PATCH/DELETE (as escritas offline
  *   são tratadas pela fila em IndexedDB — lib/pwa). */
-const CACHE = "asp-v2";
-const API_CACHE = "asp-api-v2";
+const CACHE = "asp-v3";
+const API_CACHE = "asp-api-v3";
+
+/* Arquivos com nome FIXO (o conteúdo muda, o endereço não): o modelo do
+ * relatório, a ferramenta do medidor, ícones. Se forem servidos com
+ * "cache-first", a versão antiga fica presa no navegador para sempre e as
+ * correções nunca chegam ao usuário — foi o que aconteceu com o template do
+ * relatório e com o medidor.
+ *
+ * Já os arquivos de /_next/static têm o hash do conteúdo no nome: cada build
+ * gera um endereço novo, então cache-first ali é seguro e rápido. */
+function temNomeFixo(pathname) {
+  return !pathname.startsWith("/_next/static/");
+}
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -49,13 +61,29 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Estáticos: cache-first.
+  // Estáticos com hash no nome (/_next/static): cache-first, sem risco de
+  // servir versão velha — um build novo produz um endereço novo.
+  if (!temNomeFixo(url.pathname)) {
+    event.respondWith(
+      caches.match(req).then((m) => m || fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      }))
+    );
+    return;
+  }
+
+  // Demais estáticos (nome fixo): REDE PRIMEIRO, cache só como reserva
+  // offline. Assim uma correção no modelo .docx ou no medidor chega no
+  // primeiro carregamento, e o app continua abrindo sem internet.
   event.respondWith(
-    caches.match(req).then((m) => m || fetch(req).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(req, copy));
-      return res;
-    }))
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+        return res;
+      })
+      .catch(() => caches.match(req))
   );
 });
 
