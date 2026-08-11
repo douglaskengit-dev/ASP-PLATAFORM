@@ -43,8 +43,9 @@ export interface ImagemRelatorio {
   /** Subtópico de destino ("6.1", "6.2", "6.3"). A figura entra logo abaixo
    *  daquele subtítulo, em vez de no fim da seção. */
   ancora?: string;
-  /** true = ocupa uma VAGA do modelo ([imagem], [IMAGEM DO LAUDO]). Nesse
-   *  caso a legenda e a fonte não são geradas: já estão escritas no modelo. */
+  /** true = a foto ocupa uma VAGA do modelo ([imagem], [IMAGEM DO LAUDO]).
+   *  As vagas de um tópico são preenchidas na ordem em que as fotos chegam;
+   *  a legenda não é gerada, pois o modelo já a traz escrita abaixo da vaga. */
   vaga?: boolean;
 }
 
@@ -900,6 +901,40 @@ export const TOPICOS_PADRAO: { numero: number; titulo: string }[] = [
   { numero: 10, titulo: "Recomendações" },
 ];
 
+/**
+ * Chaves canônicas de tópico, reconhecidas pelo TÍTULO.
+ *
+ * O número de um tópico muda de um modelo para outro — no de batimetria
+ * "Equipe de trabalho" é o 5, no do POP 001 é o 6; "Recomendações" é o 10 num
+ * e o 14 no outro. Amarrar conteúdo ao número faria o texto cair na seção
+ * errada. Por isso identificamos cada seção pelo título e só então
+ * descobrimos que número ela tem NAQUELE modelo.
+ */
+const CHAVES_TOPICO: { chave: string; re: RegExp }[] = [
+  { chave: "local", re: /identifica[çc][ãa]o do local/i },
+  { chave: "tanque", re: /identifica[çc][ãa]o do tanque/i },
+  { chave: "metodos", re: /^\s*\d+\.?\s*m[ée]todos?\b/i },
+  { chave: "equipamentos", re: /equipamentos?\s+utilizados?/i },
+  { chave: "anexos", re: /^\s*\d+\.?\s*anexos\b/i },
+  { chave: "equipe", re: /equipe de trabalho/i },
+  { chave: "reservatorio", re: /dados\s+(do\s+)?reservat[óo]rio/i },
+  { chave: "batimetria", re: /^\s*\d+\.?\s*batimetria\b/i },
+  { chave: "sanitizacao", re: /sanitiza[çc][ãa]o/i },
+  { chave: "coletas", re: /coletas?\s+das?\s+amostras/i },
+  { chave: "limpeza", re: /limpeza\s+robotizada/i },
+  { chave: "apos-limpeza", re: /imagens?\s+ap[óo]s\s+a\s+limpeza/i },
+  { chave: "analise", re: /an[áa]lise\s+f[íi]sico/i },
+  { chave: "fotos-internas", re: /inspe[çc][ãa]o visual interna/i },
+  { chave: "observacoes", re: /^\s*\d+\.?\s*observa[çc][õo]es/i },
+  { chave: "conclusao", re: /^\s*\d+\.?\s*conclus[ãa]o/i },
+  { chave: "recomendacoes", re: /^\s*\d+\.?\s*recomenda[çc][õo]es/i },
+];
+
+/** Chave canônica de um título de tópico, ou null se não reconhecido. */
+function chaveDoTitulo(texto: string): string | null {
+  return CHAVES_TOPICO.find((c) => c.re.test(texto))?.chave || null;
+}
+
 /** Detecta o número do tópico de nível 1 num bloco ("7. Batimetria:" → 7). */
 function numeroTopico(texto: string): number | null {
   // Os modelos são irregulares: "1. Identificação", "8.Sanitização" (sem
@@ -911,6 +946,57 @@ function numeroTopico(texto: string): number | null {
   const n = parseInt(m[1], 10);
   // O modelo do POP 001 vai até 14; não limitamos mais a 10.
   return n >= 1 && n <= 30 ? n : null;
+}
+
+/** Marcador de imagem do modelo: [imagem], [Imagem2], [IMAGEM DO LAUDO]… */
+const RE_VAGA = /\[\s*imagem[^\]]*\]/i;
+
+export interface VagaImagem {
+  /** Posição na ordem do documento. */
+  indice: number;
+  /** Tópico do modelo a que a vaga pertence. */
+  topico: number;
+  /** Legenda que o modelo já traz logo abaixo do marcador. */
+  legenda: string;
+  /** Texto do marcador, para exibição. */
+  marcador: string;
+}
+
+/**
+ * Lista as vagas de imagem de um modelo, na ordem do documento.
+ *
+ * O modelo do POP 001 já traz a legenda escrita ("Figura 3- Ponto de coleta
+ * higienizado…") logo abaixo de cada marcador. Em vez de recriar essas
+ * legendas no código, lemos o próprio arquivo: o formulário mostra a legenda
+ * de cada vaga e o usuário só anexa a foto correspondente.
+ */
+export async function lerVagasDeImagem(templateUrl?: string): Promise<VagaImagem[]> {
+  const JSZip = (await import("jszip")).default;
+  const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");
+  if (!resp.ok) return [];
+  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const doc = zip.file("word/document.xml");
+  if (!doc) return [];
+  const xml = await doc.async("string");
+  const body = xml.slice(xml.indexOf("<w:body>") + 8, xml.lastIndexOf("</w:body>"));
+  const blocos = separarBlocos(body);
+
+  const vagas: VagaImagem[] = [];
+  let topicoAtual = 0;
+  blocos.forEach((b, i) => {
+    const n = numeroTopico(b.texto);
+    if (n !== null) topicoAtual = n;
+    const achados = b.texto.match(new RegExp(RE_VAGA.source, "gi")) || [];
+    achados.forEach((marcador) => {
+      // legenda = primeiro bloco seguinte que começa com "Figura"
+      let legenda = "";
+      for (let k = i + 1; k < Math.min(i + 4, blocos.length); k++) {
+        if (/^Figura\s/i.test(blocos[k].texto)) { legenda = blocos[k].texto; break; }
+      }
+      vagas.push({ indice: vagas.length, topico: topicoAtual, legenda, marcador });
+    });
+  });
+  return vagas;
 }
 
 /** Gera o .docx preenchido. Devolve um Blob pronto para download. */
@@ -1126,6 +1212,15 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     if (n !== null && !inicioDoTopico.has(n)) inicioDoTopico.set(n, idx);
   });
 
+  // Qual número cada seção tem NESTE modelo (ver CHAVES_TOPICO).
+  const numeroDaChave = new Map<string, number>();
+  blocos.forEach((b) => {
+    const n = numeroTopico(b.texto);
+    if (n === null) return;
+    const chave = chaveDoTitulo(b.texto);
+    if (chave && !numeroDaChave.has(chave)) numeroDaChave.set(chave, n);
+  });
+
   const ocultos = new Set(dados.topicos.filter((t) => !t.visivel).map((t) => t.numero));
   // Texto de cada tópico: entra logo DEPOIS do título, não no fim da seção
   // (o template tem parágrafos vazios de respiro que jogariam o texto adiante).
@@ -1135,21 +1230,21 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // "Anexos" existe só no modelo do POP 001 e numa posição diferente da do
   // outro modelo, por isso é localizado pelo TÍTULO. Se o modelo não tiver
   // esse tópico, o conteúdo simplesmente não é usado.
-  if (dados.anexos?.trim()) {
-    const alvo = blocos.findIndex((b) => /^\s*\d+\.?\s*Anexos\b/i.test(b.texto));
-    if (alvo !== -1) {
-      const n = numeroTopico(blocos[alvo].texto);
-      if (n !== null) addTexto(n, htmlParaParagrafos(dados.anexos));
-    }
-  }
+  /** Envia conteúdo para a seção com aquela CHAVE, seja qual for o número
+   *  que ela tenha neste modelo. Seção inexistente = conteúdo ignorado. */
+  const addPorChave = (chave: string, conteudo: string) => {
+    const n = numeroDaChave.get(chave);
+    if (n !== undefined && conteudo) addTexto(n, conteudo);
+  };
 
-  if (dados.metodos) addTexto(3, htmlParaParagrafos(dados.metodos));
+  if (dados.anexos?.trim()) addPorChave("anexos", htmlParaParagrafos(dados.anexos));
+  if (dados.metodos) addPorChave("metodos", htmlParaParagrafos(dados.metodos));
   (dados.equipamentosFicha || []).forEach((f, i) =>
-    addTexto(4, fichaEquipamentoXml(f, rIdDaFicha.get(i), 500 + i)));
-  if (dados.equipamentos) addTexto(4, htmlParaParagrafos(dados.equipamentos));
-  if (dados.fotosInternas) addTexto(8, htmlParaParagrafos(dados.fotosInternas));
-  if (dados.conclusao) addTexto(9, htmlParaParagrafos(dados.conclusao));
-  if (dados.recomendacoes) addTexto(10, htmlParaParagrafos(dados.recomendacoes));
+    addPorChave("equipamentos", fichaEquipamentoXml(f, rIdDaFicha.get(i), 500 + i)));
+  if (dados.equipamentos) addPorChave("equipamentos", htmlParaParagrafos(dados.equipamentos));
+  if (dados.fotosInternas) addPorChave("fotos-internas", htmlParaParagrafos(dados.fotosInternas));
+  if (dados.conclusao) addPorChave("conclusao", htmlParaParagrafos(dados.conclusao));
+  if (dados.recomendacoes) addPorChave("recomendacoes", htmlParaParagrafos(dados.recomendacoes));
 
   // Figuras: legenda ABNT acima ("Figura N – …") e fonte abaixo. As que têm
   // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.
@@ -1232,8 +1327,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // Tópico 8 — subtópicos criados pelo usuário (8.1, 8.2 …), cada um com o
   // seu título e as suas fotos. A numeração segue o número FINAL do tópico,
   // para continuar certa quando algum tópico anterior é ocultado.
-  if (!ocultos.has(8) && (dados.subtopicos8 || []).length > 0) {
-    const n8 = novoNumero.get(8) ?? 8;
+  const nFotosInternas = numeroDaChave.get("fotos-internas") ?? 8;
+  if (!ocultos.has(nFotosInternas) && (dados.subtopicos8 || []).length > 0) {
+    const n8 = novoNumero.get(nFotosInternas) ?? nFotosInternas;
     let bloco8 = "";
     (dados.subtopicos8 || []).forEach((st, i) => {
       const ancora = `sub8-${i}`;
@@ -1243,7 +1339,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       bloco8 += figs;
       figurasDaAncora.delete(ancora);
     });
-    if (bloco8) addTexto(8, bloco8);
+    if (bloco8) addTexto(nFotosInternas, bloco8);
   }
 
   const extrasEmitidos = new Set<number>();
