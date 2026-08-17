@@ -28,6 +28,10 @@ interface Procedimento {
   template_path: string | null;
   /** Tópicos próprios deste procedimento: título + posição (`apos`). */
   topicos_extras: { titulo: string; apos?: number }[];
+  /** Tópicos do relatório deste procedimento — a lista real, editável.
+   *  `titulo_origem` é o título como está no .docx: o gerador casa por ele,
+   *  então renomear o rótulo na tela não quebra o vínculo com o modelo. */
+  topicos_lista: { numero: number; titulo: string; titulo_origem?: string; ativo: boolean }[];
 }
 
 const campo: React.CSSProperties = {
@@ -67,6 +71,7 @@ export default function CatalogoPage() {
           topicos: Array.isArray(p.topicos) ? p.topicos : null,
           template_path: p.template_path || null,
           topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
+          topicos_lista: Array.isArray(p.topicos_lista) ? p.topicos_lista : [],
         })));
         setPodeEditar(!!d.podeEditar);
       })
@@ -111,7 +116,8 @@ export default function CatalogoPage() {
       ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
       : { codigo: item.codigo, nome: item.nome, metodos: item.metodos,
           equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos,
-          template_path: item.template_path || null, topicos_extras: item.topicos_extras || [] };
+          template_path: item.template_path || null, topicos_extras: item.topicos_extras || [],
+          topicos_lista: item.topicos_lista || [] };
     const r = item.id
       ? await api("PATCH", { tipo, id: item.id, dados })
       : await api("POST", { tipo, dados });
@@ -160,13 +166,40 @@ export default function CatalogoPage() {
     }
   }
 
+  /** Traz as seções do modelo para dentro do procedimento. A partir daí a
+   *  lista é do sistema: editar aqui não exige mexer no Word. */
+  async function importarDoModelo() {
+    if (!edProc) return;
+    const url = edProc.template_path
+      ? `/api/catalogo/template?caminho=${encodeURIComponent(edProc.template_path)}`
+      : undefined;
+    try {
+      const t = await lerTopicosDoModelo(url);
+      if (t.length === 0) { setErro("Nenhuma seção reconhecida no modelo."); return; }
+      setEdProc({
+        ...edProc,
+        topicos_lista: t.map((x) => ({
+          numero: x.numero, titulo: x.titulo, titulo_origem: x.titulo, ativo: true,
+        })),
+      });
+    } catch (e) {
+      setErro(`Falha ao ler o modelo: ${e instanceof Error ? e.message : "erro"}`);
+    }
+  }
+
+  /** Aplica uma alteração na lista de tópicos do procedimento aberto. */
+  function mexerLista(fn: (l: Procedimento["topicos_lista"]) => Procedimento["topicos_lista"]) {
+    if (!edProc) return;
+    setEdProc({ ...edProc, topicos_lista: fn(edProc.topicos_lista || []) });
+  }
+
   const novoEquip = (): Equipamento => ({
     id: "", slug: `equip-${Date.now()}`, nome: "", especificacoes: [], fotos: [],
     ordem: equipamentos.length + 1,
   });
   const novoProc = (): Procedimento => ({
     id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
-    topicos: null, template_path: null, topicos_extras: [],
+    topicos: null, template_path: null, topicos_extras: [], topicos_lista: [],
   });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -290,95 +323,70 @@ export default function CatalogoPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ ...rot, marginBottom: 0 }}>Tópicos do relatório</label>
                 {podeEditar && (
-                  <button type="button" className="btn-dl btn-sec"
-                    onClick={() => setEdProc({ ...edProc, topicos: null })}>Usar todos</button>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button type="button" className="btn-dl btn-sec" onClick={importarDoModelo}>
+                      ⬇ Importar do modelo
+                    </button>
+                    <button type="button" className="btn-dl btn-sec"
+                      onClick={() => mexerLista((l) => [...l, {
+                        numero: (l.length ? Math.max(...l.map((x) => x.numero)) : 0) + 1,
+                        titulo: "", ativo: true,
+                      }])}>+ Tópico</button>
+                  </span>
                 )}
               </div>
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>
-                {/* A condição é o MODELO PRÓPRIO, não a quantidade lida: sem
-                    modelo a leitura cai no padrão e também devolve seções —
-                    dizer "deste procedimento" ali seria falso. */}
-                {edProc.template_path
-                  ? `Seções lidas do modelo deste procedimento (${topicosModelo.length}). Sem marcação, entram todas.`
-                  : `Modelo padrão da ASP (${topicosModelo.length} seções). Envie um modelo próprio acima para este procedimento ter as seções dele.`}
+                {edProc.topicos_lista?.length
+                  ? `${edProc.topicos_lista.length} tópicos deste procedimento. A ordem aqui é a ordem no relatório.`
+                  : "Ainda não configurado — usa o modelo (ou o padrão da ASP). Importe do modelo para editar aqui."}
               </p>
-              <div style={{ border: "1px solid var(--borda)", borderRadius: 8, overflow: "hidden" }}>
-                {topicosDisponiveis.map((t, k) => {
-                  const marcados = edProc.topicos;
-                  const ativo = marcados === null || marcados.includes(t.numero);
-                  return (
-                    <label key={t.numero} style={{
-                      display: "flex", gap: 10, alignItems: "center", fontSize: 13,
-                      padding: "7px 10px", cursor: podeEditar ? "pointer" : "default",
-                      borderTop: k === 0 ? "none" : "1px solid var(--borda)",
-                      background: ativo ? "transparent" : "var(--bg-suave)",
-                      opacity: ativo ? 1 : 0.6,
-                    }}>
-                      <input type="checkbox" disabled={!podeEditar} checked={ativo}
-                        style={{ width: 16, height: 16, flexShrink: 0 }}
-                        onChange={(ev) => {
-                          // null (= todos) vira lista explícita ao primeiro clique
-                          const base = marcados === null ? topicosDisponiveis.map((x) => x.numero) : marcados;
-                          const novos = ev.target.checked
-                            ? [...base, t.numero].sort((a, b) => a - b)
-                            : base.filter((n) => n !== t.numero);
-                          setEdProc({ ...edProc, topicos: novos });
-                        }} />
-                      <span style={{ width: 26, flexShrink: 0, fontWeight: 600, color: "var(--texto-suave)" }}>
-                        {t.numero === 0 ? "—" : `${t.numero}.`}
-                      </span>
-                      <span>{t.numero === 0 ? "Capa" : t.titulo}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
 
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <label style={{ ...rot, marginBottom: 0 }}>Tópicos próprios deste procedimento</label>
-                {podeEditar && (
-                  <button type="button" className="btn-dl btn-sec"
-                    onClick={() => setEdProc({ ...edProc, topicos_extras: [...edProc.topicos_extras, { titulo: "", apos: 10 }] })}>
-                    + Tópico
-                  </button>
-                )}
-              </div>
-              <p className="detalhe" style={{ margin: "2px 0 6px" }}>
-                Tópicos que só este procedimento tem. Escolha em que posição entram — a numeração
-                de todos se ajusta sozinha.
-              </p>
-              {edProc.topicos_extras.length === 0 && (
-                <p className="detalhe" style={{ margin: 0 }}>Nenhum tópico próprio.</p>
-              )}
-              {edProc.topicos_extras.map((t, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", marginTop: 6 }}>
-                  <input style={campo} value={t.titulo} disabled={!podeEditar}
-                    placeholder="Título do tópico (ex.: Ensaio de estanqueidade)"
-                    onChange={(ev) => setEdProc({
-                      ...edProc,
-                      topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { ...x, titulo: ev.target.value } : x),
-                    })} />
-                  <select style={{ ...campo, width: "auto", minWidth: 190 }} disabled={!podeEditar}
-                    value={String(t.apos ?? 10)}
-                    onChange={(ev) => setEdProc({
-                      ...edProc,
-                      topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { ...x, apos: Number(ev.target.value) } : x),
-                    })}>
-                    <option value="0">Logo após a capa</option>
-                    {topicosDisponiveis.filter((x) => x.numero > 0).map((tp) => (
-                      <option key={tp.numero} value={String(tp.numero)}>Depois de “{tp.titulo}”</option>
-                    ))}
-                  </select>
-                  {podeEditar && (
-                    <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-                      onClick={() => setEdProc({
-                        ...edProc,
-                        topicos_extras: edProc.topicos_extras.filter((_, k) => k !== i),
-                      })}>Remover</button>
-                  )}
+              {(edProc.topicos_lista || []).length === 0 ? null : (
+                <div style={{ border: "1px solid var(--borda)", borderRadius: 8, overflow: "hidden" }}>
+                  {edProc.topicos_lista.map((t, i) => (
+                    <div key={i} style={{
+                      display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
+                      borderTop: i === 0 ? "none" : "1px solid var(--borda)",
+                      background: t.ativo ? "transparent" : "var(--bg-suave)",
+                      opacity: t.ativo ? 1 : 0.6,
+                    }}>
+                      <input type="checkbox" checked={t.ativo} disabled={!podeEditar}
+                        title={t.ativo ? "Entra no relatório" : "Não entra no relatório"}
+                        style={{ width: 16, height: 16, flexShrink: 0 }}
+                        onChange={(ev) => mexerLista((l) =>
+                          l.map((x, k) => k === i ? { ...x, ativo: ev.target.checked } : x))} />
+                      <span style={{ width: 26, flexShrink: 0, fontWeight: 600, color: "var(--texto-suave)" }}>
+                        {i + 1}.
+                      </span>
+                      <input style={{ ...campo, flex: 1, minWidth: 0 }} value={t.titulo} disabled={!podeEditar}
+                        placeholder="Título do tópico"
+                        title={t.titulo_origem ? `No modelo: “${t.titulo_origem}”` : "Tópico criado aqui — não existe no modelo"}
+                        onChange={(ev) => mexerLista((l) =>
+                          l.map((x, k) => k === i ? { ...x, titulo: ev.target.value } : x))} />
+                      {podeEditar && (
+                        <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                          <button type="button" className="fu-icone-btn" title="Subir" disabled={i === 0}
+                            onClick={() => mexerLista((l) => {
+                              const n = [...l]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n;
+                            })}>↑</button>
+                          <button type="button" className="fu-icone-btn" title="Descer"
+                            disabled={i === edProc.topicos_lista.length - 1}
+                            onClick={() => mexerLista((l) => {
+                              const n = [...l]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n;
+                            })}>↓</button>
+                          <button type="button" className="fu-icone-btn lixeira" title="Remover"
+                            onClick={() => mexerLista((l) => l.filter((_, k) => k !== i))}>🗑</button>
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+              {edProc.topicos_lista?.some((t) => !t.titulo_origem) && (
+                <p className="detalhe" style={{ margin: "6px 0 0" }}>
+                  Tópicos sem vínculo com o modelo entram como seção nova, com título e texto que você definir.
+                </p>
+              )}
             </div>
 
             <div>
