@@ -140,6 +140,10 @@ export interface DadosRelatorio {
   topicosExtras?: { titulo: string; texto?: string; apos?: number }[];
   /** Modelo .docx a usar. Vazio = modelo padrão da ASP. */
   templateUrl?: string;
+  /** Texto das seções que não têm campos próprios no formulário, por NÚMERO.
+   *  Os números vêm do mesmo modelo que está sendo gerado, então aqui a
+   *  posição é confiável — diferente do conteúdo fixo, que anda por chave. */
+  textosPorNumero?: Record<number, string>;
   // Estrutura
   topicos: TopicoRelatorio[];
   imagens?: ImagemRelatorio[];
@@ -1272,6 +1276,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     if (n !== undefined && conteudo) addTexto(n, conteudo);
   };
 
+  for (const [n, html] of Object.entries(dados.textosPorNumero || {})) {
+    if (html?.trim()) addTexto(Number(n), htmlParaParagrafos(html));
+  }
   if (dados.anexos?.trim()) addPorChave("anexos", htmlParaParagrafos(dados.anexos));
   if (dados.metodos) addPorChave("metodos", htmlParaParagrafos(dados.metodos));
   (dados.equipamentosFicha || []).forEach((f, i) =>

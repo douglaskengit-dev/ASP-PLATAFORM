@@ -42,6 +42,7 @@ export interface SnapshotRelatorio {
   d: Partial<DadosRelatorio>;
   subs8?: { titulo: string }[];
   textosExtras?: Record<number, string>;
+  textosTopico?: Record<number, string>;
   visiveis: Record<number, boolean>;
   equipeIds: string[];
   equipIds: string[];
@@ -100,6 +101,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [textosExtras, setTextosExtras] = useState<Record<number, string>>(estadoSalvo?.textosExtras || {});
   /** Tópicos do modelo do procedimento escolhido. Vazio = modelo padrão. */
   const [topicosModelo, setTopicosModelo] = useState<{ numero: number; titulo: string }[]>([]);
+  /** Texto das seções do modelo que não têm campos próprios, por número. */
+  const [textosTopico, setTextosTopico] = useState<Record<number, string>>(estadoSalvo?.textosTopico || {});
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
@@ -157,10 +160,26 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     lerTopicosDoModelo(url).then(setTopicosModelo).catch(() => setTopicosModelo([]));
   }, [caminhoModelo]);
 
+  /** Seções que já possuem campos próprios no formulário, reconhecidas pelo
+   *  TÍTULO — o número muda de um modelo para outro. */
+  const TEM_CAMPOS = [
+    /identifica[çc][ãa]o do local/i, /identifica[çc][ãa]o do tanque/i,
+    /^m[ée]todos?$/i, /equipamentos?\s+utilizados?/i, /equipe de trabalho/i,
+    /dados\s+(do\s+)?reservat[óo]rio/i, /^batimetria$/i,
+    /inspe[çc][ãa]o visual interna/i, /^conclus[ãa]o$/i, /^recomenda[çc][õo]es$/i,
+    /^anexos$/i,
+  ];
+
   /** Capa + seções do modelo em uso. */
   const TOPICOS_EM_USO = topicosModelo.length > 0
     ? [TOPICO_CAPA, ...topicosModelo]
     : TODOS_TOPICOS;
+
+  /** Seções do modelo sem campos próprios: ganham bloco genérico. Só quando o
+   *  procedimento tem modelo próprio — no modelo padrão todos já têm campos. */
+  const topicosGenericos = topicosModelo.length > 0
+    ? topicosModelo.filter((t) => !TEM_CAMPOS.some((re) => re.test(t.titulo)))
+    : [];
 
   const qtdOcultos = useMemo(() => TOPICOS_EM_USO.filter((t) => !ativo(t.numero)).length, [visiveis, TOPICOS_EM_USO]);
 
@@ -276,6 +295,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         subtopicos8: subs8,
+        textosPorNumero: textosTopico,
         topicosExtras: extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "", apos: t.apos })),
         templateUrl: proc?.template_path
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
@@ -316,7 +336,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setEnviando(true);
     try {
       const blob = await montarBlob();
-      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras });
+      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras, textosTopico });
       onFechar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao enviar o relatório.");
@@ -893,6 +913,17 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {Topico({ numero: 10, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
           <EditorTexto valor={d.recomendacoes || ""} onChange={(v) => setD((x) => ({ ...x, recomendacoes: v }))} altura={110} />
         </> })}
+
+        {/* Seções do modelo do procedimento que não têm campos próprios no
+            formulário (Anexos, Sanitização, Coletas, Análise…). Recebem texto
+            e fotos genéricos, para que TODA seção do modelo seja preenchível. */}
+        {topicosGenericos.map((t) => Topico({
+          numero: t.numero, titulo: t.titulo, maxFotos: 20, legendaFoto: t.titulo,
+          children: (
+            <EditorTexto valor={textosTopico[t.numero] || ""} altura={110}
+              onChange={(v) => setTextosTopico((p) => ({ ...p, [t.numero]: v }))} />
+          ),
+        }))}
 
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
