@@ -10,7 +10,8 @@ import { useEffect, useMemo, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
-  gerarRelatorioDocx, LAUDO_COLUNAS, LAUDO_PARAMETROS, TOPICOS_PADRAO, TOPICO_CAPA,
+  gerarRelatorioDocx, lerTopicosDoModelo, LAUDO_COLUNAS, LAUDO_PARAMETROS,
+  TOPICOS_PADRAO, TOPICO_CAPA,
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -97,6 +98,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [modalColetas, setModalColetas] = useState(false);
   // Texto das seções extras do procedimento, por índice. O título é do Catálogo.
   const [textosExtras, setTextosExtras] = useState<Record<number, string>>(estadoSalvo?.textosExtras || {});
+  /** Tópicos do modelo do procedimento escolhido. Vazio = modelo padrão. */
+  const [topicosModelo, setTopicosModelo] = useState<{ numero: number; titulo: string }[]>([]);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
@@ -138,7 +141,28 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
       setD((v) => ({ ...v, [k]: e.target.value }));
 
   const ativo = (n: number) => visiveis[n] !== false;
-  const qtdOcultos = useMemo(() => TODOS_TOPICOS.filter((t) => !ativo(t.numero)).length, [visiveis]);
+  const proc = useMemo(
+    () => PROCEDIMENTOS.find((p) => p.codigo === d.procedimento) || null,
+    [d.procedimento, PROCEDIMENTOS]
+  );
+
+  // Cada procedimento pode ter o seu modelo, com outras seções. A lista de
+  // escolha vem do próprio arquivo — é o que garante que você marque as
+  // seções que aquele relatório realmente tem.
+  const caminhoModelo = proc?.template_path || null;
+  useEffect(() => {
+    const url = caminhoModelo
+      ? `/api/catalogo/template?caminho=${encodeURIComponent(caminhoModelo)}`
+      : undefined;
+    lerTopicosDoModelo(url).then(setTopicosModelo).catch(() => setTopicosModelo([]));
+  }, [caminhoModelo]);
+
+  /** Capa + seções do modelo em uso. */
+  const TOPICOS_EM_USO = topicosModelo.length > 0
+    ? [TOPICO_CAPA, ...topicosModelo]
+    : TODOS_TOPICOS;
+
+  const qtdOcultos = useMemo(() => TOPICOS_EM_USO.filter((t) => !ativo(t.numero)).length, [visiveis, TOPICOS_EM_USO]);
 
   /** Preparado / Checado / Aprovado saem dos usuários de Operações. */
   const operacoes = useMemo(() => usuarios.filter((u) => u.perfil === "operacoes"), [usuarios]);
@@ -146,10 +170,6 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
   /** Procedimento escolhido na capa — dele saem as sugestões de método e
    *  de equipamentos (itens 3 e 4). */
-  const proc = useMemo(
-    () => PROCEDIMENTOS.find((p) => p.codigo === d.procedimento) || null,
-    [d.procedimento, PROCEDIMENTOS]
-  );
   /** Quantos tópicos o procedimento escolhido prevê (null = todos). */
   const topicosDoProc: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
   /** Tópicos próprios do procedimento escolhido (definidos no Catálogo). */
@@ -157,6 +177,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const limpeza = ehLimpezaRobotizada(d.procedimento);
   const extras: { titulo: string; apos?: number }[] =
     Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
+
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
@@ -168,7 +189,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     // Sem configuração (null), mantém o que estiver marcado hoje.
     if (Array.isArray(proc.topicos)) {
       const lista: number[] = proc.topicos;
-      setVisiveis(Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, lista.includes(t.numero)])));
+      setVisiveis(Object.fromEntries(TOPICOS_EM_USO.map((t) => [t.numero, lista.includes(t.numero)])));
     }
   }
 
@@ -260,7 +281,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,
         elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
-        topicos: TODOS_TOPICOS.map((t) => ({ ...t, visivel: ativo(t.numero) })),
+        topicos: TOPICOS_EM_USO.map((t) => ({ ...t, visivel: ativo(t.numero) })),
         imagens: imgs,
       });
   }
@@ -677,7 +698,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               {!proc ? "Escolha o procedimento na capa para habilitar a sugestão."
                 : `Baseada em ${proc.codigo} — ${proc.nome}.` +
                   (topicosDoProc !== null
-                    ? ` Este procedimento usa ${topicosDoProc} de ${TODOS_TOPICOS.length} tópicos — a seleção será ajustada.`
+                    ? ` Este procedimento usa ${topicosDoProc} de ${TOPICOS_EM_USO.length} tópicos — a seleção será ajustada.`
                     : " Mantém os tópicos como estão.")}
             </span>
           </div>

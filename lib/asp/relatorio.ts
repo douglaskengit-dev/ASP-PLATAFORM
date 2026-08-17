@@ -999,6 +999,41 @@ export async function lerVagasDeImagem(templateUrl?: string): Promise<VagaImagem
   return vagas;
 }
 
+/**
+ * Lê os tópicos de um modelo .docx — os títulos numerados, na ordem.
+ *
+ * A lista fixa de tópicos serve ao modelo de batimetria. Quando um
+ * procedimento tem modelo próprio, as seções dele são outras (Anexos,
+ * Sanitização, Coletas…), e é essa lista que precisa aparecer para escolha.
+ * Lendo do arquivo, trocar o modelo atualiza a lista sozinho.
+ */
+export async function lerTopicosDoModelo(
+  templateUrl?: string,
+): Promise<{ numero: number; titulo: string }[]> {
+  const JSZip = (await import("jszip")).default;
+  const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");
+  if (!resp.ok) return [];
+  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const doc = zip.file("word/document.xml");
+  if (!doc) return [];
+  const xml = await doc.async("string");
+  const body = xml.slice(xml.indexOf("<w:body>") + 8, xml.lastIndexOf("</w:body>"));
+
+  const vistos = new Set<number>();
+  const topicos: { numero: number; titulo: string }[] = [];
+  for (const b of separarBlocos(body)) {
+    const n = numeroTopico(b.texto);
+    if (n === null || vistos.has(n)) continue;
+    // subtópicos ("9.1 Imagens…") não entram: escolhe-se a seção inteira
+    if (/^\s*\d+\.\s*\d/.test(b.texto)) continue;
+    const titulo = b.texto.replace(/^\s*\d+\.?\s*/, "").replace(/[:.]\s*$/, "").trim();
+    if (!titulo || titulo.length > 90) continue;
+    vistos.add(n);
+    topicos.push({ numero: n, titulo });
+  }
+  return topicos.sort((a, b) => a.numero - b.numero);
+}
+
 /** Gera o .docx preenchido. Devolve um Blob pronto para download. */
 export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const JSZip = (await import("jszip")).default;

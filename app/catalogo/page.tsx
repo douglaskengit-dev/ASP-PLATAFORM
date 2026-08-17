@@ -8,7 +8,7 @@
  * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
-import { TOPICOS_PADRAO, TOPICO_CAPA } from "@/lib/asp/relatorio";
+import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo } from "@/lib/asp/relatorio";
 
 /** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
@@ -52,6 +52,8 @@ export default function CatalogoPage() {
   const [salvando, setSalvando] = useState(false);
   const [enviandoFoto, setEnviandoFoto] = useState(false);
   const [enviandoModelo, setEnviandoModelo] = useState(false);
+  /** Tópicos lidos do modelo do procedimento aberto. Vazio = usa os padrão. */
+  const [topicosModelo, setTopicosModelo] = useState<{ numero: number; titulo: string }[]>([]);
   // Item aberto no modal (cópia local — só grava ao salvar).
   const [edEquip, setEdEquip] = useState<Equipamento | null>(null);
   const [edProc, setEdProc] = useState<Procedimento | null>(null);
@@ -71,6 +73,20 @@ export default function CatalogoPage() {
       .finally(() => setCarregando(false));
   }, []);
   useEffect(() => { carregar(); }, [carregar]);
+
+  // Ao abrir um procedimento, a lista de tópicos vem do MODELO dele — só assim
+  // aparecem as seções que aquele relatório realmente tem (Anexos, Sanitização…).
+  const modeloProc = edProc?.template_path || null;
+  useEffect(() => {
+    if (!edProc) { setTopicosModelo([]); return; }
+    const url = modeloProc ? `/api/catalogo/template?caminho=${encodeURIComponent(modeloProc)}` : undefined;
+    lerTopicosDoModelo(url).then(setTopicosModelo).catch(() => setTopicosModelo([]));
+  }, [edProc?.id, modeloProc]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Capa + tópicos do modelo (ou os padrão, quando não há modelo próprio). */
+  const topicosDisponiveis = topicosModelo.length > 0
+    ? [TOPICO_CAPA, ...topicosModelo]
+    : TODOS_TOPICOS;
 
   async function api(metodo: string, corpo?: any, query = "") {
     setErro(null);
@@ -279,10 +295,12 @@ export default function CatalogoPage() {
                 )}
               </div>
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>
-                Define o formato do relatório deste procedimento. Sem nenhuma marcação, entram todos.
+                {topicosModelo.length > 0
+                  ? `Seções lidas do modelo deste procedimento (${topicosModelo.length}). Sem marcação, entram todas.`
+                  : "Tópicos do modelo padrão da ASP. Sem nenhuma marcação, entram todos."}
               </p>
               <div style={{ border: "1px solid var(--borda)", borderRadius: 8, overflow: "hidden" }}>
-                {TODOS_TOPICOS.map((t, k) => {
+                {topicosDisponiveis.map((t, k) => {
                   const marcados = edProc.topicos;
                   const ativo = marcados === null || marcados.includes(t.numero);
                   return (
@@ -297,7 +315,7 @@ export default function CatalogoPage() {
                         style={{ width: 16, height: 16, flexShrink: 0 }}
                         onChange={(ev) => {
                           // null (= todos) vira lista explícita ao primeiro clique
-                          const base = marcados === null ? TODOS_TOPICOS.map((x) => x.numero) : marcados;
+                          const base = marcados === null ? topicosDisponiveis.map((x) => x.numero) : marcados;
                           const novos = ev.target.checked
                             ? [...base, t.numero].sort((a, b) => a - b)
                             : base.filter((n) => n !== t.numero);
@@ -345,7 +363,7 @@ export default function CatalogoPage() {
                       topicos_extras: edProc.topicos_extras.map((x, k) => k === i ? { ...x, apos: Number(ev.target.value) } : x),
                     })}>
                     <option value="0">Logo após a capa</option>
-                    {TOPICOS_PADRAO.map((tp) => (
+                    {topicosDisponiveis.filter((x) => x.numero > 0).map((tp) => (
                       <option key={tp.numero} value={String(tp.numero)}>Depois de “{tp.titulo}”</option>
                     ))}
                   </select>
