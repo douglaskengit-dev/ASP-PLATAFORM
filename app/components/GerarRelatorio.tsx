@@ -103,6 +103,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [topicosModelo, setTopicosModelo] = useState<{ numero: number; titulo: string }[]>([]);
   /** Texto das seções do modelo que não têm campos próprios, por número. */
   const [textosTopico, setTextosTopico] = useState<Record<number, string>>(estadoSalvo?.textosTopico || {});
+  /** Diagnóstico do modelo em uso. Sem isso, uma falha de leitura fica
+   *  indistinguível de "procedimento sem modelo próprio": a tela não muda. */
+  const [infoModelo, setInfoModelo] = useState<string>("carregando modelo…");
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
@@ -157,8 +160,20 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     const url = caminhoModelo
       ? `/api/catalogo/template?caminho=${encodeURIComponent(caminhoModelo)}`
       : undefined;
-    lerTopicosDoModelo(url).then(setTopicosModelo).catch(() => setTopicosModelo([]));
-  }, [caminhoModelo]);
+    const origem = caminhoModelo ? `modelo de ${proc?.codigo || "procedimento"}` : "modelo padrão da ASP";
+    setInfoModelo(`lendo ${origem}…`);
+    lerTopicosDoModelo(url)
+      .then((t) => {
+        setTopicosModelo(t);
+        setInfoModelo(t.length
+          ? `${origem} · ${t.length} seções`
+          : `${origem} · nenhuma seção reconhecida no arquivo`);
+      })
+      .catch((e) => {
+        setTopicosModelo([]);
+        setInfoModelo(`falha ao ler o ${origem}: ${e instanceof Error ? e.message : "erro"}`);
+      });
+  }, [caminhoModelo, proc?.codigo]);
 
   /** Seções que já possuem campos próprios no formulário, reconhecidas pelo
    *  TÍTULO — o número muda de um modelo para outro. */
@@ -531,6 +546,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p className="detalhe" style={{ margin: 0 }}>
+          📄 {infoModelo}
+          {topicosGenericos.length > 0 && ` · ${topicosGenericos.length} seções próprias deste modelo`}
+          {!caminhoModelo && proc && " — este procedimento não tem modelo próprio no Catálogo"}
+          {!proc && " — escolha o procedimento na capa para usar o modelo dele"}
+        </p>
         <p className="detalhe" style={{ margin: 0 }}>
           Preenche o modelo oficial da ASP mantendo timbre, cabeçalho e rodapé. Formatação conforme
           ABNT (NBR 14724): Arial 12, entrelinha 1,5, texto justificado, margens 3/2/3/2 cm e legendas
