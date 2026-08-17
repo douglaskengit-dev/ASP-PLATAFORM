@@ -295,9 +295,12 @@ export default function CatalogoPage() {
                 )}
               </div>
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>
-                {topicosModelo.length > 0
+                {/* A condição é o MODELO PRÓPRIO, não a quantidade lida: sem
+                    modelo a leitura cai no padrão e também devolve seções —
+                    dizer "deste procedimento" ali seria falso. */}
+                {edProc.template_path
                   ? `Seções lidas do modelo deste procedimento (${topicosModelo.length}). Sem marcação, entram todas.`
-                  : "Tópicos do modelo padrão da ASP. Sem nenhuma marcação, entram todos."}
+                  : `Modelo padrão da ASP (${topicosModelo.length} seções). Envie um modelo próprio acima para este procedimento ter as seções dele.`}
               </p>
               <div style={{ border: "1px solid var(--borda)", borderRadius: 8, overflow: "hidden" }}>
                 {topicosDisponiveis.map((t, k) => {
