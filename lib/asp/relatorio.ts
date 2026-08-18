@@ -140,6 +140,11 @@ export interface DadosRelatorio {
   topicosExtras?: { titulo: string; texto?: string; apos?: number }[];
   /** Modelo .docx a usar. Vazio = modelo padrão da ASP. */
   templateUrl?: string;
+  /** Lista de tópicos do PROCEDIMENTO (Catálogo). Quando vem preenchida, é
+   *  ela que manda: define quais seções entram, em que ordem e com que
+   *  título. `titulo_origem` é o título como está no modelo — é por ele que
+   *  a seção é localizada, então renomear na tela não quebra o vínculo. */
+  topicosLista?: { numero: number; titulo: string; titulo_origem?: string; ativo: boolean }[];
   /** Texto das seções que não têm campos próprios no formulário, por NÚMERO.
    *  Os números vêm do mesmo modelo que está sendo gerado, então aqui a
    *  posição é confiável — diferente do conteúdo fixo, que anda por chave. */
@@ -1260,7 +1265,45 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     if (chave && !numeroDaChave.has(chave)) numeroDaChave.set(chave, n);
   });
 
-  const ocultos = new Set(dados.topicos.filter((t) => !t.visivel).map((t) => t.numero));
+  // Quando o procedimento tem lista própria, ela decide o que entra: casamos
+  // cada item com a seção do modelo pelo TÍTULO DE ORIGEM (ou pelo título
+  // exibido, se o tópico nunca foi importado).
+  const lista = (dados.topicosLista || []).filter((t) => t?.titulo?.trim() || t?.titulo_origem);
+  const numeroPorTituloModelo = new Map<string, number>();
+  blocos.forEach((b) => {
+    const n = numeroTopico(b.texto);
+    if (n === null) return;
+    const t = b.texto.replace(/^\s*\d+\.?\s*/, "").replace(/[:.]\s*$/, "").trim().toLowerCase();
+    if (t && !numeroPorTituloModelo.has(t)) numeroPorTituloModelo.set(t, n);
+  });
+  /** Número, no modelo, da seção que este item da lista representa. */
+  const numeroDoItem = (t: { titulo: string; titulo_origem?: string }) =>
+    numeroPorTituloModelo.get((t.titulo_origem || t.titulo).trim().toLowerCase());
+
+  const ocultosDaLista = new Set<number>();
+  const renomear = new Map<number, string>();
+  if (lista.length > 0) {
+    // tudo que o modelo tem e a lista não menciona fica de fora
+    const mencionados = new Set<number>();
+    for (const item of lista) {
+      const n = numeroDoItem(item);
+      if (n === undefined) continue;              // tópico novo: não está no modelo
+      mencionados.add(n);
+      if (!item.ativo) ocultosDaLista.add(n);
+      const original = (item.titulo_origem || "").trim();
+      if (item.titulo?.trim() && original && item.titulo.trim() !== original) {
+        renomear.set(n, item.titulo.trim());
+      }
+    }
+    for (const n of numeroPorTituloModelo.values()) {
+      if (!mencionados.has(n)) ocultosDaLista.add(n);
+    }
+  }
+
+  const ocultos = new Set([
+    ...dados.topicos.filter((t) => !t.visivel).map((t) => t.numero),
+    ...ocultosDaLista,
+  ]);
   // Texto de cada tópico: entra logo DEPOIS do título, não no fim da seção
   // (o template tem parágrafos vazios de respiro que jogariam o texto adiante).
   const textoDoTopico = new Map<number, string>();
@@ -1415,6 +1458,13 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
         // renumera o título e também os subtítulos (6.1, 6.2 → 5.1, 5.2)
         if (novo !== nTop && new RegExp(`^\\s*${nTop}(\\.|\\s|$)`).test(t)) {
           bx = renumerarBloco(bx, nTop, novo);
+        }
+        // título renomeado no Catálogo: troca o texto do cabeçalho da seção,
+        // preservando a numeração que acabou de ser calculada.
+        const rotuloNovo = k === idx ? renomear.get(nTop) : undefined;
+        if (rotuloNovo) {
+          const atual = textoDe(bx).replace(/^\s*\d+\.?\s*/, "").replace(/[:.]\s*$/, "").trim();
+          if (atual && atual !== rotuloNovo) bx = trocarTexto(bx, atual, rotuloNovo);
         }
         // o marcador de imagens dá lugar às figuras (some se não houver)
         if (t.includes(MARCADOR_IMAGENS)) {

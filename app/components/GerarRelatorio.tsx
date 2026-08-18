@@ -185,16 +185,25 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     /^anexos$/i,
   ];
 
-  /** Capa + seções do modelo em uso. */
-  const TOPICOS_EM_USO = topicosModelo.length > 0
-    ? [TOPICO_CAPA, ...topicosModelo]
-    : TODOS_TOPICOS;
+  /** Lista de tópicos configurada no Catálogo para este procedimento.
+   *  Quando existe, ela manda — é a lista que você edita lá. */
+  const listaProc: { numero: number; titulo: string; titulo_origem?: string; ativo: boolean }[] =
+    Array.isArray(proc?.topicos_lista) ? proc!.topicos_lista : [];
+
+  /** Capa + seções em uso: a lista do procedimento, ou o que o modelo tem,
+   *  ou o padrão da ASP. */
+  const TOPICOS_EM_USO = listaProc.length > 0
+    ? [TOPICO_CAPA, ...listaProc.map((t, i) => ({ numero: t.numero ?? i + 1, titulo: t.titulo }))]
+    : topicosModelo.length > 0
+      ? [TOPICO_CAPA, ...topicosModelo]
+      : TODOS_TOPICOS;
 
   /** Seções do modelo sem campos próprios: ganham bloco genérico. Só quando o
    *  procedimento tem modelo próprio — no modelo padrão todos já têm campos. */
-  const topicosGenericos = topicosModelo.length > 0
-    ? topicosModelo.filter((t) => !TEM_CAMPOS.some((re) => re.test(t.titulo)))
-    : [];
+  const topicosGenericos = (listaProc.length > 0
+    ? listaProc.filter((t) => t.ativo).map((t, i) => ({ numero: t.numero ?? i + 1, titulo: t.titulo }))
+    : topicosModelo
+  ).filter((t) => t.titulo && !TEM_CAMPOS.some((re) => re.test(t.titulo)));
 
   const qtdOcultos = useMemo(() => TOPICOS_EM_USO.filter((t) => !ativo(t.numero)).length, [visiveis, TOPICOS_EM_USO]);
 
@@ -311,6 +320,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
         subtopicos8: subs8,
         textosPorNumero: textosTopico,
+        topicosLista: listaProc,
         topicosExtras: extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "", apos: t.apos })),
         templateUrl: proc?.template_path
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
@@ -547,7 +557,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <p className="detalhe" style={{ margin: 0 }}>
-          📄 {infoModelo}
+          📄 {listaProc.length > 0
+            ? `tópicos do procedimento ${proc?.codigo} (${listaProc.length}, configurados no Catálogo)`
+            : infoModelo}
           {topicosGenericos.length > 0 && ` · ${topicosGenericos.length} seções próprias deste modelo`}
           {!caminhoModelo && proc && " — este procedimento não tem modelo próprio no Catálogo"}
           {!proc && " — escolha o procedimento na capa para usar o modelo dele"}
