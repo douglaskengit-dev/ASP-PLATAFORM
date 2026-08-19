@@ -8,7 +8,7 @@
  * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
-import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo } from "@/lib/asp/relatorio";
+import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, listaDeTopicosSalvos } from "@/lib/asp/relatorio";
 
 /** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
@@ -32,6 +32,9 @@ interface Procedimento {
    *  `titulo_origem` é o título como está no .docx: o gerador casa por ele,
    *  então renomear o rótulo na tela não quebra o vínculo com o modelo. */
   topicos_lista: { numero: number; titulo: string; titulo_origem?: string; ativo: boolean }[];
+  /** Só na tela: a lista acima não veio do banco, foi remontada a partir da
+   *  configuração antiga em `topicos`. Vira lista de verdade ao salvar. */
+  lista_recuperada?: boolean;
 }
 
 const campo: React.CSSProperties = {
@@ -66,13 +69,22 @@ export default function CatalogoPage() {
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {})
       .then((d: any) => {
         setEquipamentos((d.equipamentos || []).map((e: any) => ({ ...e, especificacoes: e.especificacoes || [], fotos: e.fotos || [] })));
-        setProcedimentos((d.procedimentos || []).map((p: any) => ({
-          ...p, equipamentos: p.equipamentos || [],
-          topicos: Array.isArray(p.topicos) ? p.topicos : null,
-          template_path: p.template_path || null,
-          topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
-          topicos_lista: Array.isArray(p.topicos_lista) ? p.topicos_lista : [],
-        })));
+        setProcedimentos((d.procedimentos || []).map((p: any) => {
+          const salva = Array.isArray(p.topicos_lista) ? p.topicos_lista : [];
+          // Procedimento configurado ANTES da lista editável existir guardou a
+          // escolha em `topicos`, e `topicos_lista` nasceu vazia. Mostrar a tela
+          // vazia nesse caso dá a impressão de que a configuração se perdeu —
+          // ela está no banco. Remontamos para exibir; salvar a torna oficial.
+          const recuperada = salva.length === 0 ? listaDeTopicosSalvos(p.topicos) : [];
+          return {
+            ...p, equipamentos: p.equipamentos || [],
+            topicos: Array.isArray(p.topicos) ? p.topicos : null,
+            template_path: p.template_path || null,
+            topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
+            topicos_lista: salva.length > 0 ? salva : recuperada,
+            lista_recuperada: recuperada.length > 0,
+          };
+        }));
         setPodeEditar(!!d.podeEditar);
       })
       .finally(() => setCarregando(false));
@@ -181,6 +193,7 @@ export default function CatalogoPage() {
         topicos_lista: t.map((x) => ({
           numero: x.numero, titulo: x.titulo, titulo_origem: x.titulo, ativo: true,
         })),
+        lista_recuperada: false,
       });
     } catch (e) {
       setErro(`Falha ao ler o modelo: ${e instanceof Error ? e.message : "erro"}`);
@@ -191,6 +204,31 @@ export default function CatalogoPage() {
   function mexerLista(fn: (l: Procedimento["topicos_lista"]) => Procedimento["topicos_lista"]) {
     if (!edProc) return;
     setEdProc({ ...edProc, topicos_lista: fn(edProc.topicos_lista || []) });
+  }
+
+  /** Procedimentos que já têm lista e servem de ponto de partida para este.
+   *  A lista é de cada procedimento; reaproveitar é opcional, e daqui em
+   *  diante a cópia vive por conta própria — mexer num não mexe no outro. */
+  const fontesParaCopiar = procedimentos.filter(
+    (p) => p.id !== edProc?.id && (p.topicos_lista || []).length > 0
+  );
+
+  /** Traz a lista de outro procedimento para o que está aberto. */
+  function copiarDeProcedimento(id: string) {
+    if (!edProc || !id) return;
+    const fonte = procedimentos.find((p) => p.id === id);
+    if (!fonte) return;
+    if (
+      (edProc.topicos_lista || []).length > 0 &&
+      !confirm(`Substituir os ${edProc.topicos_lista.length} tópicos atuais pelos ${fonte.topicos_lista.length} de ${fonte.codigo}?`)
+    ) return;
+    // Cópia profunda: sem isso os dois procedimentos passariam a apontar para
+    // os MESMOS objetos, e editar o título de um mudaria o do outro na tela.
+    setEdProc({
+      ...edProc,
+      topicos_lista: fonte.topicos_lista.map((t) => ({ ...t })),
+      lista_recuperada: false,
+    });
   }
 
   const novoEquip = (): Equipamento => ({
@@ -323,7 +361,19 @@ export default function CatalogoPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ ...rot, marginBottom: 0 }}>Tópicos do relatório</label>
                 {podeEditar && (
-                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    {fontesParaCopiar.length > 0 && (
+                      <select style={{ ...campo, width: "auto", padding: "7px 9px" }} value=""
+                        title="Copia a lista de tópicos de outro procedimento para este"
+                        onChange={(ev) => { copiarDeProcedimento(ev.target.value); ev.target.value = ""; }}>
+                        <option value="">⧉ Copiar de outro procedimento…</option>
+                        {fontesParaCopiar.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.codigo} — {p.topicos_lista.length} tópicos
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <button type="button" className="btn-dl btn-sec" onClick={importarDoModelo}>
                       ⬇ Importar do modelo
                     </button>
@@ -340,6 +390,13 @@ export default function CatalogoPage() {
                   ? `${edProc.topicos_lista.length} tópicos deste procedimento. A ordem aqui é a ordem no relatório.`
                   : "Ainda não configurado — usa o modelo (ou o padrão da ASP). Importe do modelo para editar aqui."}
               </p>
+              {edProc.lista_recuperada && (
+                <p className="detalhe" style={{ margin: "-2px 0 6px" }}>
+                  ↩ Lista remontada a partir da configuração que este procedimento já tinha
+                  ({edProc.topicos?.filter((n) => n > 0).length} tópicos ativos). Ela ainda não está
+                  gravada nesse formato — <strong>salve para confirmar</strong>, ou ajuste antes.
+                </p>
+              )}
 
               {(edProc.topicos_lista || []).length === 0 ? null : (
                 <div style={{ border: "1px solid var(--borda)", borderRadius: 8, overflow: "hidden" }}>
