@@ -962,7 +962,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         <div className="card" style={{ margin: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ fontSize: 13.5 }}>
-              Limpeza robotizada <span className="detalhe">— {d.procedimento}</span>
+              Análise Físico Química e Laboratorial <span className="detalhe">— {d.procedimento}</span>
             </strong>
             <button type="button" className="btn-dl btn-sec" onClick={() => setModalColetas(true)}>
               Valores das coletas e do laudo
@@ -979,10 +979,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               <input style={campo} value={d.volumeSedimento || ""} onChange={set("volumeSedimento")} /></div>
           </div>
           {([
-            [8, "Sanitização — 4 fotos", 4],
-            [9, "Coletas — imagens", 12],
-            [10, "Limpeza robotizada — imagens", 12],
-            [11, "Depois da limpeza — imagens", 8],
+            [8, "Análise Físico Química e Laboratorial — 4 fotos", 4],
+            [9, "Análise Físico Química e Laboratorial — imagens", 12],
+            [10, "Análise Físico Química e Laboratorial — imagens", 12],
+            [11, "Análise Físico Química e Laboratorial — imagens", 8],
             [12, "Análise Físico Química e Laboratorial — prints do laudo (antes e depois)", 2],
           ] as const).map(([num, rot, max]) => (
             <div key={num} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
