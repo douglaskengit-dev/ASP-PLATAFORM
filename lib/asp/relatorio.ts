@@ -1009,19 +1009,28 @@ export interface TopicoDoProcedimento {
  * formulário usa o modelo, o Catálogo oferece importar).
  */
 export function topicosDoProcedimento(
-  proc: { codigo?: unknown; topicos_lista?: unknown; topicos?: unknown } | null | undefined,
+  proc: { codigo?: unknown; template_path?: unknown; topicos_lista?: unknown; topicos?: unknown } | null | undefined,
 ): TopicoDoProcedimento[] {
   const salva = Array.isArray(proc?.topicos_lista) ? (proc!.topicos_lista as TopicoDoProcedimento[]) : [];
   if (salva.length > 0) return salva;
 
   // Remontar a configuração antiga só funciona quando os números dela se
-  // referem ao modelo padrão. O procedimento de limpeza robotizada segue o
-  // modelo do POP 001, onde 8, 9 e 10 são Sanitização, Coleta das amostras e
-  // Limpeza robotizada — não "Foto da Inspeção Visual Interna", "Conclusão" e
-  // "Recomendações". Aplicar TOPICOS_PADRAO ali produziria uma lista com os
-  // títulos errados, o que é pior do que dizer "não configurado": a lista
-  // certa vem de "Importar do modelo", com o .docx do POP 001 no Catálogo.
-  if (ehLimpezaRobotizada(typeof proc?.codigo === "string" ? proc.codigo : null)) return [];
+  // referem ao modelo PADRÃO — o único caso em que dá para confiar, sem abrir
+  // o arquivo, que TOPICOS_PADRAO descreve os títulos certos.
+  //
+  // Isso falha de dois jeitos:
+  //  - o procedimento de limpeza robotizada segue o modelo do POP 001, onde
+  //    8, 9 e 10 são Sanitização, Coleta das amostras e Limpeza robotizada —
+  //    não "Foto da Inspeção Visual Interna", "Conclusão" e "Recomendações";
+  //  - QUALQUER procedimento com modelo próprio (template_path) pode numerar
+  //    as seções do jeito dele, diferente do padrão.
+  // Aplicar TOPICOS_PADRAO nesses casos produz uma lista com os títulos
+  // errados — pior do que dizer "não configurado", porque parece certa. E o
+  // Catálogo persiste essa lista no primeiro salvamento (mesmo um que só
+  // mude outro campo), tornando o erro definitivo. A lista certa vem de
+  // "Importar do modelo", com o .docx do procedimento anexado no Catálogo.
+  const temModeloProprio = typeof proc?.template_path === "string" && proc.template_path.length > 0;
+  if (temModeloProprio || ehLimpezaRobotizada(typeof proc?.codigo === "string" ? proc.codigo : null)) return [];
 
   return listaDeTopicosSalvos(Array.isArray(proc?.topicos) ? (proc!.topicos as number[]) : null);
 }
@@ -1393,7 +1402,11 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       const n = numeroDoItem(item);
       if (n === undefined) continue;              // tópico novo: não está no modelo
       mencionados.add(n);
-      if (!item.ativo) ocultosDaLista.add(n);
+      // `!== false`, não `!item.ativo`: um item sem `ativo` gravado (ex.:
+      // JSONB antigo, escrito antes deste campo existir) deve contar como
+      // ativo aqui — mesma convenção do formulário. Com `!item.ativo`, esse
+      // item aparecia marcado/visível na tela mas saía oculto do documento.
+      if (item.ativo === false) ocultosDaLista.add(n);
       const original = (item.titulo_origem || "").trim();
       if (item.titulo?.trim() && original && item.titulo.trim() !== original) {
         renomear.set(n, item.titulo.trim());
