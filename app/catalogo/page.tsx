@@ -193,6 +193,7 @@ export default function CatalogoPage() {
         topicos_lista: t.map((x) => ({
           numero: x.numero, titulo: x.titulo, titulo_origem: x.titulo, ativo: true,
         })),
+        lista_recuperada: false,
       });
     } catch (e) {
       setErro(`Falha ao ler o modelo: ${e instanceof Error ? e.message : "erro"}`);
@@ -203,6 +204,31 @@ export default function CatalogoPage() {
   function mexerLista(fn: (l: Procedimento["topicos_lista"]) => Procedimento["topicos_lista"]) {
     if (!edProc) return;
     setEdProc({ ...edProc, topicos_lista: fn(edProc.topicos_lista || []) });
+  }
+
+  /** Procedimentos que já têm lista e servem de ponto de partida para este.
+   *  A lista é de cada procedimento; reaproveitar é opcional, e daqui em
+   *  diante a cópia vive por conta própria — mexer num não mexe no outro. */
+  const fontesParaCopiar = procedimentos.filter(
+    (p) => p.id !== edProc?.id && (p.topicos_lista || []).length > 0
+  );
+
+  /** Traz a lista de outro procedimento para o que está aberto. */
+  function copiarDeProcedimento(id: string) {
+    if (!edProc || !id) return;
+    const fonte = procedimentos.find((p) => p.id === id);
+    if (!fonte) return;
+    if (
+      (edProc.topicos_lista || []).length > 0 &&
+      !confirm(`Substituir os ${edProc.topicos_lista.length} tópicos atuais pelos ${fonte.topicos_lista.length} de ${fonte.codigo}?`)
+    ) return;
+    // Cópia profunda: sem isso os dois procedimentos passariam a apontar para
+    // os MESMOS objetos, e editar o título de um mudaria o do outro na tela.
+    setEdProc({
+      ...edProc,
+      topicos_lista: fonte.topicos_lista.map((t) => ({ ...t })),
+      lista_recuperada: false,
+    });
   }
 
   const novoEquip = (): Equipamento => ({
@@ -335,7 +361,19 @@ export default function CatalogoPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ ...rot, marginBottom: 0 }}>Tópicos do relatório</label>
                 {podeEditar && (
-                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    {fontesParaCopiar.length > 0 && (
+                      <select style={{ ...campo, width: "auto", padding: "7px 9px" }} value=""
+                        title="Copia a lista de tópicos de outro procedimento para este"
+                        onChange={(ev) => { copiarDeProcedimento(ev.target.value); ev.target.value = ""; }}>
+                        <option value="">⧉ Copiar de outro procedimento…</option>
+                        {fontesParaCopiar.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.codigo} — {p.topicos_lista.length} tópicos
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <button type="button" className="btn-dl btn-sec" onClick={importarDoModelo}>
                       ⬇ Importar do modelo
                     </button>
