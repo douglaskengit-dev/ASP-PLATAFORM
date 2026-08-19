@@ -8,7 +8,7 @@
  * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
-import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, listaDeTopicosSalvos } from "@/lib/asp/relatorio";
+import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, topicosDoProcedimento } from "@/lib/asp/relatorio";
 
 /** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
@@ -74,15 +74,17 @@ export default function CatalogoPage() {
           // Procedimento configurado ANTES da lista editável existir guardou a
           // escolha em `topicos`, e `topicos_lista` nasceu vazia. Mostrar a tela
           // vazia nesse caso dá a impressão de que a configuração se perdeu —
-          // ela está no banco. Remontamos para exibir; salvar a torna oficial.
-          const recuperada = salva.length === 0 ? listaDeTopicosSalvos(p.topicos) : [];
+          // ela está no banco. `topicosDoProcedimento` remonta para exibir, e é
+          // a MESMA função que o formulário do relatório usa: as duas telas
+          // enxergam a mesma lista. Salvar a torna oficial.
+          const lista = topicosDoProcedimento(p);
           return {
             ...p, equipamentos: p.equipamentos || [],
             topicos: Array.isArray(p.topicos) ? p.topicos : null,
             template_path: p.template_path || null,
             topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
-            topicos_lista: salva.length > 0 ? salva : recuperada,
-            lista_recuperada: recuperada.length > 0,
+            topicos_lista: lista,
+            lista_recuperada: salva.length === 0 && lista.length > 0,
           };
         }));
         setPodeEditar(!!d.podeEditar);

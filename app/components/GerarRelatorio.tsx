@@ -6,12 +6,12 @@
  * abaixo, os campos daquele tópico e o envio de fotos correspondente. Ao
  * desmarcar, a seção sai do documento e os números seguintes são reajustados.
  * A capa é o tópico 0 e também pode ser omitida. */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, LAUDO_COLUNAS, LAUDO_PARAMETROS,
-  TOPICOS_PADRAO, TOPICO_CAPA, chaveDeTopico,
+  TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada,
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -71,17 +71,14 @@ const grade: React.CSSProperties = {
 
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
 
-/** Procedimento de limpeza robotizada. O relatório dele tem blocos que não
- *  existem nos demais (valores de coleta, horários da operação e figuras em
- *  vagas fixas do modelo), então esses campos só aparecem quando ele está
- *  escolhido — nos outros procedimentos apenas poluiriam o formulário.
+/** O procedimento de limpeza robotizada tem blocos que não existem nos demais
+ *  (valores de coleta, horários da operação e figuras em vagas fixas do
+ *  modelo), então esses campos só aparecem quando ele está escolhido — nos
+ *  outros procedimentos apenas poluiriam o formulário.
  *
- *  A comparação ignora espaços e acentuação de caixa para tolerar variações
- *  de digitação do código ("CVS 6" / "CVS6"). */
-const COD_LIMPEZA = "cvs6de12/01/2011";
-function ehLimpezaRobotizada(codigo?: string): boolean {
-  return (codigo || "").toLowerCase().replace(/\s+/g, "") === COD_LIMPEZA;
-}
+ *  `ehLimpezaRobotizada` mora na lib porque a resolução da lista de tópicos
+ *  também precisa dele: os números do modelo do POP 001 não significam o
+ *  mesmo que os de TOPICOS_PADRAO. */
 
 export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo }: Props) {
   const [d, setD] = useState<Partial<DadosRelatorio>>(
@@ -186,9 +183,34 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   ];
 
   /** Lista de tópicos configurada no Catálogo para este procedimento.
-   *  Quando existe, ela manda — é a lista que você edita lá. */
-  const listaProc: { numero: number; titulo: string; titulo_origem?: string; ativo: boolean }[] =
-    Array.isArray(proc?.topicos_lista) ? proc!.topicos_lista : [];
+   *  Quando existe, ela manda — é a lista que você edita lá. Resolvida pela
+   *  MESMA função que o Catálogo usa, senão as duas telas discordam. */
+  const listaProc = topicosDoProcedimento(proc);
+
+  /** Quais tópicos o Catálogo manda marcar para este procedimento.
+   *  null = procedimento sem configuração, não há o que aplicar. */
+  function selecaoDoCatalogo(): Record<number, boolean> | null {
+    if (listaProc.length === 0) return null;
+    return {
+      0: capaVisivel(proc),
+      ...Object.fromEntries(listaProc.map((t, i) => [t.numero ?? i + 1, t.ativo !== false])),
+    };
+  }
+
+  /** Ao escolher o procedimento, a seleção de tópicos passa a ser a do
+   *  Catálogo. Sem isto o Catálogo dizia "Batimetria fora" e o formulário
+   *  mostrava Batimetria marcada — e o documento saía conforme o Catálogo,
+   *  não conforme a tela. Relatório retomado mantém a seleção salva com ele. */
+  const procAplicado = useRef<string | null>(null);
+  useEffect(() => {
+    const id = proc?.id || null;
+    if (!id || id === procAplicado.current) return;
+    const primeiraVez = procAplicado.current === null;
+    procAplicado.current = id;
+    if (primeiraVez && estadoSalvo?.visiveis) return;
+    const selecao = selecaoDoCatalogo();
+    if (selecao) setVisiveis(selecao);
+  }, [proc?.id, listaProc.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Quantos tópicos o procedimento tem configurados no Catálogo (inclui a
    *  capa, que é o número 0). null = nunca foi configurado. */
@@ -252,33 +274,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setD((v) => ({ ...v, metodos: proc.metodos || "" }));
     setEquipIds(proc.equipamentos);
     // O procedimento define o FORMATO do relatório: quais tópicos entram.
-    // Sem configuração (null), mantém o que estiver marcado hoje.
-    if (!Array.isArray(proc.topicos)) return;
-    const salvos: number[] = proc.topicos;
-
-    // Os números guardados em `topicos` são os do modelo em que a configuração
-    // foi feita — normalmente o padrão da ASP, de 0 a 10. A lista em uso pode
-    // vir de OUTRO modelo, onde a mesma seção tem outro número ("Equipe de
-    // trabalho" é 5 no modelo de batimetria e 6 no POP 001; "Recomendações" é
-    // 10 num e 14 no outro). Comparar número com número desmarcava, de uma vez,
-    // todo tópico cujo número tivesse mudado.
-    //
-    // Por isso o casamento é pelo TÍTULO, via chave canônica — o mesmo critério
-    // que o gerador já usa para saber em que seção cada conteúdo entra.
-    const chavesSalvas = new Set(
-      salvos
-        .map((n) => TOPICOS_PADRAO.find((t) => t.numero === n))
-        .map((t) => (t ? chaveDeTopico(t.numero, t.titulo) : null))
-        .filter((c): c is string => !!c)
-    );
-    const marcado = (t: { numero: number; titulo: string }) => {
-      if (t.numero === 0) return salvos.includes(0);        // capa não tem chave
-      const chave = chaveDeTopico(t.numero, t.titulo);
-      // Seção que a lista canônica não conhece (tópico próprio do modelo):
-      // sem título para comparar, resta o número — o comportamento antigo.
-      return chave ? chavesSalvas.has(chave) : salvos.includes(t.numero);
-    };
-    setVisiveis(Object.fromEntries(TOPICOS_EM_USO.map((t) => [t.numero, marcado(t)])));
+    // Sem configuração, mantém o que estiver marcado hoje.
+    const selecao = selecaoDoCatalogo();
+    if (selecao) setVisiveis(selecao);
   }
 
   /** Marca/desmarca um equipamento e reescreve o texto do tópico 4. */
@@ -985,7 +983,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             [9, "Coletas — imagens", 12],
             [10, "Limpeza robotizada — imagens", 12],
             [11, "Depois da limpeza — imagens", 8],
-            [12, "Análise — prints do laudo (antes e depois)", 2],
+            [12, "Análise Físico Química e Laboratorial — prints do laudo (antes e depois)", 2],
           ] as const).map(([num, rot, max]) => (
             <div key={num} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
               <strong style={{ fontSize: 12.5 }}>{rot}</strong>

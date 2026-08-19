@@ -932,7 +932,10 @@ const CHAVES_TOPICO: { chave: string; re: RegExp }[] = [
   { chave: "coletas", re: /coletas?\s+das?\s+amostras/i },
   { chave: "limpeza", re: /limpeza\s+robotizada/i },
   { chave: "apos-limpeza", re: /imagens?\s+ap[óo]s\s+a\s+limpeza/i },
-  { chave: "analise", re: /an[áa]lise\s+f[íi]sico/i },
+  // Título oficial: "Análise Físico Química e Laboratorial". A alternativa
+  // `laboratorial` cobre quem escrever só "Análise Laboratorial"; hífen em
+  // "Físico-Química" e falta de acento já passam pelo resto do padrão.
+  { chave: "analise", re: /an[áa]lise\s+(f[íi]sico|laboratorial)/i },
   { chave: "fotos-internas", re: /inspe[çc][ãa]o visual interna/i },
   { chave: "observacoes", re: /^\s*\d+\.?\s*observa[çc][õo]es/i },
   { chave: "conclusao", re: /^\s*\d+\.?\s*conclus[ãa]o/i },
@@ -968,6 +971,65 @@ export function listaDeTopicosSalvos(
     titulo_origem: t.titulo,
     ativo: topicos.includes(t.numero),
   }));
+}
+
+/**
+ * Procedimento de limpeza robotizada.
+ *
+ * O relatório dele segue OUTRO modelo — o do POP 001, com Sanitização,
+ * Coleta das amostras, Limpeza robotizada, Imagens após a limpeza e Análise
+ * físico-química, numerado até 14. Os números dele não querem dizer a mesma
+ * coisa que os de TOPICOS_PADRAO, que descreve o modelo de batimetria.
+ *
+ * A comparação ignora espaços e caixa para tolerar variações de digitação do
+ * código ("CVS 6" / "CVS6").
+ */
+const COD_LIMPEZA = "cvs6de12/01/2011";
+export function ehLimpezaRobotizada(codigo?: string | null): boolean {
+  return (codigo || "").toLowerCase().replace(/\s+/g, "") === COD_LIMPEZA;
+}
+
+/** Tópico de um procedimento, como o Catálogo edita e o relatório usa. */
+export interface TopicoDoProcedimento {
+  numero: number;
+  titulo: string;
+  titulo_origem?: string;
+  ativo: boolean;
+}
+
+/**
+ * A lista de tópicos de um procedimento — resposta única para as duas telas.
+ *
+ * O Catálogo e o formulário do relatório leem o mesmo /api/catalogo, mas cada
+ * um resolvia a lista por conta própria: o Catálogo caía na configuração
+ * antiga, o formulário caía no modelo. Resultado: o Catálogo dizia
+ * "Batimetria fora" e o formulário mostrava Batimetria marcada.
+ *
+ * Vazio significa "não configurado" — quem chama decide o que fazer (o
+ * formulário usa o modelo, o Catálogo oferece importar).
+ */
+export function topicosDoProcedimento(
+  proc: { codigo?: unknown; topicos_lista?: unknown; topicos?: unknown } | null | undefined,
+): TopicoDoProcedimento[] {
+  const salva = Array.isArray(proc?.topicos_lista) ? (proc!.topicos_lista as TopicoDoProcedimento[]) : [];
+  if (salva.length > 0) return salva;
+
+  // Remontar a configuração antiga só funciona quando os números dela se
+  // referem ao modelo padrão. O procedimento de limpeza robotizada segue o
+  // modelo do POP 001, onde 8, 9 e 10 são Sanitização, Coleta das amostras e
+  // Limpeza robotizada — não "Foto da Inspeção Visual Interna", "Conclusão" e
+  // "Recomendações". Aplicar TOPICOS_PADRAO ali produziria uma lista com os
+  // títulos errados, o que é pior do que dizer "não configurado": a lista
+  // certa vem de "Importar do modelo", com o .docx do POP 001 no Catálogo.
+  if (ehLimpezaRobotizada(typeof proc?.codigo === "string" ? proc.codigo : null)) return [];
+
+  return listaDeTopicosSalvos(Array.isArray(proc?.topicos) ? (proc!.topicos as number[]) : null);
+}
+
+/** A capa (tópico 0) entra no relatório? Fica fora de `topicos_lista`, que só
+ *  descreve as seções numeradas, então a resposta vem da configuração antiga. */
+export function capaVisivel(proc: { topicos?: unknown } | null | undefined): boolean {
+  return !Array.isArray(proc?.topicos) || (proc!.topicos as number[]).includes(0);
 }
 
 /**
