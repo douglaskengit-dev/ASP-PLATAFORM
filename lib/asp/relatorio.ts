@@ -970,6 +970,22 @@ export function listaDeTopicosSalvos(
   }));
 }
 
+/**
+ * Procedimento de limpeza robotizada.
+ *
+ * O relatório dele segue OUTRO modelo — o do POP 001, com Sanitização,
+ * Coleta das amostras, Limpeza robotizada, Imagens após a limpeza e Análise
+ * físico-química, numerado até 14. Os números dele não querem dizer a mesma
+ * coisa que os de TOPICOS_PADRAO, que descreve o modelo de batimetria.
+ *
+ * A comparação ignora espaços e caixa para tolerar variações de digitação do
+ * código ("CVS 6" / "CVS6").
+ */
+const COD_LIMPEZA = "cvs6de12/01/2011";
+export function ehLimpezaRobotizada(codigo?: string | null): boolean {
+  return (codigo || "").toLowerCase().replace(/\s+/g, "") === COD_LIMPEZA;
+}
+
 /** Tópico de um procedimento, como o Catálogo edita e o relatório usa. */
 export interface TopicoDoProcedimento {
   numero: number;
@@ -990,10 +1006,20 @@ export interface TopicoDoProcedimento {
  * formulário usa o modelo, o Catálogo oferece importar).
  */
 export function topicosDoProcedimento(
-  proc: { topicos_lista?: unknown; topicos?: unknown } | null | undefined,
+  proc: { codigo?: unknown; topicos_lista?: unknown; topicos?: unknown } | null | undefined,
 ): TopicoDoProcedimento[] {
   const salva = Array.isArray(proc?.topicos_lista) ? (proc!.topicos_lista as TopicoDoProcedimento[]) : [];
   if (salva.length > 0) return salva;
+
+  // Remontar a configuração antiga só funciona quando os números dela se
+  // referem ao modelo padrão. O procedimento de limpeza robotizada segue o
+  // modelo do POP 001, onde 8, 9 e 10 são Sanitização, Coleta das amostras e
+  // Limpeza robotizada — não "Foto da Inspeção Visual Interna", "Conclusão" e
+  // "Recomendações". Aplicar TOPICOS_PADRAO ali produziria uma lista com os
+  // títulos errados, o que é pior do que dizer "não configurado": a lista
+  // certa vem de "Importar do modelo", com o .docx do POP 001 no Catálogo.
+  if (ehLimpezaRobotizada(typeof proc?.codigo === "string" ? proc.codigo : null)) return [];
+
   return listaDeTopicosSalvos(Array.isArray(proc?.topicos) ? (proc!.topicos as number[]) : null);
 }
 

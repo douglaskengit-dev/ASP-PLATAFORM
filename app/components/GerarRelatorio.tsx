@@ -11,7 +11,7 @@ import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, LAUDO_COLUNAS, LAUDO_PARAMETROS,
-  TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel,
+  TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada,
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -71,17 +71,14 @@ const grade: React.CSSProperties = {
 
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
 
-/** Procedimento de limpeza robotizada. O relatório dele tem blocos que não
- *  existem nos demais (valores de coleta, horários da operação e figuras em
- *  vagas fixas do modelo), então esses campos só aparecem quando ele está
- *  escolhido — nos outros procedimentos apenas poluiriam o formulário.
+/** O procedimento de limpeza robotizada tem blocos que não existem nos demais
+ *  (valores de coleta, horários da operação e figuras em vagas fixas do
+ *  modelo), então esses campos só aparecem quando ele está escolhido — nos
+ *  outros procedimentos apenas poluiriam o formulário.
  *
- *  A comparação ignora espaços e acentuação de caixa para tolerar variações
- *  de digitação do código ("CVS 6" / "CVS6"). */
-const COD_LIMPEZA = "cvs6de12/01/2011";
-function ehLimpezaRobotizada(codigo?: string): boolean {
-  return (codigo || "").toLowerCase().replace(/\s+/g, "") === COD_LIMPEZA;
-}
+ *  `ehLimpezaRobotizada` mora na lib porque a resolução da lista de tópicos
+ *  também precisa dele: os números do modelo do POP 001 não significam o
+ *  mesmo que os de TOPICOS_PADRAO. */
 
 export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo }: Props) {
   const [d, setD] = useState<Partial<DadosRelatorio>>(
