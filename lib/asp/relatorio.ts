@@ -1450,7 +1450,16 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
    *  legenda gerada porque o modelo já traz a legenda de cada vaga. */
   const vagasDoTopico = new Map<number, string[]>();
   (dados.imagens || []).forEach((img, i) => {
-    if (ocultos.has(img.topico)) return;
+    // Vaga de foto da limpeza robotizada não tem checkbox próprio — o
+    // formulário nunca oferece como escondê-la. `ocultos` reflete o que o
+    // usuário desmarcou entre os tópicos NUMERADOS do modelo padrão (1 a
+    // 10), que hoje reaproveitam os mesmos números 8-12 das vagas por
+    // coincidência de faixa, não por serem a mesma seção. Aplicar `ocultos`
+    // a uma vaga a esconderia por desmarcar um tópico completamente
+    // diferente — ex.: desmarcar "Foto da Inspeção Visual Interna" (8)
+    // apagaria as fotos de Sanitização (também 8) da Análise Físico Química
+    // e Laboratorial.
+    if (!img.vaga && ocultos.has(img.topico)) return;
     const rId = rels[i]?.rId;
     if (!rId) return;
     const largura = img.larguraCm || 15;

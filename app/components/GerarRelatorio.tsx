@@ -968,10 +968,19 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               Valores das coletas e do laudo
             </button>
           </div>
-          <p className="detalhe" style={{ margin: "4px 0 8px" }}>
-            As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
-            figura vem do próprio modelo; vaga sem foto é removida do documento.
-          </p>
+          {!caminhoModelo ? (
+            <p className="detalhe" style={{ margin: "4px 0 8px", color: "var(--erro, #b42318)" }}>
+              <strong>⚠ Este procedimento não tem o modelo da limpeza robotizada anexado no Catálogo.</strong>{" "}
+              Sem ele o relatório sai no modelo padrão da ASP, que não tem vaga para essas fotos nem
+              marcador para cloro, pH ou o laudo — o que você preencher aqui não aparece no documento
+              gerado. Anexe o .docx do procedimento em Catálogo → {d.procedimento} → Modelo próprio.
+            </p>
+          ) : (
+            <p className="detalhe" style={{ margin: "4px 0 8px" }}>
+              As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
+              figura vem do próprio modelo; vaga sem foto é removida do documento.
+            </p>
+          )}
           <div style={grade}>
             <div><label style={rotulo}>Altura de sedimento <span className="detalhe">(medição)</span></label>
               <input style={campo} value={d.alturaSedimento || ""} onChange={set("alturaSedimento")} /></div>
