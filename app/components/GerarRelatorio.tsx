@@ -294,7 +294,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
    *  de equipamentos (itens 3 e 4). */
   /** Tópicos próprios do procedimento escolhido (definidos no Catálogo). */
   /** Formulário adaptado ao procedimento de limpeza robotizada. */
-  const limpeza = ehLimpezaRobotizada(d.procedimento);
+  const limpeza = ehLimpezaRobotizada(proc);
   const extras: { titulo: string; apos?: number }[] =
     Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
 
