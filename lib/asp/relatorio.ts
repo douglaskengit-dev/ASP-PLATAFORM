@@ -974,19 +974,19 @@ export function listaDeTopicosSalvos(
 }
 
 /**
- * Procedimento de limpeza robotizada.
- *
- * O relatório dele segue OUTRO modelo — o do POP 001, com Sanitização,
- * Coleta das amostras, Limpeza robotizada, Imagens após a limpeza e Análise
- * físico-química, numerado até 14. Os números dele não querem dizer a mesma
- * coisa que os de TOPICOS_PADRAO, que descreve o modelo de batimetria.
+ * Procedimento de limpeza robotizada — os dois códigos que usam o modelo de
+ * relatório do POP 001, com Sanitização, Coleta das amostras, Limpeza
+ * robotizada, Imagens após a limpeza e Análise Físico Química e Laboratorial,
+ * numerado até 14. Os números dele não querem dizer a mesma coisa que os de
+ * TOPICOS_PADRAO, que descreve o modelo de batimetria.
  *
  * A comparação ignora espaços e caixa para tolerar variações de digitação do
- * código ("CVS 6" / "CVS6").
+ * código ("CVS 6" / "CVS6", "POP 001" / "pop001").
  */
-const COD_LIMPEZA = "cvs6de12/01/2011";
+const CODS_LIMPEZA = ["cvs6de12/01/2011", "pop001"];
 export function ehLimpezaRobotizada(codigo?: string | null): boolean {
-  return (codigo || "").toLowerCase().replace(/\s+/g, "") === COD_LIMPEZA;
+  const normalizado = (codigo || "").toLowerCase().replace(/\s+/g, "");
+  return CODS_LIMPEZA.includes(normalizado);
 }
 
 /** Tópico de um procedimento, como o Catálogo edita e o relatório usa. */
