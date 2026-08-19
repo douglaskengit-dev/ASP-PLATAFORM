@@ -8,7 +8,7 @@
  * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
-import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, topicosDoProcedimento } from "@/lib/asp/relatorio";
+import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, topicosDoProcedimento, ehLimpezaRobotizada } from "@/lib/asp/relatorio";
 
 /** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
@@ -210,9 +210,20 @@ export default function CatalogoPage() {
 
   /** Procedimentos que já têm lista e servem de ponto de partida para este.
    *  A lista é de cada procedimento; reaproveitar é opcional, e daqui em
-   *  diante a cópia vive por conta própria — mexer num não mexe no outro. */
+   *  diante a cópia vive por conta própria — mexer num não mexe no outro.
+   *
+   *  Só oferece fontes do MESMO modelo de relatório (limpeza robotizada ou
+   *  padrão). Números de tópico só fazem sentido dentro do modelo em que
+   *  foram configurados — copiar entre modelos diferentes traria a lista
+   *  certa para o modelo errado. Também evita contornar a proteção de
+   *  topicosDoProcedimento contra remontar a lista da limpeza com títulos do
+   *  modelo de batimetria: ela só age enquanto topicos_lista está vazia, e
+   *  uma cópia grava uma lista não vazia direto. */
   const fontesParaCopiar = procedimentos.filter(
-    (p) => p.id !== edProc?.id && (p.topicos_lista || []).length > 0
+    (p) =>
+      p.id !== edProc?.id &&
+      (p.topicos_lista || []).length > 0 &&
+      ehLimpezaRobotizada(p.codigo) === ehLimpezaRobotizada(edProc?.codigo)
   );
 
   /** Traz a lista de outro procedimento para o que está aberto. */

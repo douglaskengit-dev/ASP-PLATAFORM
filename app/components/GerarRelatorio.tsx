@@ -184,16 +184,33 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
   /** Lista de tópicos configurada no Catálogo para este procedimento.
    *  Quando existe, ela manda — é a lista que você edita lá. Resolvida pela
-   *  MESMA função que o Catálogo usa, senão as duas telas discordam. */
-  const listaProc = topicosDoProcedimento(proc);
+   *  MESMA função que o Catálogo usa, senão as duas telas discordam.
+   *
+   *  Memoizada em `proc`: sem isso, `topicosDoProcedimento` recalcularia (e
+   *  realocaria a lista padrão de 10 itens) a cada tecla digitada em
+   *  qualquer campo do formulário, e a nova identidade do array a cada
+   *  render tornaria inútil qualquer useMemo rio abaixo que dependa dela. */
+  const listaProc = useMemo(() => topicosDoProcedimento(proc), [proc]);
+
+  /** `listaProc` com o número sempre resolvido (posição ORIGINAL do item na
+   *  lista, nunca a posição depois de um filtro). Usada por tudo que precisa
+   *  do número de um tópico — se cada consumidor aplicasse `numero ?? i+1`
+   *  com o próprio índice pós-filtro, um item sem número ganharia números
+   *  diferentes em cada lugar (o checkbox controlaria um número, o texto
+   *  seria gravado sob outro), e o checkbox do formulário perderia o efeito
+   *  de esconder o tópico de verdade. */
+  const listaNumerada = useMemo(
+    () => listaProc.map((t, i) => ({ ...t, numero: t.numero ?? i + 1 })),
+    [listaProc]
+  );
 
   /** Quais tópicos o Catálogo manda marcar para este procedimento.
    *  null = procedimento sem configuração, não há o que aplicar. */
   function selecaoDoCatalogo(): Record<number, boolean> | null {
-    if (listaProc.length === 0) return null;
+    if (listaNumerada.length === 0) return null;
     return {
       0: capaVisivel(proc),
-      ...Object.fromEntries(listaProc.map((t, i) => [t.numero ?? i + 1, t.ativo !== false])),
+      ...Object.fromEntries(listaNumerada.map((t) => [t.numero, t.ativo !== false])),
     };
   }
 
@@ -235,20 +252,35 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     topicosModelo.length > 0 && qtdConfigurada !== null && topicosModelo.length + 1 < qtdConfigurada;
 
   /** Seções do modelo em que dá para confiar. */
-  const topicosDoModelo = modeloIncompleto ? [] : topicosModelo;
+  const topicosDoModelo = useMemo(
+    () => (modeloIncompleto ? [] : topicosModelo),
+    [modeloIncompleto, topicosModelo]
+  );
 
   /** Capa + seções em uso: a lista do procedimento, ou o que o modelo tem,
-   *  ou o padrão da ASP. */
-  const TOPICOS_EM_USO = listaProc.length > 0
-    ? [TOPICO_CAPA, ...listaProc.map((t, i) => ({ numero: t.numero ?? i + 1, titulo: t.titulo }))]
-    : topicosDoModelo.length > 0
-      ? [TOPICO_CAPA, ...topicosDoModelo]
-      : TODOS_TOPICOS;
+   *  ou o padrão da ASP.
+   *
+   *  Memoizada porque `qtdOcultos`, logo abaixo, depende dela: sem isso o
+   *  array seria reconstruído (nova identidade) a cada render e o useMemo de
+   *  `qtdOcultos` nunca bateria a comparação de dependências — recalculando
+   *  em toda tecla digitada, exatamente o que o useMemo deveria evitar. */
+  const TOPICOS_EM_USO = useMemo(() => (
+    listaNumerada.length > 0
+      ? [TOPICO_CAPA, ...listaNumerada.map((t) => ({ numero: t.numero, titulo: t.titulo }))]
+      : topicosDoModelo.length > 0
+        ? [TOPICO_CAPA, ...topicosDoModelo]
+        : TODOS_TOPICOS
+  ), [listaNumerada, topicosDoModelo]);
 
   /** Seções do modelo sem campos próprios: ganham bloco genérico. Só quando o
-   *  procedimento tem modelo próprio — no modelo padrão todos já têm campos. */
-  const topicosGenericos = (listaProc.length > 0
-    ? listaProc.filter((t) => t.ativo).map((t, i) => ({ numero: t.numero ?? i + 1, titulo: t.titulo }))
+   *  procedimento tem modelo próprio — no modelo padrão todos já têm campos.
+   *
+   *  `ativo !== false` (não `t.ativo` puro) para casar com `selecaoDoCatalogo`
+   *  acima: um item sem `ativo` gravado deve contar como ativo nos dois
+   *  lugares, senão o tópico aparece marcado (visível) no checklist mas sem
+   *  campo de texto aqui para preencher — uma seção "ligada" e muda. */
+  const topicosGenericos = (listaNumerada.length > 0
+    ? listaNumerada.filter((t) => t.ativo !== false).map((t) => ({ numero: t.numero, titulo: t.titulo }))
     : topicosDoModelo
   ).filter((t) => t.titulo && !TEM_CAMPOS.some((re) => re.test(t.titulo)));
 
@@ -968,10 +1000,19 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               Valores das coletas e do laudo
             </button>
           </div>
-          <p className="detalhe" style={{ margin: "4px 0 8px" }}>
-            As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
-            figura vem do próprio modelo; vaga sem foto é removida do documento.
-          </p>
+          {!caminhoModelo ? (
+            <p className="detalhe" style={{ margin: "4px 0 8px", color: "var(--erro, #b42318)" }}>
+              <strong>⚠ Este procedimento não tem o modelo da limpeza robotizada anexado no Catálogo.</strong>{" "}
+              Sem ele o relatório sai no modelo padrão da ASP, que não tem vaga para essas fotos nem
+              marcador para cloro, pH ou o laudo — o que você preencher aqui não aparece no documento
+              gerado. Anexe o .docx do procedimento em Catálogo → {d.procedimento} → Modelo próprio.
+            </p>
+          ) : (
+            <p className="detalhe" style={{ margin: "4px 0 8px" }}>
+              As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
+              figura vem do próprio modelo; vaga sem foto é removida do documento.
+            </p>
+          )}
           <div style={grade}>
             <div><label style={rotulo}>Altura de sedimento <span className="detalhe">(medição)</span></label>
               <input style={campo} value={d.alturaSedimento || ""} onChange={set("alturaSedimento")} /></div>
