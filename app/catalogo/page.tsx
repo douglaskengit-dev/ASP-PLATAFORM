@@ -8,7 +8,7 @@
  * rótulo/valor, como saem no relatório) e fotos. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
-import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, topicosDoProcedimento, ehLimpezaRobotizada } from "@/lib/asp/relatorio";
+import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, topicosDoProcedimento, ehLimpezaRobotizada, capaVisivel } from "@/lib/asp/relatorio";
 
 /** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
@@ -26,6 +26,9 @@ interface Procedimento {
   topicos: number[] | null;
   /** Modelo .docx próprio (storage). Vazio = modelo padrão da ASP. */
   template_path: string | null;
+  /** Usa o modelo de relatório da limpeza robotizada (Sanitização, Coletas,
+   *  Análise Físico Química e Laboratorial…) em vez do padrão de batimetria. */
+  limpeza_robotizada: boolean;
   /** Tópicos próprios deste procedimento: título + posição (`apos`). */
   topicos_extras: { titulo: string; apos?: number }[];
   /** Tópicos do relatório deste procedimento — a lista real, editável.
@@ -82,6 +85,7 @@ export default function CatalogoPage() {
             ...p, equipamentos: p.equipamentos || [],
             topicos: Array.isArray(p.topicos) ? p.topicos : null,
             template_path: p.template_path || null,
+            limpeza_robotizada: !!p.limpeza_robotizada,
             topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
             topicos_lista: lista,
             lista_recuperada: salva.length === 0 && lista.length > 0,
@@ -130,8 +134,8 @@ export default function CatalogoPage() {
       ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
       : { codigo: item.codigo, nome: item.nome, metodos: item.metodos,
           equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos,
-          template_path: item.template_path || null, topicos_extras: item.topicos_extras || [],
-          topicos_lista: item.topicos_lista || [] };
+          template_path: item.template_path || null, limpeza_robotizada: !!item.limpeza_robotizada,
+          topicos_extras: item.topicos_extras || [], topicos_lista: item.topicos_lista || [] };
     const r = item.id
       ? await api("PATCH", { tipo, id: item.id, dados })
       : await api("POST", { tipo, dados });
@@ -223,7 +227,7 @@ export default function CatalogoPage() {
     (p) =>
       p.id !== edProc?.id &&
       (p.topicos_lista || []).length > 0 &&
-      ehLimpezaRobotizada(p.codigo) === ehLimpezaRobotizada(edProc?.codigo)
+      ehLimpezaRobotizada(p) === ehLimpezaRobotizada(edProc)
   );
 
   /** Traz a lista de outro procedimento para o que está aberto. */
@@ -235,10 +239,23 @@ export default function CatalogoPage() {
       (edProc.topicos_lista || []).length > 0 &&
       !confirm(`Substituir os ${edProc.topicos_lista.length} tópicos atuais pelos ${fonte.topicos_lista.length} de ${fonte.codigo}?`)
     ) return;
+    // A capa (tópico 0) não mora em topicos_lista — capaVisivel lê o array
+    // antigo `topicos` (ver lib/asp/relatorio.ts). Copiar só topicos_lista
+    // deixaria a capa presa à configuração antiga DESTE procedimento, fora
+    // de sintonia com a lista que acabou de vir de outro. Só mexe em
+    // `topicos` quando a visibilidade da capa realmente muda — não força um
+    // array onde antes era null (que já significa "capa visível").
+    const capaFonte = capaVisivel(fonte);
+    const topicos = capaVisivel(edProc) === capaFonte
+      ? edProc.topicos
+      : capaFonte
+        ? [0, ...(edProc.topicos || []).filter((n) => n !== 0)]
+        : (edProc.topicos || []).filter((n) => n !== 0);
     // Cópia profunda: sem isso os dois procedimentos passariam a apontar para
     // os MESMOS objetos, e editar o título de um mudaria o do outro na tela.
     setEdProc({
       ...edProc,
+      topicos,
       topicos_lista: fonte.topicos_lista.map((t) => ({ ...t })),
       lista_recuperada: false,
     });
@@ -250,7 +267,7 @@ export default function CatalogoPage() {
   });
   const novoProc = (): Procedimento => ({
     id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
-    topicos: null, template_path: null, topicos_extras: [], topicos_lista: [],
+    topicos: null, template_path: null, limpeza_robotizada: false, topicos_extras: [], topicos_lista: [],
   });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -347,6 +364,18 @@ export default function CatalogoPage() {
             <div><label style={rot}>Texto sugerido para “Métodos”</label>
               <textarea style={{ ...campo, minHeight: 110 }} value={edProc.metodos || ""} disabled={!podeEditar}
                 onChange={(ev) => setEdProc({ ...edProc, metodos: ev.target.value })} /></div>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: podeEditar ? "pointer" : "default" }}>
+              <input type="checkbox" style={{ marginTop: 3 }} checked={edProc.limpeza_robotizada} disabled={!podeEditar}
+                onChange={(ev) => setEdProc({ ...edProc, limpeza_robotizada: ev.target.checked })} />
+              <span>
+                <strong style={{ fontSize: 13 }}>Limpeza robotizada</strong>
+                <p className="detalhe" style={{ margin: "2px 0 0" }}>
+                  Marque para este procedimento usar o modelo de relatório da limpeza robotizada
+                  (Sanitização, Coletas, valores de cloro/pH, laudo e Análise Físico Química e
+                  Laboratorial) em vez do modelo padrão de batimetria.
+                </p>
+              </span>
+            </label>
             <div>
               <label style={rot}>Modelo do relatório (.docx)</label>
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>

@@ -974,19 +974,28 @@ export function listaDeTopicosSalvos(
 }
 
 /**
- * Procedimento de limpeza robotizada — os dois códigos que usam o modelo de
- * relatório do POP 001, com Sanitização, Coleta das amostras, Limpeza
- * robotizada, Imagens após a limpeza e Análise Físico Química e Laboratorial,
- * numerado até 14. Os números dele não querem dizer a mesma coisa que os de
- * TOPICOS_PADRAO, que descreve o modelo de batimetria.
+ * Procedimento de limpeza robotizada — usa o modelo de relatório do POP 001,
+ * com Sanitização, Coleta das amostras, Limpeza robotizada, Imagens após a
+ * limpeza e Análise Físico Química e Laboratorial, numerado até 14. Os
+ * números dele não querem dizer a mesma coisa que os de TOPICOS_PADRAO, que
+ * descreve o modelo de batimetria.
  *
- * A comparação ignora espaços e caixa para tolerar variações de digitação do
- * código ("CVS 6" / "CVS6", "POP 001" / "pop001").
+ * A resposta vem de `gp_procedimentos.limpeza_robotizada` — quem cadastra o
+ * procedimento no Catálogo marca a caixinha, sem precisar mexer em código.
+ *
+ * `CODS_LIMPEZA` fica como rede de segurança: cobre o intervalo entre um
+ * ambiente que ainda não rodou a migration da coluna e o deploy do código que
+ * já a lê, e os dois procedimentos que já usavam este modelo antes de existir
+ * a coluna. A comparação ignora espaços e caixa para tolerar variações de
+ * digitação do código ("CVS 6" / "CVS6", "POP 001" / "pop001").
  */
 const CODS_LIMPEZA = ["cvs6de12/01/2011", "pop001"];
-export function ehLimpezaRobotizada(codigo?: string | null): boolean {
-  const normalizado = (codigo || "").toLowerCase().replace(/\s+/g, "");
-  return CODS_LIMPEZA.includes(normalizado);
+export function ehLimpezaRobotizada(
+  proc: { codigo?: unknown; limpeza_robotizada?: unknown } | null | undefined,
+): boolean {
+  if (proc?.limpeza_robotizada === true) return true;
+  const codigo = typeof proc?.codigo === "string" ? proc.codigo : "";
+  return CODS_LIMPEZA.includes(codigo.toLowerCase().replace(/\s+/g, ""));
 }
 
 /** Tópico de um procedimento, como o Catálogo edita e o relatório usa. */
@@ -1009,7 +1018,10 @@ export interface TopicoDoProcedimento {
  * formulário usa o modelo, o Catálogo oferece importar).
  */
 export function topicosDoProcedimento(
-  proc: { codigo?: unknown; template_path?: unknown; topicos_lista?: unknown; topicos?: unknown } | null | undefined,
+  proc: {
+    codigo?: unknown; template_path?: unknown; topicos_lista?: unknown; topicos?: unknown;
+    limpeza_robotizada?: unknown;
+  } | null | undefined,
 ): TopicoDoProcedimento[] {
   const salva = Array.isArray(proc?.topicos_lista) ? (proc!.topicos_lista as TopicoDoProcedimento[]) : [];
   if (salva.length > 0) return salva;
@@ -1030,7 +1042,7 @@ export function topicosDoProcedimento(
   // mude outro campo), tornando o erro definitivo. A lista certa vem de
   // "Importar do modelo", com o .docx do procedimento anexado no Catálogo.
   const temModeloProprio = typeof proc?.template_path === "string" && proc.template_path.length > 0;
-  if (temModeloProprio || ehLimpezaRobotizada(typeof proc?.codigo === "string" ? proc.codigo : null)) return [];
+  if (temModeloProprio || ehLimpezaRobotizada(proc)) return [];
 
   return listaDeTopicosSalvos(Array.isArray(proc?.topicos) ? (proc!.topicos as number[]) : null);
 }
@@ -1039,22 +1051,6 @@ export function topicosDoProcedimento(
  *  descreve as seções numeradas, então a resposta vem da configuração antiga. */
 export function capaVisivel(proc: { topicos?: unknown } | null | undefined): boolean {
   return !Array.isArray(proc?.topicos) || (proc!.topicos as number[]).includes(0);
-}
-
-/**
- * Chave canônica de um tópico já separado em número + título.
- *
- * Parte das CHAVES_TOPICO esperam o título AINDA numerado ("3. Métodos"),
- * porque no documento é assim que ele aparece. Quem já tem o número à parte
- * — o formulário e o Catálogo — precisa remontar antes de consultar, senão
- * "Métodos" nunca casa com /^\s*\d+\.?\s*m[ée]todos?\b/.
- *
- * É por esta chave que se compara um tópico entre modelos diferentes: o
- * NÚMERO muda de um modelo para outro, o título não.
- */
-export function chaveDeTopico(numero: number, titulo: string): string | null {
-  if (!titulo?.trim()) return null;
-  return chaveDoTitulo(`${numero}. ${titulo.trim()}`);
 }
 
 /** Detecta o número do tópico de nível 1 num bloco ("7. Batimetria:" → 7). */
