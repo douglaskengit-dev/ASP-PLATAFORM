@@ -945,6 +945,32 @@ function chaveDoTitulo(texto: string): string | null {
 }
 
 /**
+ * Converte a configuração ANTIGA de tópicos — `gp_procedimentos.topicos`, uma
+ * lista de números visíveis como [0,1,2,3,4,5,6,8,9,10] — na lista nova
+ * `topicos_lista`, de {numero, titulo, ativo}.
+ *
+ * Quando os tópicos passaram a ser uma lista editável, `topicos_lista` nasceu
+ * com default '[]' e nada foi copiado de `topicos`. O formulário do relatório
+ * não sentiu (lista vazia cai no modelo), mas o Catálogo passou a mostrar
+ * "ainda não configurado" para procedimentos que ESTAVAM configurados — a
+ * configuração continuava no banco, invisível na tela.
+ *
+ * O `titulo_origem` recebe o título padrão porque é por ele que o gerador
+ * casa cada item com a seção do modelo.
+ */
+export function listaDeTopicosSalvos(
+  topicos: number[] | null | undefined,
+): { numero: number; titulo: string; titulo_origem: string; ativo: boolean }[] {
+  if (!Array.isArray(topicos)) return [];
+  return TOPICOS_PADRAO.map((t) => ({
+    numero: t.numero,
+    titulo: t.titulo,
+    titulo_origem: t.titulo,
+    ativo: topicos.includes(t.numero),
+  }));
+}
+
+/**
  * Chave canônica de um tópico já separado em número + título.
  *
  * Parte das CHAVES_TOPICO esperam o título AINDA numerado ("3. Métodos"),
