@@ -944,6 +944,22 @@ function chaveDoTitulo(texto: string): string | null {
   return CHAVES_TOPICO.find((c) => c.re.test(texto))?.chave || null;
 }
 
+/**
+ * Chave canônica de um tópico já separado em número + título.
+ *
+ * Parte das CHAVES_TOPICO esperam o título AINDA numerado ("3. Métodos"),
+ * porque no documento é assim que ele aparece. Quem já tem o número à parte
+ * — o formulário e o Catálogo — precisa remontar antes de consultar, senão
+ * "Métodos" nunca casa com /^\s*\d+\.?\s*m[ée]todos?\b/.
+ *
+ * É por esta chave que se compara um tópico entre modelos diferentes: o
+ * NÚMERO muda de um modelo para outro, o título não.
+ */
+export function chaveDeTopico(numero: number, titulo: string): string | null {
+  if (!titulo?.trim()) return null;
+  return chaveDoTitulo(`${numero}. ${titulo.trim()}`);
+}
+
 /** Detecta o número do tópico de nível 1 num bloco ("7. Batimetria:" → 7). */
 function numeroTopico(texto: string): number | null {
   // Os modelos são irregulares: "1. Identificação", "8.Sanitização" (sem
@@ -1295,8 +1311,15 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
         renomear.set(n, item.titulo.trim());
       }
     }
-    for (const n of numeroPorTituloModelo.values()) {
-      if (!mencionados.has(n)) ocultosDaLista.add(n);
+    // Nenhum item da lista casou com o modelo? Então a lista não é deste
+    // modelo (foi importada de outro, ou os títulos foram reescritos sem
+    // guardar o titulo_origem). Ocultar "tudo que não foi mencionado" nesse
+    // caso apagaria o relatório inteiro, calado. Melhor ignorar a lista e
+    // gerar o modelo completo do que entregar um documento vazio.
+    if (mencionados.size > 0) {
+      for (const n of numeroPorTituloModelo.values()) {
+        if (!mencionados.has(n)) ocultosDaLista.add(n);
+      }
     }
   }
 

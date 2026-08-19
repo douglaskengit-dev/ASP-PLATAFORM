@@ -11,7 +11,7 @@ import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, LAUDO_COLUNAS, LAUDO_PARAMETROS,
-  TOPICOS_PADRAO, TOPICO_CAPA,
+  TOPICOS_PADRAO, TOPICO_CAPA, chaveDeTopico,
   type DadosRelatorio, type ImagemRelatorio,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -190,19 +190,44 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const listaProc: { numero: number; titulo: string; titulo_origem?: string; ativo: boolean }[] =
     Array.isArray(proc?.topicos_lista) ? proc!.topicos_lista : [];
 
+  /** Quantos tópicos o procedimento tem configurados no Catálogo (inclui a
+   *  capa, que é o número 0). null = nunca foi configurado. */
+  const qtdConfigurada: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
+
+  /** A leitura do modelo perdeu seções?
+   *
+   *  Um título que o leitor não reconhece (numeração fora do padrão, texto
+   *  quebrado em vários <w:t>, título com mais de 90 caracteres) some da
+   *  lista sem erro nenhum. Se o que sobrou é MENOS do que o procedimento já
+   *  usava, o parse veio incompleto — e trocar a lista completa por ela
+   *  apagaria da tela tópicos que o usuário já tinha configurado.
+   *
+   *  Nesse caso preferimos a lista padrão e um aviso: um tópico a mais na
+   *  tela o usuário desmarca; um tópico que sumiu ele não tem como recuperar.
+   *
+   *  A heurística é assimétrica de propósito e pode disparar num modelo que
+   *  REALMENTE tem poucas seções — o aviso explica o que houve, e a saída
+   *  definitiva é configurar os tópicos do procedimento no Catálogo
+   *  (topicos_lista), que passa a mandar e dispensa esta adivinhação. */
+  const modeloIncompleto =
+    topicosModelo.length > 0 && qtdConfigurada !== null && topicosModelo.length + 1 < qtdConfigurada;
+
+  /** Seções do modelo em que dá para confiar. */
+  const topicosDoModelo = modeloIncompleto ? [] : topicosModelo;
+
   /** Capa + seções em uso: a lista do procedimento, ou o que o modelo tem,
    *  ou o padrão da ASP. */
   const TOPICOS_EM_USO = listaProc.length > 0
     ? [TOPICO_CAPA, ...listaProc.map((t, i) => ({ numero: t.numero ?? i + 1, titulo: t.titulo }))]
-    : topicosModelo.length > 0
-      ? [TOPICO_CAPA, ...topicosModelo]
+    : topicosDoModelo.length > 0
+      ? [TOPICO_CAPA, ...topicosDoModelo]
       : TODOS_TOPICOS;
 
   /** Seções do modelo sem campos próprios: ganham bloco genérico. Só quando o
    *  procedimento tem modelo próprio — no modelo padrão todos já têm campos. */
   const topicosGenericos = (listaProc.length > 0
     ? listaProc.filter((t) => t.ativo).map((t, i) => ({ numero: t.numero ?? i + 1, titulo: t.titulo }))
-    : topicosModelo
+    : topicosDoModelo
   ).filter((t) => t.titulo && !TEM_CAMPOS.some((re) => re.test(t.titulo)));
 
   const qtdOcultos = useMemo(() => TOPICOS_EM_USO.filter((t) => !ativo(t.numero)).length, [visiveis, TOPICOS_EM_USO]);
@@ -213,8 +238,6 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
   /** Procedimento escolhido na capa — dele saem as sugestões de método e
    *  de equipamentos (itens 3 e 4). */
-  /** Quantos tópicos o procedimento escolhido prevê (null = todos). */
-  const topicosDoProc: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
   /** Tópicos próprios do procedimento escolhido (definidos no Catálogo). */
   /** Formulário adaptado ao procedimento de limpeza robotizada. */
   const limpeza = ehLimpezaRobotizada(d.procedimento);
@@ -230,10 +253,32 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setEquipIds(proc.equipamentos);
     // O procedimento define o FORMATO do relatório: quais tópicos entram.
     // Sem configuração (null), mantém o que estiver marcado hoje.
-    if (Array.isArray(proc.topicos)) {
-      const lista: number[] = proc.topicos;
-      setVisiveis(Object.fromEntries(TOPICOS_EM_USO.map((t) => [t.numero, lista.includes(t.numero)])));
-    }
+    if (!Array.isArray(proc.topicos)) return;
+    const salvos: number[] = proc.topicos;
+
+    // Os números guardados em `topicos` são os do modelo em que a configuração
+    // foi feita — normalmente o padrão da ASP, de 0 a 10. A lista em uso pode
+    // vir de OUTRO modelo, onde a mesma seção tem outro número ("Equipe de
+    // trabalho" é 5 no modelo de batimetria e 6 no POP 001; "Recomendações" é
+    // 10 num e 14 no outro). Comparar número com número desmarcava, de uma vez,
+    // todo tópico cujo número tivesse mudado.
+    //
+    // Por isso o casamento é pelo TÍTULO, via chave canônica — o mesmo critério
+    // que o gerador já usa para saber em que seção cada conteúdo entra.
+    const chavesSalvas = new Set(
+      salvos
+        .map((n) => TOPICOS_PADRAO.find((t) => t.numero === n))
+        .map((t) => (t ? chaveDeTopico(t.numero, t.titulo) : null))
+        .filter((c): c is string => !!c)
+    );
+    const marcado = (t: { numero: number; titulo: string }) => {
+      if (t.numero === 0) return salvos.includes(0);        // capa não tem chave
+      const chave = chaveDeTopico(t.numero, t.titulo);
+      // Seção que a lista canônica não conhece (tópico próprio do modelo):
+      // sem título para comparar, resta o número — o comportamento antigo.
+      return chave ? chavesSalvas.has(chave) : salvos.includes(t.numero);
+    };
+    setVisiveis(Object.fromEntries(TOPICOS_EM_USO.map((t) => [t.numero, marcado(t)])));
   }
 
   /** Marca/desmarca um equipamento e reescreve o texto do tópico 4. */
@@ -564,6 +609,17 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           {!caminhoModelo && proc && " — este procedimento não tem modelo próprio no Catálogo"}
           {!proc && " — escolha o procedimento na capa para usar o modelo dele"}
         </p>
+        {modeloIncompleto && (
+          <p className="detalhe" style={{ margin: 0, color: "var(--erro, #b42318)" }}>
+            <strong>
+              ⚠ Só {topicosModelo.length} seções foram reconhecidas no modelo de {proc?.codigo}, mas
+              este procedimento usa {qtdConfigurada}.
+            </strong>{" "}
+            A lista abaixo é a padrão da ASP, para não esconder tópicos que você já configurou.
+            Confira a numeração dos títulos no .docx — títulos como “8.Sanitização” ou “11 Imagens”
+            são lidos, mas um título sem número na frente não é.
+          </p>
+        )}
         <p className="detalhe" style={{ margin: 0 }}>
           Preenche o modelo oficial da ASP mantendo timbre, cabeçalho e rodapé. Formatação conforme
           ABNT (NBR 14724): Arial 12, entrelinha 1,5, texto justificado, margens 3/2/3/2 cm e legendas
@@ -750,8 +806,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <span className="detalhe" style={{ margin: 0 }}>
               {!proc ? "Escolha o procedimento na capa para habilitar a sugestão."
                 : `Baseada em ${proc.codigo} — ${proc.nome}.` +
-                  (topicosDoProc !== null
-                    ? ` Este procedimento usa ${topicosDoProc} de ${TOPICOS_EM_USO.length} tópicos — a seleção será ajustada.`
+                  (qtdConfigurada !== null
+                    ? ` Este procedimento usa ${qtdConfigurada} de ${TOPICOS_EM_USO.length} tópicos — a seleção será ajustada.`
                     : " Mantém os tópicos como estão.")}
             </span>
           </div>
