@@ -932,7 +932,10 @@ const CHAVES_TOPICO: { chave: string; re: RegExp }[] = [
   { chave: "coletas", re: /coletas?\s+das?\s+amostras/i },
   { chave: "limpeza", re: /limpeza\s+robotizada/i },
   { chave: "apos-limpeza", re: /imagens?\s+ap[óo]s\s+a\s+limpeza/i },
-  { chave: "analise", re: /an[áa]lise\s+f[íi]sico/i },
+  // Título oficial: "Análise Físico Química e Laboratorial". A alternativa
+  // `laboratorial` cobre quem escrever só "Análise Laboratorial"; hífen em
+  // "Físico-Química" e falta de acento já passam pelo resto do padrão.
+  { chave: "analise", re: /an[áa]lise\s+(f[íi]sico|laboratorial)/i },
   { chave: "fotos-internas", re: /inspe[çc][ãa]o visual interna/i },
   { chave: "observacoes", re: /^\s*\d+\.?\s*observa[çc][õo]es/i },
   { chave: "conclusao", re: /^\s*\d+\.?\s*conclus[ãa]o/i },

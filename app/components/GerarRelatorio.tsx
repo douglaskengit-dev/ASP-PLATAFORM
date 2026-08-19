@@ -983,7 +983,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             [9, "Coletas — imagens", 12],
             [10, "Limpeza robotizada — imagens", 12],
             [11, "Depois da limpeza — imagens", 8],
-            [12, "Análise — prints do laudo (antes e depois)", 2],
+            [12, "Análise Físico Química e Laboratorial — prints do laudo (antes e depois)", 2],
           ] as const).map(([num, rot, max]) => (
             <div key={num} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
               <strong style={{ fontSize: 12.5 }}>{rot}</strong>
