@@ -970,6 +970,39 @@ export function listaDeTopicosSalvos(
   }));
 }
 
+/** Tópico de um procedimento, como o Catálogo edita e o relatório usa. */
+export interface TopicoDoProcedimento {
+  numero: number;
+  titulo: string;
+  titulo_origem?: string;
+  ativo: boolean;
+}
+
+/**
+ * A lista de tópicos de um procedimento — resposta única para as duas telas.
+ *
+ * O Catálogo e o formulário do relatório leem o mesmo /api/catalogo, mas cada
+ * um resolvia a lista por conta própria: o Catálogo caía na configuração
+ * antiga, o formulário caía no modelo. Resultado: o Catálogo dizia
+ * "Batimetria fora" e o formulário mostrava Batimetria marcada.
+ *
+ * Vazio significa "não configurado" — quem chama decide o que fazer (o
+ * formulário usa o modelo, o Catálogo oferece importar).
+ */
+export function topicosDoProcedimento(
+  proc: { topicos_lista?: unknown; topicos?: unknown } | null | undefined,
+): TopicoDoProcedimento[] {
+  const salva = Array.isArray(proc?.topicos_lista) ? (proc!.topicos_lista as TopicoDoProcedimento[]) : [];
+  if (salva.length > 0) return salva;
+  return listaDeTopicosSalvos(Array.isArray(proc?.topicos) ? (proc!.topicos as number[]) : null);
+}
+
+/** A capa (tópico 0) entra no relatório? Fica fora de `topicos_lista`, que só
+ *  descreve as seções numeradas, então a resposta vem da configuração antiga. */
+export function capaVisivel(proc: { topicos?: unknown } | null | undefined): boolean {
+  return !Array.isArray(proc?.topicos) || (proc!.topicos as number[]).includes(0);
+}
+
 /**
  * Chave canônica de um tópico já separado em número + título.
  *
