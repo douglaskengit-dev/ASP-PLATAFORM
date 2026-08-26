@@ -233,32 +233,20 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
    *  capa, que é o número 0). null = nunca foi configurado. */
   const qtdConfigurada: number | null = Array.isArray(proc?.topicos) ? proc!.topicos.length : null;
 
-  /** A leitura do modelo perdeu seções?
+  /** A leitura do modelo pode ter perdido seções — um título que o leitor não
+   *  reconhece (numeração fora do padrão, texto quebrado em vários <w:t>,
+   *  título com mais de 90 caracteres) some da lista sem erro nenhum.
    *
-   *  Um título que o leitor não reconhece (numeração fora do padrão, texto
-   *  quebrado em vários <w:t>, título com mais de 90 caracteres) some da
-   *  lista sem erro nenhum. Se o que sobrou é MENOS do que o procedimento já
-   *  usava, o parse veio incompleto — e trocar a lista completa por ela
-   *  apagaria da tela tópicos que o usuário já tinha configurado.
-   *
-   *  Nesse caso preferimos a lista padrão e um aviso: um tópico a mais na
-   *  tela o usuário desmarca; um tópico que sumiu ele não tem como recuperar.
-   *
-   *  A heurística é assimétrica de propósito e pode disparar num modelo que
-   *  REALMENTE tem poucas seções — o aviso explica o que houve, e a saída
-   *  definitiva é configurar os tópicos do procedimento no Catálogo
-   *  (topicos_lista), que passa a mandar e dispensa esta adivinhação. */
+   *  Isto é só um AVISO. O modelo entra na tela por INTEIRO, sempre — quem
+   *  decide o que fica de fora do relatório é o Catálogo (topicos_lista),
+   *  nunca uma adivinhação daqui. Substituir a lista real por uma lista
+   *  padrão "por segurança" é o problema oposto: esconderia justamente as
+   *  seções que o modelo tem e o Catálogo ainda não configurou. */
   const modeloIncompleto =
     topicosModelo.length > 0 && qtdConfigurada !== null && topicosModelo.length + 1 < qtdConfigurada;
 
-  /** Seções do modelo em que dá para confiar. */
-  const topicosDoModelo = useMemo(
-    () => (modeloIncompleto ? [] : topicosModelo),
-    [modeloIncompleto, topicosModelo]
-  );
-
-  /** Capa + seções em uso: a lista do procedimento, ou o que o modelo tem,
-   *  ou o padrão da ASP.
+  /** Capa + seções em uso: a lista do Catálogo manda; sem ela, todo o modelo
+   *  entra — nunca uma lista padrão no lugar do modelo real.
    *
    *  Memoizada porque `qtdOcultos`, logo abaixo, depende dela: sem isso o
    *  array seria reconstruído (nova identidade) a cada render e o useMemo de
@@ -267,10 +255,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const TOPICOS_EM_USO = useMemo(() => (
     listaNumerada.length > 0
       ? [TOPICO_CAPA, ...listaNumerada.map((t) => ({ numero: t.numero, titulo: t.titulo }))]
-      : topicosDoModelo.length > 0
-        ? [TOPICO_CAPA, ...topicosDoModelo]
+      : topicosModelo.length > 0
+        ? [TOPICO_CAPA, ...topicosModelo]
         : TODOS_TOPICOS
-  ), [listaNumerada, topicosDoModelo]);
+  ), [listaNumerada, topicosModelo]);
 
   /** Seções do modelo sem campos próprios: ganham bloco genérico. Só quando o
    *  procedimento tem modelo próprio — no modelo padrão todos já têm campos.
@@ -281,7 +269,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
    *  campo de texto aqui para preencher — uma seção "ligada" e muda. */
   const topicosGenericos = (listaNumerada.length > 0
     ? listaNumerada.filter((t) => t.ativo !== false).map((t) => ({ numero: t.numero, titulo: t.titulo }))
-    : topicosDoModelo
+    : topicosModelo
   ).filter((t) => t.titulo && !TEM_CAMPOS.some((re) => re.test(t.titulo)));
 
   const qtdOcultos = useMemo(() => TOPICOS_EM_USO.filter((t) => !ativo(t.numero)).length, [visiveis, TOPICOS_EM_USO]);
@@ -645,9 +633,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               ⚠ Só {topicosModelo.length} seções foram reconhecidas no modelo de {proc?.codigo}, mas
               este procedimento usa {qtdConfigurada}.
             </strong>{" "}
-            A lista abaixo é a padrão da ASP, para não esconder tópicos que você já configurou.
-            Confira a numeração dos títulos no .docx — títulos como “8.Sanitização” ou “11 Imagens”
-            são lidos, mas um título sem número na frente não é.
+            As seções abaixo são as que foram lidas do modelo — nenhuma foi trocada por uma lista
+            padrão. Se faltar alguma, confira a numeração dos títulos no .docx: “8.Sanitização” ou
+            “11 Imagens” são lidos, mas um título sem número na frente não é.
           </p>
         )}
         <p className="detalhe" style={{ margin: 0 }}>
