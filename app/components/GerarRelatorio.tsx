@@ -10,9 +10,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
-  gerarRelatorioDocx, lerTopicosDoModelo, LAUDO_COLUNAS, LAUDO_PARAMETROS,
+  gerarRelatorioDocx, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
   TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada,
-  type DadosRelatorio, type ImagemRelatorio,
+  type DadosRelatorio, type ImagemRelatorio, type VagaImagem,
 } from "@/lib/asp/relatorio";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { MATERIAIS_TANQUE } from "@/lib/asp/procedimentos";
@@ -98,6 +98,11 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [textosExtras, setTextosExtras] = useState<Record<number, string>>(estadoSalvo?.textosExtras || {});
   /** Tópicos do modelo do procedimento escolhido. Vazio = modelo padrão. */
   const [topicosModelo, setTopicosModelo] = useState<{ numero: number; titulo: string }[]>([]);
+  /** Vagas de imagem do modelo (marcador [imagem] + legenda já escrita no
+   *  arquivo), por tópico — qualquer tópico, não só os da limpeza
+   *  robotizada. Um tópico sem vaga aqui usa o upload de fotos livre de
+   *  sempre. */
+  const [vagasModelo, setVagasModelo] = useState<VagaImagem[]>([]);
   /** Texto das seções do modelo que não têm campos próprios, por número. */
   const [textosTopico, setTextosTopico] = useState<Record<number, string>>(estadoSalvo?.textosTopico || {});
   /** Diagnóstico do modelo em uso. Sem isso, uma falha de leitura fica
@@ -170,6 +175,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         setTopicosModelo([]);
         setInfoModelo(`falha ao ler o ${origem}: ${e instanceof Error ? e.message : "erro"}`);
       });
+    // Vagas de imagem do modelo — falha aqui não precisa de mensagem própria
+    // na tela: sem vaga lida, o tópico só volta a usar o upload de fotos
+    // livre, que é o comportamento de sempre.
+    lerVagasDeImagem(url).then(setVagasModelo).catch(() => setVagasModelo([]));
   }, [caminhoModelo, proc?.codigo]);
 
   /** Seções que já possuem campos próprios no formulário, reconhecidas pelo
@@ -506,6 +515,53 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     );
   }
 
+  /** Vagas de imagem de QUALQUER tópico — não só os 5 hardcoded da limpeza
+   *  robotizada. Se o modelo tem marcador [imagem] sob este título, a foto
+   *  entra na posição certa com a legenda que o próprio modelo já traz,
+   *  igual ao card de Análise Físico Química e Laboratorial. Sem vaga
+   *  lida para este número, retorna null — o chamador cai no upload de
+   *  fotos livre de sempre. */
+  function BlocoVagasDoTopico(numero: number) {
+    const vagas = vagasModelo.filter((v) => v.topico === numero);
+    if (vagas.length === 0) return null;
+    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.vaga && x.f.topico === numero);
+    const max = vagas.length;
+    return (
+      <div style={{ marginTop: 10 }}>
+        <label style={rotulo}>
+          Fotos das vagas deste tópico <span className="detalhe">— a legenda de cada uma já vem do modelo</span>
+        </label>
+        {minhas.length < max && (
+          <input type="file" accept="image/png,image/jpeg" multiple
+            onChange={(e) => {
+              const fs = Array.from(e.target.files || []).slice(0, max - minhas.length);
+              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: "", topico: numero, vaga: true }))]);
+              e.target.value = "";
+            }} />
+        )}
+        <span className="detalhe" style={{ display: "block", marginTop: 4 }}>{minhas.length} de {max} vaga(s)</span>
+        {/* Vagas preenchidas na ordem em que as fotos são anexadas — mesma
+            ordem em que o gerador as consome no documento. A legenda ajuda a
+            saber qual foto vai em qual vaga antes de anexar. */}
+        {vagas.map((v, i) => {
+          const anexo = minhas[i];
+          return (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+              <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {i + 1}. {v.legenda || "(sem legenda no modelo)"}
+                {anexo && ` — ${anexo.f.arquivo.name}`}
+              </span>
+              {anexo && (
+                <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                  onClick={() => setFotos((p) => p.filter((_, k) => k !== anexo.i))}>Remover</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   /** Bloco de fotos de um tópico. */
   function BlocoFotos({ topico, max, legendaPadrao }: { topico: number; max?: number; legendaPadrao?: string }) {
     const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.topico === topico && !x.f.ancora);
@@ -525,9 +581,13 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     );
   }
 
-  /** Um tópico: cabeçalho com seleção + campos logo abaixo quando ativo. */
-  function Topico({ numero, titulo, children, maxFotos, legendaFoto }: {
+  /** Um tópico: cabeçalho com seleção + campos logo abaixo quando ativo.
+   *  `semFotos` tira o upload de fotos livre — usado quando o próprio
+   *  `children` já traz um BlocoVagasDoTopico, senão o tópico ganhava dois
+   *  uploads de foto ao mesmo tempo. */
+  function Topico({ numero, titulo, children, maxFotos, legendaFoto, semFotos }: {
     numero: number; titulo: string; children?: React.ReactNode; maxFotos?: number; legendaFoto?: string;
+    semFotos?: boolean;
   }) {
     const on = ativo(numero);
     return (
@@ -543,7 +603,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {on && (
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
             {children}
-            {BlocoFotos({ topico: numero, max: maxFotos, legendaPadrao: legendaFoto })}
+            {!semFotos && BlocoFotos({ topico: numero, max: maxFotos, legendaPadrao: legendaFoto })}
           </div>
         )}
       </div>
@@ -1032,14 +1092,23 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
         {/* Seções do modelo do procedimento que não têm campos próprios no
             formulário (Anexos, Sanitização, Coletas, Análise…). Recebem texto
-            e fotos genéricos, para que TODA seção do modelo seja preenchível. */}
-        {topicosGenericos.map((t) => Topico({
-          numero: t.numero, titulo: t.titulo, maxFotos: 20, legendaFoto: t.titulo,
-          children: (
-            <EditorTexto valor={textosTopico[t.numero] || ""} altura={110}
-              onChange={(v) => setTextosTopico((p) => ({ ...p, [t.numero]: v }))} />
-          ),
-        }))}
+            genérico sempre e, quando o modelo tem vaga de imagem para o
+            tópico, fotos em posição fixa com a legenda do modelo — senão,
+            upload de fotos livre. */}
+        {topicosGenericos.map((t) => {
+          const temVagas = vagasModelo.some((v) => v.topico === t.numero);
+          return Topico({
+            numero: t.numero, titulo: t.titulo, maxFotos: 20, legendaFoto: t.titulo,
+            semFotos: temVagas,
+            children: (
+              <>
+                <EditorTexto valor={textosTopico[t.numero] || ""} altura={110}
+                  onChange={(v) => setTextosTopico((p) => ({ ...p, [t.numero]: v }))} />
+                {temVagas && BlocoVagasDoTopico(t.numero)}
+              </>
+            ),
+          });
+        })}
 
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
