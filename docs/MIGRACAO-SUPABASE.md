@@ -1,6 +1,12 @@
-# Migração futura — Supabase compartilhado → projeto dedicado
+# Migração — Supabase compartilhado → projeto dedicado
 
-**Situação atual (decisão D2 do plano de migração):** o sistema roda no projeto Supabase
+> **Onde o sistema roda hoje:** projeto dedicado `lyxdrciubhpxophubbsi` —
+> https://supabase.com/dashboard/project/lyxdrciubhpxophubbsi. É esse o projeto
+> que vale para `.env.local`, para as variáveis do Vercel e para rodar os
+> scripts SQL da raiz. O passo a passo abaixo é o registro de como sair do
+> projeto compartilhado; pule o que já estiver feito.
+
+**Ponto de partida (decisão D2 do plano de migração):** o sistema roda no projeto Supabase
 **compartilhado** `supabase-aquamarine-sail` (`xyngrzennrozwcpgxmmm`, org "douglas-tanaka's
 projects"), que também hospeda outro sistema (rankings/eventos). O isolamento é lógico:
 tabelas prefixadas (`gp_*` e, após a unificação, as do schema de securitização) e bucket

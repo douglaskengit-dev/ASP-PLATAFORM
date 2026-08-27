@@ -1,6 +1,7 @@
 -- ============================================================================
 -- ASP — Migração dos dados da base antiga (xyngrzennrozwcpgxmmm) para a base
--- oficial. Rodar no SQL Editor da base de DESTINO (ayqdqwnrgbiqjwjpccuj),
+-- oficial. Rodar no SQL Editor da base de DESTINO (lyxdrciubhpxophubbsi —
+-- https://supabase.com/dashboard/project/lyxdrciubhpxophubbsi),
 -- DEPOIS do script verificacao-db-asp.sql (que garante as tabelas).
 --
 -- Conteúdo: Catálogo completo (7 equipamentos + 2 procedimentos).
