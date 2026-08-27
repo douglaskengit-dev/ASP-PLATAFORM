@@ -16,6 +16,8 @@ import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarMode
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
+import FormularioTanque from "@/app/components/FormularioTanque";
+import { dadosRelatorioDoTanque, erroDoTanque, resumoTanque, tanqueParaForm, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 import AvisoCliente from "@/app/components/AvisoCliente";
 
 interface Projeto {
@@ -30,6 +32,8 @@ interface Inspecao {
   identificacao: string;
   /** Código do procedimento do Catálogo — define o formato do relatório. */
   procedimento?: string | null;
+  /** Cadastro do tanque: dimensões, capacidade e material. */
+  tanque?: Tanque | null;
   fase: number;
   ferramenta_coleta: string;
   status_relatorio_inspecao: string;
@@ -152,6 +156,12 @@ export default function InspecaoDetalhePage() {
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [tituloNovo, setTituloNovo] = useState("");
   const [salvandoTitulo, setSalvandoTitulo] = useState(false);
+  // Cadastro do tanque: nasce na criação da inspeção (dentro do projeto) e é
+  // corrigido aqui. Alimenta a identificação do tanque no relatório.
+  const [editandoTanque, setEditandoTanque] = useState(false);
+  const [tanqueForm, setTanqueForm] = useState<TanqueForm>({ ...TANQUE_FORM_VAZIO });
+  const [salvandoTanque, setSalvandoTanque] = useState(false);
+  const [erroTanque, setErroTanque] = useState<string | null>(null);
   /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
    *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
   const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
@@ -242,6 +252,8 @@ export default function InspecaoDetalhePage() {
    *  agendamento. O usuário revisa tudo no formulário antes de gerar. */
   const dadosIniciaisRelatorio = useMemo(() => {
     const proj = insp?.projeto;
+    // Material, capacidade e medidas de projeto vêm do cadastro do tanque.
+    const doTanque = dadosRelatorioDoTanque(insp?.tanque);
     // Prioriza a medição APROVADA; se nenhuma foi validada, usa a mais recente.
     const comDados = coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0);
     const medicao = (comDados.find((c) => c.aprovada_em) || comDados[0])?.dados as any;
@@ -276,8 +288,11 @@ export default function InspecaoDetalhePage() {
       procedimento: insp?.procedimento || "",
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
-      alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : "",
-      diametro: medicao?.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
+      ...doTanque,
+      // A medição em campo tem a última palavra sobre altura e diâmetro; sem
+      // medição, valem as medidas do cadastro.
+      alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : doTanque.alturaTanque,
+      diametro: medicao?.dimValue ? `${num(medicao.dimValue)} ${un}` : doTanque.diametro,
       // Capacidade nominal é dado de placa (manual). Aqui vai o volume
       // calculado do tanque, que alimenta o quadro do tópico 6.
       capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
@@ -377,6 +392,31 @@ export default function InspecaoDetalhePage() {
       setErroProc("Sem conexão — tente novamente quando estiver online.");
     } finally {
       setSalvandoProc(false);
+    }
+  }
+
+  /** Salva o cadastro do tanque (dimensões, capacidade e material). */
+  async function salvarTanque() {
+    const problema = erroDoTanque(tanqueForm);
+    if (problema) { setErroTanque(problema); return; }
+    setSalvandoTanque(true);
+    setErroTanque(null);
+    try {
+      const res = await fetch(`/api/inspecoes/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tanque: tanqueForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErroTanque(data?.erro || `Falha ao salvar o tanque (HTTP ${res.status}).`);
+        return;
+      }
+      setEditandoTanque(false);
+      carregar();
+    } catch {
+      setErroTanque("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setSalvandoTanque(false);
     }
   }
 
@@ -809,6 +849,18 @@ export default function InspecaoDetalhePage() {
               {salvandoProc && <span className="detalhe" style={{ margin: 0 }}>salvando…</span>}
               {erroProc && (
                 <span className="erro-texto" style={{ margin: 0, flexBasis: "100%" }}>{erroProc}</span>
+              )}
+            </div>
+            {/* Tanque: cadastrado na criação da inspeção. Fica junto do
+                procedimento porque os dois dizem o que está sendo inspecionado. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              <span className="detalhe" style={{ margin: 0 }}>Tanque:</span>
+              <strong style={{ fontSize: 13 }}>
+                {insp.tanque ? resumoTanque(insp.tanque) : "não cadastrado"}
+              </strong>
+              {podeRenomear && (
+                <button className="fu-icone-btn" title="Editar o cadastro do tanque"
+                  onClick={() => { setTanqueForm(tanqueParaForm(insp.tanque)); setErroTanque(null); setEditandoTanque(true); }}>✎</button>
               )}
             </div>
           </div>
@@ -1336,6 +1388,25 @@ export default function InspecaoDetalhePage() {
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button className="btn-azul btn-sec" onClick={() => setModalAgenda(false)} disabled={salvandoAgenda}>Cancelar</button>
               <button className="btn-azul" onClick={salvarAgenda} disabled={salvandoAgenda}>{salvandoAgenda ? "Salvando…" : "Salvar agendamento"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: cadastro do tanque */}
+      {editandoTanque && (
+        <Modal titulo="Tanque da inspeção" onFechar={() => setEditandoTanque(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta inspeção.
+            </p>
+            <FormularioTanque valor={tanqueForm} onChange={setTanqueForm} desabilitado={salvandoTanque} />
+            {erroTanque && <p className="erro-texto" style={{ margin: 0 }}>{erroTanque}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="btn-azul btn-sec" onClick={() => setEditandoTanque(false)} disabled={salvandoTanque}>Cancelar</button>
+              <button className="btn-azul" onClick={salvarTanque} disabled={salvandoTanque}>
+                {salvandoTanque ? "Salvando…" : "Salvar tanque"}
+              </button>
             </div>
           </div>
         </Modal>

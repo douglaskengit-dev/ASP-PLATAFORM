@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { PRIMEIRA_FASE_INSPECAO } from "@/lib/asp/fases";
+import { erroDoTanque, normalizarTanque } from "@/lib/asp/tanque";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,9 @@ interface NovaInspecaoBody {
   ferramentaColeta?: string;
   /** Código do procedimento do Catálogo — define o formato do relatório. */
   procedimento?: string;
+  /** Cadastro do tanque: dimensões, capacidade e material. Obrigatório — é
+   *  o que alimenta a identificação do tanque em todo relatório da inspeção. */
+  tanque?: unknown;
 }
 
 /** Lista inspeções de um projeto. ?lixeira=1 lista as excluídas. Limpeza
@@ -52,6 +56,9 @@ export async function POST(req: NextRequest) {
   if (!body.projetoId || !body.identificacao?.trim()) {
     return NextResponse.json({ erro: "Projeto e identificação são obrigatórios." }, { status: 400 });
   }
+  // Mesma regra do formulário: ela mora em lib/asp/tanque e vale dos dois lados.
+  const erroTanque = erroDoTanque(body.tanque);
+  if (erroTanque) return NextResponse.json({ erro: erroTanque }, { status: 400 });
 
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
@@ -62,6 +69,7 @@ export async function POST(req: NextRequest) {
       fase: PRIMEIRA_FASE_INSPECAO,
       ferramenta_coleta: body.ferramentaColeta?.trim() || "sedimento",
       procedimento: body.procedimento?.trim() || null,
+      tanque: normalizarTanque(body.tanque),
       criado_por: profile.id,
     })
     .select("*")
