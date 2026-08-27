@@ -166,6 +166,21 @@ alter table public.gp_relatorios add column if not exists excluido_em timestampt
 alter table public.gp_relatorios add column if not exists excluido_por uuid references public.gp_profiles (id);
 create index if not exists idx_gp_relatorios_excluido on public.gp_relatorios (excluido_em);
 
+-- ============================================================================
+-- ASP — Cadastro do tanque na inspeção.
+-- Dimensões, capacidade e material entram uma vez, na criação da inspeção
+-- (dentro do projeto), e alimentam a identificação do tanque em todo relatório
+-- gerado depois. Antes disso eram redigitados a cada relatório, e o mesmo
+-- tanque saía com medidas diferentes de um documento para o outro.
+-- Formato do jsonb — comprimentos em METROS, capacidade em M³:
+--   { "formato": "circular", "diametro": 12.5, "comprimento": null,
+--     "largura": null, "altura": 8, "capacidade": 1500,
+--     "material": "Aço carbono" }
+-- Inspeções criadas antes disto ficam com tanque nulo: a tela mostra "não
+-- cadastrado" e o cadastro é preenchido pelo botão de editar da inspeção.
+-- ============================================================================
+alter table public.gp_inspecoes add column if not exists tanque jsonb;
+
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
 
@@ -177,7 +192,7 @@ with esperado(tabela, coluna) as (values
   ('gp_orgaos','excluido_em'),
   ('gp_orgaos_contatos','nome_completo'),
   ('gp_projetos','endereco'), ('gp_projetos','excluido_em'),
-  ('gp_inspecoes','excluido_em'),
+  ('gp_inspecoes','excluido_em'), ('gp_inspecoes','tanque'),
   ('gp_coletas','excluido_em'), ('gp_coletas','aprovada_em'),
   ('gp_relatorios','dados'), ('gp_relatorios','excluido_em'),
   ('gp_equipamentos','especificacoes'), ('gp_equipamentos','fotos'),

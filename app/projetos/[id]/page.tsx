@@ -9,6 +9,8 @@ import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { descreverAcaoFase, tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
+import FormularioTanque from "@/app/components/FormularioTanque";
+import { erroDoTanque, resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 
 interface Cliente {
   id: string;
@@ -31,6 +33,8 @@ interface Inspecao {
   identificacao: string;
   fase: number;
   ferramenta_coleta: string;
+  /** Cadastro do tanque: dimensões, capacidade e material. */
+  tanque?: Tanque | null;
   agendamentos?: { data_visita: string | null; hora: string | null; tipo: string }[];
   ultima_acao?: {
     acao: string; fase_de: number; fase_para: number;
@@ -65,6 +69,9 @@ export default function ProjetoDetalhePage() {
   // Procedimento do Catálogo: define o formato do relatório desta inspeção.
   const [procedimento, setProcedimento] = useState("");
   const [procedimentos, setProcedimentos] = useState<any[]>([]);
+  // Tanque da inspeção: obrigatório na criação, porque é dele que sai a
+  // identificação do tanque em todo relatório gerado depois.
+  const [tanque, setTanque] = useState<TanqueForm>({ ...TANQUE_FORM_VAZIO });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   // Edição do projeto
@@ -148,12 +155,17 @@ export default function ProjetoDetalhePage() {
       setErro("Informe a identificação (ex.: Tanque TQ-01).");
       return;
     }
+    const problemaTanque = erroDoTanque(tanque);
+    if (problemaTanque) {
+      setErro(problemaTanque);
+      return;
+    }
     setSalvando(true);
     try {
       const r = await fetch("/api/inspecoes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projetoId: id, identificacao, procedimento }),
+        body: JSON.stringify({ projetoId: id, identificacao, procedimento, tanque }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -163,6 +175,7 @@ export default function ProjetoDetalhePage() {
       setInspecoes((prev) => [...prev, d.inspecao]);
       setIdentificacao("");
       setProcedimento("");
+      setTanque({ ...TANQUE_FORM_VAZIO });
       setModalAberto(false);
     } catch {
       setErro("Falha de rede ao salvar.");
@@ -291,6 +304,7 @@ export default function ProjetoDetalhePage() {
                     <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
                     <span className="detalhe" style={{ margin: 0 }}>Fase {i.fase} · {tituloFase(i.fase)}</span>
                   </div>
+                  {i.tanque && <span className="detalhe" style={{ margin: "4px 0 0" }}>🛢 {resumoTanque(i.tanque)}</span>}
                   {data && <span className="detalhe" style={{ margin: "4px 0 0" }}>📅 Agendada: {data}</span>}
                   {i.ultima_acao && (
                     <span className="detalhe" style={{ margin: "2px 0 0" }}>
@@ -375,6 +389,15 @@ export default function ProjetoDetalhePage() {
               <small style={{ color: "var(--cinza)" }}>
                 Define o formato do relatório (tópicos, seções e modelo). Pode ser alterado depois.
               </small>
+            </div>
+            {/* Tanque: cadastrado aqui uma vez e reaproveitado por todo
+                relatório desta inspeção. */}
+            <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 12 }}>
+              <strong style={{ fontSize: 13 }}>Tanque</strong>
+              <p className="detalhe" style={{ margin: "2px 0 10px" }}>
+                Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta inspeção.
+              </p>
+              <FormularioTanque valor={tanque} onChange={setTanque} desabilitado={salvando} />
             </div>
             {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>

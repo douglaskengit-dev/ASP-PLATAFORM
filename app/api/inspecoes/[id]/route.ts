@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
+import { erroDoTanque, normalizarTanque } from "@/lib/asp/tanque";
 
 export const runtime = "nodejs";
 
-/** PATCH: restaurar da lixeira ({ restaurar: true }) ou renomear a inspeção
- *  ({ identificacao }). O título é usado no relatório (campo TAG) e nos nomes
- *  dos arquivos gerados, por isso vale corrigi-lo sem refazer a inspeção. */
+/** PATCH: restaurar da lixeira ({ restaurar: true }), renomear a inspeção
+ *  ({ identificacao }) ou corrigir o cadastro do tanque ({ tanque }). O título
+ *  é usado no relatório (campo TAG) e nos nomes dos arquivos gerados, e as
+ *  medidas do tanque saem em todo relatório — vale corrigir os dois sem
+ *  refazer a inspeção. */
 const PERFIS_EDICAO = ["admin", "operacoes", "gerencia", "comercial"];
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
@@ -24,6 +27,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .update({ procedimento: body.procedimento.trim() || null, atualizado_em: new Date().toISOString() })
       .eq("id", params.id)
       .select("id, procedimento")
+      .single();
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, inspecao: data });
+  }
+
+  // Cadastro do tanque: dimensões, capacidade e material. Vem inteiro, nunca
+  // campo a campo, para não sobrar diâmetro de quando o tanque era circular.
+  if (body.tanque !== undefined) {
+    if (!PERFIS_EDICAO.includes(profile.perfil)) {
+      return NextResponse.json({ erro: "Sem permissão para alterar o tanque." }, { status: 403 });
+    }
+    const erroTanque = erroDoTanque(body.tanque);
+    if (erroTanque) return NextResponse.json({ erro: erroTanque }, { status: 400 });
+    const { data, error } = await getSupabaseAdmin()
+      .from("gp_inspecoes")
+      .update({ tanque: normalizarTanque(body.tanque), atualizado_em: new Date().toISOString() })
+      .eq("id", params.id)
+      .select("id, tanque")
       .single();
     if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, inspecao: data });
