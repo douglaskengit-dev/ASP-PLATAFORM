@@ -16,10 +16,11 @@ administração de usuários.
 * **Next.js 14 App Router + TypeScript**, componentes client (`"use client"`)
   para telas interativas; rotas de API em `app/api/**/route.ts` com
   `export const runtime = "nodejs"`.
-* **Supabase** (projeto `xyngrzennrozwcpgxmmm`): Postgres com RLS, Auth
-  (e-mail/senha) e Storage. Todas as tabelas do app usam o prefixo **`gp_`**
-  (o banco é compartilhado com outro sistema — nunca mexer em tabelas sem esse
-  prefixo).
+* **Supabase** (projeto `lyxdrciubhpxophubbsi` —
+  https://supabase.com/dashboard/project/lyxdrciubhpxophubbsi): Postgres com RLS,
+  Auth (e-mail/senha) e Storage. Todas as tabelas do app usam o prefixo **`gp_`**
+  (herança da base compartilhada anterior — manter o prefixo e nunca mexer em
+  tabelas sem ele).
 * **Vercel**: deploy automático a cada push. Atenção: dependências com
   `require`/`import` dinâmico (ex.: pdfjs-dist) podem precisar de
   `experimental.outputFileTracingIncludes` no `next.config.js`.

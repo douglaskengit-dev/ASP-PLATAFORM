@@ -30,7 +30,7 @@ npm run dev                     # http://localhost:3000
 ```
 
 `.env.local`:
-- `NEXT_PUBLIC_SUPABASE_URL` — https://xyngrzennrozwcpgxmmm.supabase.co
+- `NEXT_PUBLIC_SUPABASE_URL` — https://lyxdrciubhpxophubbsi.supabase.co
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — Settings → API Keys (publishable)
 - `SUPABASE_SECRET_KEY` — Settings → API Keys (secret/service_role)
 - `ANTHROPIC_API_KEY` — console.anthropic.com (chave do Douglas — D4)
