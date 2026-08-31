@@ -295,6 +295,35 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const extras: { titulo: string; apos?: number }[] =
     Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
 
+  /** Título sem número nem pontuação final — mesma regra que o gerador usa
+   *  para casar a lista do Catálogo com as seções do modelo. */
+  const chaveDoTitulo = (t: string) =>
+    t.replace(/^\s*\d+\.?\s*/, "").replace(/[:.]\s*$/, "").trim().toLowerCase();
+
+  /** Seções que a lista do Catálogo tem e o modelo NÃO — as criadas ali com
+   *  "+ Tópico". Entram no documento como seção nova, na posição da lista:
+   *  logo depois do último tópico do modelo que vem antes delas.
+   *
+   *  Sem modelo lido não há como saber o que falta nele; aí a lista inteira
+   *  pareceria nova e o relatório sairia com tudo duplicado. */
+  const secoesNovas = useMemo(() => {
+    if (topicosModelo.length === 0 || listaNumerada.length === 0) return [];
+    const numeroPorTitulo = new Map<string, number>();
+    topicosModelo.forEach((t) => {
+      const k = chaveDoTitulo(t.titulo);
+      if (k && !numeroPorTitulo.has(k)) numeroPorTitulo.set(k, t.numero);
+    });
+    const novas: { numero: number; titulo: string; apos: number }[] = [];
+    let ultimoDoModelo = 0;
+    for (const t of listaNumerada) {
+      const n = numeroPorTitulo.get(chaveDoTitulo(t.titulo_origem || t.titulo));
+      if (n !== undefined) { ultimoDoModelo = n; continue; }
+      if (t.titulo?.trim()) novas.push({ numero: t.numero, titulo: t.titulo, apos: ultimoDoModelo });
+    }
+    return novas;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listaNumerada, topicosModelo]);
+
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
@@ -352,6 +381,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           foto: await fotoDoEquipamento(e),
         }))
       );
+      // As seções próprias entram na MESMA lista de extras do gerador, depois
+      // das do campo antigo do Catálogo. É esse índice que ancora as fotos
+      // (`extra-<i>`), por isso a ordem das duas partes nunca muda.
+      const ancoraDaSecaoNova = new Map<number, string>();
+      secoesNovas.forEach((s, k) => ancoraDaSecaoNova.set(s.numero, `extra-${extras.length + k}`));
+
       const imgs: ImagemRelatorio[] = [];
       for (const f of fotos) {
         if (!ativo(f.topico)) continue;               // tópico oculto: ignora a foto
@@ -360,7 +395,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           dados: await f.arquivo.arrayBuffer(),
           extensao: ext as "png" | "jpeg",
           legenda: f.legenda || f.arquivo.name.replace(/\.[^.]+$/, ""),
-          topico: f.topico, ancora: f.ancora, fonte: f.fonte?.trim() || undefined,
+          topico: f.topico, ancora: f.ancora || ancoraDaSecaoNova.get(f.topico),
+          fonte: f.fonte?.trim() || undefined,
           vaga: f.vaga,
         });
       }
@@ -393,7 +429,16 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         subtopicos8: subs8,
         textosPorNumero: textosTopico,
         topicosLista: listaProc,
-        topicosExtras: extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "", apos: t.apos })),
+        topicosExtras: [
+          ...extras.map((t, i) => ({ titulo: t.titulo, texto: textosExtras[i] || "", apos: t.apos })),
+          // Desmarcada no checklist, a seção vai vazia: o gerador ignora extra
+          // sem título, sem texto e sem foto, e a numeração se fecha sozinha.
+          ...secoesNovas.map((s) => ({
+            titulo: ativo(s.numero) ? s.titulo : "",
+            texto: ativo(s.numero) ? (textosTopico[s.numero] || "") : "",
+            apos: s.apos,
+          })),
+        ],
         templateUrl: proc?.template_path
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,

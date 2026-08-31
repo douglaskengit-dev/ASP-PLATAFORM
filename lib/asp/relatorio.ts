@@ -1514,18 +1514,33 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // novo número de cada tópico visível (renumeração sequencial)
   // Tópicos próprios do procedimento: cada um sabe depois de qual tópico
   // padrão entra (`apos`), então podem ficar no meio dos demais.
-  const extras = (dados.topicosExtras || []).filter((e) => e?.titulo?.trim() || e?.texto?.trim());
-  const aposDo = (i: number) => Math.max(0, Math.min(10, extras[i].apos ?? 10));
+  //
+  // O índice de cada extra é preservado: as fotos vêm ancoradas em
+  // `extra-<i>`, com o i do formulário. Filtrar a lista aqui reindexaria tudo
+  // e as fotos cairiam na seção errada — por isso ela fica inteira, e quem
+  // não tem conteúdo é ignorado na hora de numerar e de emitir.
+  const extras = dados.topicosExtras || [];
+  const extraVazio = (i: number) => {
+    const e = extras[i];
+    return !e?.titulo?.trim() && !e?.texto?.trim() && !figurasDaAncora.has(`extra-${i}`);
+  };
+  // A renumeração segue os tópicos DO MODELO, na ordem do documento — não uma
+  // lista fixa de 1 a 10. Modelo com 14 seções (POP 001) renumerava só até a
+  // décima, e as seguintes ficavam com o número antigo depois de ocultar uma.
+  const numerosDoModelo = ordem.map(([n]) => n);
+  const ultimoDoModelo = numerosDoModelo.length ? Math.max(...numerosDoModelo) : 10;
+  const aposDo = (i: number) =>
+    Math.max(0, Math.min(ultimoDoModelo, extras[i].apos ?? ultimoDoModelo));
   const extrasApos = (k: number) =>
-    extras.map((_, i) => i).filter((i) => aposDo(i) === k);
+    extras.map((_, i) => i).filter((i) => !extraVazio(i) && aposDo(i) === k);
 
   const novoNumero = new Map<number, number>();
   const numeroExtra = new Map<number, number>();
   let seq = 0;
   extrasApos(0).forEach((i) => numeroExtra.set(i, ++seq));
-  TOPICOS_PADRAO.forEach((t) => {
-    if (!ocultos.has(t.numero)) novoNumero.set(t.numero, ++seq);
-    extrasApos(t.numero).forEach((i) => numeroExtra.set(i, ++seq));
+  numerosDoModelo.forEach((n) => {
+    if (!ocultos.has(n)) novoNumero.set(n, ++seq);
+    extrasApos(n).forEach((i) => numeroExtra.set(i, ++seq));
   });
 
   /** Bloco XML de um tópico extra: título numerado, texto e fotos. */
@@ -1561,7 +1576,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   /** Emite os tópicos próprios cuja posição já passou (até `ate`, inclusive). */
   const emitirExtrasAte = (ate: number) => {
     extras.forEach((_, i) => {
-      if (!extrasEmitidos.has(i) && aposDo(i) <= ate) {
+      if (!extrasEmitidos.has(i) && !extraVazio(i) && aposDo(i) <= ate) {
         saida += xmlExtra(i);
         extrasEmitidos.add(i);
       }
