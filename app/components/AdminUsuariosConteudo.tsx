@@ -180,6 +180,21 @@ export default function AdminUsuariosConteudo() {
     }
   }
 
+  async function excluirUsuario(id: string, email: string) {
+    if (!window.confirm(`Excluir definitivamente o usuário ${email}?\n\nEssa ação não pode ser desfeita.`)) return;
+    setErro(null);
+    setMensagem(null);
+    try {
+      const resp = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+      const dados = await resp.json();
+      if (!resp.ok) throw new Error(dados.erro || "Falha ao excluir o usuário.");
+      setUsuarios((prev) => prev.filter((u) => u.id !== id));
+      setMensagem(`Usuário ${email} excluído.`);
+    } catch (err: any) {
+      setErro(err.message || "Erro ao excluir o usuário.");
+    }
+  }
+
   async function atualizarUsuario(id: string, campos: Partial<Profile>) {
     setErro(null);
     try {
@@ -324,6 +339,9 @@ export default function AdminUsuariosConteudo() {
               </label>
               <button type="button" className="btn-doc" onClick={() => redefinirSenha(u.id, u.email)}>
                 🔑 Redefinir senha
+              </button>
+              <button type="button" className="btn-doc" onClick={() => excluirUsuario(u.id, u.email)}>
+                🗑️ Excluir usuário
               </button>
             </div>
           </div>
