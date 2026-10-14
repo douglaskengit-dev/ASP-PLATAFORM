@@ -123,7 +123,8 @@ export default function NotificacoesBotao() {
 
   return (
     <>
-      <button onClick={abrir} title="Notificações"
+      <button type="button" onClick={abrir} title="Notificações"
+        aria-label={total > 0 ? `Notificações (${total} novas)` : "Notificações"}
         style={{ position: "relative", background: "none", border: "1px solid #3a3529", borderRadius: 8,
           width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
           cursor: "pointer", fontSize: 15, color: "#c9c4b6" }}>

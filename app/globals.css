@@ -564,25 +564,111 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
 /* Blocos largos (tabelas, matrizes) rolam dentro do próprio container. */
 .rolagem-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-/* ---- Barra superior: abas no desktop, menu hambúrguer no celular ---- */
-.barra-nav-desktop { display: flex; gap: 4px; }
-.barra-acoes-desktop { display: flex; align-items: center; gap: 14px; }
-.barra-hamburguer { display: none; }
-.barra-hamburguer-wrap { display: none; }
-.barra-wordmark { display: flex; flex-direction: column; line-height: 1.05; }
+/* ---- Barra superior (BarraUsuario) ----
+   Estratégia responsiva — a linha NUNCA encolhe abaixo do conteúdo (nada de
+   itens espremidos/sobrepostos); em vez disso, degrada por faixas de largura:
+     > 1440px   layout completo (wordmark, nome do usuário, abas folgadas)
+     ≤ 1440px   abas e ações mais compactas
+     ≤ 1320px   sai o wordmark e o nome do usuário (fica só o avatar)
+     ≤ 1100px   menu hambúrguer (gaveta lateral) com todos os links;
+                ficam visíveis só logo + 💬 + 🔔 + tema + ☰
+   Rede de segurança: BarraUsuario mede a linha e, se mesmo assim o conteúdo
+   não couber (ex.: indicador de sincronização visível, fonte diferente),
+   aplica .compacta e depois .forcar-menu — os mesmos degraus, antes da hora. */
+.barra {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 56px; padding: 8px 20px;
+  background: var(--escuro); border-bottom: 3px solid var(--acento);
+  font-size: 13px; color: #c9c4b6;
+  position: sticky; top: 0; z-index: 50;
+}
+/* flex-shrink: 0 — o bloco da esquerda nunca é comprimido por baixo das
+   ações; se faltar espaço a linha transborda (e o JS detecta), sem sobrepor. */
+.barra-esq { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+.barra-logo {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  text-decoration: none; border-radius: 8px;
+}
+.barra-wordmark {
+  display: flex; flex-direction: column; line-height: 1.05;
+  font-family: var(--fonte-titulo); font-weight: 800; letter-spacing: 0.14em;
+  color: #fff; font-size: 10px;
+}
+/* flex-shrink: 0 — as abas nunca são comprimidas por baixo das ações. */
+.barra-nav-desktop { display: flex; gap: 4px; flex-wrap: nowrap; flex-shrink: 0; }
+.barra-aba {
+  padding: 8px 14px; border-radius: 8px; white-space: nowrap;
+  font-family: var(--fonte-titulo); font-weight: 700; font-size: 13px;
+  text-transform: uppercase; letter-spacing: 0.04em; text-decoration: none;
+  color: var(--primaria); background: transparent;
+  transition: background .15s, color .15s;
+}
+.barra-aba:hover { background: rgba(255, 255, 255, 0.07); }
+.barra-aba.ativo { color: var(--escuro); background: var(--primaria); }
 
-@media (max-width: 900px) {
-  .barra-nav-desktop, .barra-acoes-desktop { display: none; }
-  .barra-hamburguer-wrap { display: flex !important; }
-  .barra-hamburguer {
-    display: flex; align-items: center; justify-content: center;
-    width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
-    background: none; border: 1px solid #3a3529; color: var(--primaria); font-size: 20px;
-  }
-  .barra-wordmark { display: none; }
+.barra-dir, .barra-acoes-desktop { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.barra-link {
+  color: var(--primaria); background: none; border: none; cursor: pointer;
+  font-family: var(--fonte-titulo); font-weight: 700; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  padding: 6px 0; border-radius: 4px;
+}
+.barra-link:hover { filter: brightness(1.35); }
+.barra-perfil {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  color: #fff; background: none; border: none; cursor: pointer; padding: 4px 0;
+  font-family: var(--fonte-titulo); font-weight: 700; font-size: 12px; border-radius: 6px;
+}
+.barra-avatar {
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800;
+}
+.barra-perfil-nome { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.barra-sair {
+  background: none; border: 1px solid #3a3529; border-radius: 8px;
+  padding: 6px 12px; color: #c9c4b6; font-weight: 600; cursor: pointer;
+  font-size: 13px; white-space: nowrap;
+}
+.barra-sair:hover { border-color: #c9c4b6; }
+.barra-hamburguer {
+  display: none; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
+  background: none; border: 1px solid #3a3529; color: var(--primaria); font-size: 20px;
+}
+.barra a:focus-visible, .barra button:focus-visible,
+.menu-mobile a:focus-visible, .menu-mobile button:focus-visible {
+  outline: 2px solid var(--acento); outline-offset: 2px;
 }
 
-/* Painel do menu no celular */
+@media (max-width: 1440px) {
+  .barra-aba { padding: 7px 10px; font-size: 12px; }
+  .barra-dir, .barra-acoes-desktop { gap: 10px; }
+}
+@media (max-width: 1320px) {
+  /* O brasão já identifica a marca; o nome segue no title/aria-label do avatar. */
+  .barra-wordmark, .barra-perfil-nome { display: none; }
+  .barra-esq { gap: 12px; }
+}
+.barra.compacta .barra-wordmark, .barra.compacta .barra-perfil-nome { display: none; }
+.barra.compacta .barra-esq { gap: 12px; }
+@media (max-width: 1100px) {
+  .barra-nav-desktop, .barra-acoes-desktop, .barra-sair { display: none; }
+  .barra-hamburguer { display: flex; }
+  .barra { padding: 6px 12px; gap: 8px; }
+  .barra-dir { gap: 6px; }
+  /* Alvos de toque ≥ 44px para 💬, 🔔 e tema (min-* vence o width inline). */
+  .barra-dir > button { min-width: 44px; min-height: 44px; }
+}
+.barra.forcar-menu .barra-nav-desktop, .barra.forcar-menu .barra-acoes-desktop,
+.barra.forcar-menu .barra-sair { display: none; }
+.barra.forcar-menu .barra-hamburguer { display: flex; }
+@media (max-width: 360px) {
+  .barra { padding: 6px 8px; }
+  .barra-dir { gap: 4px; }
+}
+
+/* Gaveta do menu (hambúrguer) */
 .menu-mobile {
   position: fixed; inset: 0; z-index: 200;
   background: rgba(0,0,0,0.55);
@@ -594,18 +680,28 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
   border-left: 3px solid var(--acento);
   padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; gap: 6px;
-  overflow-y: auto;
+  overflow-y: auto; overscroll-behavior: contain;
+}
+.menu-mobile-topo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.menu-mobile-titulo { color: #fff; font-family: var(--fonte-titulo); font-weight: 800; font-size: 13px; letter-spacing: 0.1em; }
+.menu-mobile-fechar {
+  background: none; border: 1px solid #3a3529; border-radius: 8px;
+  width: 44px; height: 44px; color: #c9c4b6; font-size: 16px; cursor: pointer; flex-shrink: 0;
 }
 .menu-mobile-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 13px 12px; border-radius: 8px;
+  display: flex; align-items: center; gap: 10px; min-height: 44px;
+  padding: 12px; border-radius: 8px;
   font-family: var(--fonte-titulo); font-weight: 700; font-size: 14px;
   text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--primaria); background: none; border: none;
   text-decoration: none; cursor: pointer; width: 100%; text-align: left;
 }
+.menu-mobile-item:hover { background: rgba(255, 255, 255, 0.07); }
 .menu-mobile-item.ativo { background: var(--primaria); color: var(--escuro); }
-.menu-mobile-sep { height: 1px; background: #3a3529; margin: 8px 0; }
+.menu-mobile-item.sair { color: #e5807a; }
+.menu-mobile-nome { text-transform: none; letter-spacing: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: #fff; }
+.menu-mobile-sep { height: 1px; background: #3a3529; margin: 8px 0; flex-shrink: 0; }
+
 
 /* ---- Modal do medidor: tela cheia no celular (ferramenta de campo) ---- */
 .medidor-shell { display: flex; flex-direction: column; height: 82vh; }
@@ -624,33 +720,4 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
   .modal-overlay { padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); align-items: flex-start; }
   .modal-caixa { max-height: calc(100dvh - 20px); border-radius: 10px; }
   .modal-caixa > div:first-child { padding: 12px 14px; }
-}
-
-/* ---- Barra superior: caber sem espremer ----
-   Com 5 abas + ações, a linha ficava apertada em telas médias. As abas
-   compactam antes de sumir, e o bloco de ações não encolhe a ponto de
-   sobrepor o logo. */
-.barra-nav-desktop { flex-wrap: nowrap; min-width: 0; }
-.barra-nav-desktop a { white-space: nowrap; }
-.barra-acoes-desktop { flex-shrink: 0; }
-.barra-hamburguer-wrap { align-items: center; gap: 8px; }
-
-@media (max-width: 1400px) {
-  .barra-nav-desktop a { padding: 7px 10px !important; font-size: 12px !important; }
-  .barra-acoes-desktop { gap: 10px; }
-}
-@media (max-width: 1200px) {
-  /* Wordmark sai antes das abas — o brasão já identifica a marca. */
-  .barra-wordmark { display: none; }
-  .barra-nav-desktop a { padding: 6px 8px !important; font-size: 11.5px !important; }
-}
-
-/* Celular: feedback, notificações e tema ficam ao lado do hambúrguer —
-   são ações de uso frequente e não devem exigir abrir o menu. */
-@media (max-width: 900px) {
-  .barra-hamburguer-wrap { gap: 6px; }
-  .barra-hamburguer-wrap > * { flex-shrink: 0; }
-}
-@media (max-width: 380px) {
-  .barra-hamburguer-wrap { gap: 4px; }
 }

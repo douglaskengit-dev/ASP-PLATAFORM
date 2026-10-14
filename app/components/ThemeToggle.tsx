@@ -34,6 +34,7 @@ export default function ThemeToggle({
       type="button"
       onClick={alternar}
       title={escuro ? "Mudar para tema claro" : "Mudar para tema escuro"}
+      aria-label={escuro ? "Mudar para tema claro" : "Mudar para tema escuro"}
       style={{
         background: "none",
         borderRadius: 8,
