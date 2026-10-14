@@ -15,7 +15,7 @@ Cada ponto de decisão está marcado como **[SOT: A definir]** — preencher com
 | # | Decisão | Opções | SOT |
 |---|---------|--------|-----|
 | D1 | Repositório final | (a) GRUPO-BRID recebe o código Next • (b) repo do Yann vira o principal • (c) repo novo | ✅ **(a) GRUPO-BRID** — tudo será implementado nele |
-| D2 | Projeto Supabase | (a) o compartilhado atual (aquamarine, divide cota com outro sistema) • (b) dedicado (exige liberar um slot free ou pausar projeto antigo) | ✅ **(a) compartilhado por enquanto** — migração futura documentada em `docs/MIGRACAO-SUPABASE.md` |
+| D2 | Projeto Supabase | (a) o compartilhado atual (aquamarine, divide cota com outro sistema) • (b) dedicado (exige liberar um slot free ou pausar projeto antigo) | ✅ **(a) compartilhado por enquanto** — migração futura documentada em `docs/MIGRACAO-SUPABASE.md`. **Atualização:** o banco oficial agora é o dedicado `ayqdqwnrgbiqjwjpccuj` — único a ser usado |
 | D3 | Autenticação | (a) Supabase Auth multi-usuário com papéis/RLS (Securitização) • (b) senha única (GRUPO-BRID) | ✅ **(a) multi-usuário com papéis** |
 | D4 | Conta da API Anthropic | chave do amigo (atual) ou outra | ✅ **chave própria do Douglas por enquanto**; troca depois na variável `ANTHROPIC_API_KEY` (sem mudança de código) |
 

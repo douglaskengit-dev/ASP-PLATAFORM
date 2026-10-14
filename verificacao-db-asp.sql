@@ -1,6 +1,6 @@
 -- ============================================================================
--- ASP — Script de GARANTIA do banco (projeto lyxdrciubhpxophubbsi —
--- https://supabase.com/dashboard/project/lyxdrciubhpxophubbsi).
+-- ASP — Script de GARANTIA do banco (projeto ayqdqwnrgbiqjwjpccuj —
+-- https://supabase.com/dashboard/project/ayqdqwnrgbiqjwjpccuj).
 -- Idempotente: pode rodar quantas vezes quiser, só cria o que falta.
 -- Rode inteiro no SQL Editor. No fim, um relatório mostra o status.
 -- ============================================================================
