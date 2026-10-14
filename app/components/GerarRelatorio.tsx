@@ -11,9 +11,13 @@ import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
-  TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada,
+  TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada, numeroDaSecao,
   type DadosRelatorio, type ImagemRelatorio, type VagaImagem,
 } from "@/lib/asp/relatorio";
+import {
+  pendenciasColeta, planejarFotosNoRelatorio, valorDoSlot, numeroBr,
+  type RegistroFotosExecucao,
+} from "@/lib/asp/fotos-execucao";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { MATERIAIS_TANQUE } from "@/lib/asp/procedimentos";
 
@@ -35,6 +39,9 @@ interface Props {
   /** Snapshot de um rascunho salvo — reabre o formulário como estava.
    *  As fotos não são restauradas (só o arquivo final as contém). */
   estadoSalvo?: SnapshotRelatorio | null;
+  /** Coleta de fotos da execução — só no Relatório de Execução. As fotos
+   *  entram já posicionadas e as pendências viram aviso (nunca bloqueio). */
+  coletaFotos?: RegistroFotosExecucao | null;
 }
 
 /** Tudo que o formulário precisa para ser reconstruído depois. */
@@ -55,6 +62,25 @@ interface FotoTopico {
   vaga?: boolean;
   /** Crédito da imagem — sai como "Fonte: …" abaixo da legenda. */
   fonte?: string;
+  /** Vaga exata do tópico (0 = primeira). Sem índice, a próxima livre. */
+  vagaIndice?: number;
+  /** Veio da coleta de fotos da execução: item de origem, para o painel. */
+  coleta?: string;
+  /** URL local da miniatura (só fotos da coleta). */
+  previa?: string;
+}
+
+/** Em que vaga cada foto do tópico cai — a MESMA regra do gerador: primeiro
+ *  as que pediram posição (`vagaIndice`), depois as demais na ordem. */
+function distribuirVagas<T extends { f: FotoTopico }>(lista: T[], total: number): (T | undefined)[] {
+  const pos: (T | undefined)[] = new Array(total).fill(undefined);
+  lista.forEach((x) => {
+    const k = x.f.vagaIndice;
+    if (k !== undefined && k >= 0 && k < total && !pos[k]) pos[k] = x;
+  });
+  const livres = lista.filter((x) => !pos.includes(x));
+  for (let k = 0; k < total; k++) if (!pos[k]) pos[k] = livres.shift();
+  return pos;
 }
 
 const campo: React.CSSProperties = {
@@ -80,7 +106,7 @@ const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
  *  também precisa dele: os números do modelo do POP 001 não significam o
  *  mesmo que os de TOPICOS_PADRAO. */
 
-export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo }: Props) {
+export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo, coletaFotos }: Props) {
   const [d, setD] = useState<Partial<DadosRelatorio>>(
     estadoSalvo?.d ? { ...inicial, ...estadoSalvo.d } : inicial
   );
@@ -108,7 +134,13 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   /** Diagnóstico do modelo em uso. Sem isso, uma falha de leitura fica
    *  indistinguível de "procedimento sem modelo próprio": a tela não muda. */
   const [infoModelo, setInfoModelo] = useState<string>("carregando modelo…");
+  /** Modelo cujos tópicos e vagas já foram lidos ("" = modelo padrão). */
+  const [modeloLido, setModeloLido] = useState<string | null>(null);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
+  const fotosRef = useRef(fotos);
+  fotosRef.current = fotos;
+  // miniaturas das fotos da coleta: libera a memória ao fechar o formulário
+  useEffect(() => () => fotosRef.current.forEach((f) => f.previa && URL.revokeObjectURL(f.previa)), []);
   // Por padrão usa a medição APROVADA; se não houver, a mais recente.
   const [coletaId, setColetaId] = useState<string>(
     estadoSalvo?.coletaId || (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || ""
@@ -116,11 +148,13 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   // Catálogo (procedimentos e equipamentos) vem do banco — aba Catálogo.
   const [PROCEDIMENTOS, setProcedimentos] = useState<any[]>([]);
   const [EQUIPAMENTOS, setEquipamentos] = useState<any[]>([]);
+  /** Catálogo já respondeu — antes disso não se sabe o modelo do procedimento. */
+  const [catalogoPronto, setCatalogoPronto] = useState(false);
   useEffect(() => {
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
       setProcedimentos(d.procedimentos || []);
       setEquipamentos((d.equipamentos || []).map((e: any) => ({ ...e, id: e.slug })));
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setCatalogoPronto(true));
   }, []);
 
   const [gerando, setGerando] = useState(false);
@@ -164,7 +198,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
       : undefined;
     const origem = caminhoModelo ? `modelo de ${proc?.codigo || "procedimento"}` : "modelo padrão da ASP";
     setInfoModelo(`lendo ${origem}…`);
-    lerTopicosDoModelo(url)
+    setModeloLido(null);
+    const lidos = lerTopicosDoModelo(url)
       .then((t) => {
         setTopicosModelo(t);
         setInfoModelo(t.length
@@ -178,7 +213,11 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     // Vagas de imagem do modelo — falha aqui não precisa de mensagem própria
     // na tela: sem vaga lida, o tópico só volta a usar o upload de fotos
     // livre, que é o comportamento de sempre.
-    lerVagasDeImagem(url).then(setVagasModelo).catch(() => setVagasModelo([]));
+    const vagas = lerVagasDeImagem(url).then(setVagasModelo).catch(() => setVagasModelo([]));
+    // leitura de um modelo que já foi trocado não marca o atual como lido
+    let vigente = true;
+    Promise.all([lidos, vagas]).then(() => { if (vigente) setModeloLido(caminhoModelo || ""); });
+    return () => { vigente = false; };
   }, [caminhoModelo, proc?.codigo]);
 
   /** Seções que já possuem campos próprios no formulário, reconhecidas pelo
@@ -324,6 +363,155 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaNumerada, topicosModelo]);
 
+  /** Pendências da coleta de fotos da execução — aviso, nunca bloqueio. */
+  const pendColeta = useMemo(() => (coletaFotos ? pendenciasColeta(coletaFotos) : []), [coletaFotos]);
+  const [infoColeta, setInfoColeta] = useState<string | null>(null);
+
+  /** Pré-carrega as fotos da coleta de execução, uma vez, quando o modelo do
+   *  procedimento já foi lido (é dele que saem os números das seções e as
+   *  vagas). O destino de cada foto está documentado em DESTINOS, em
+   *  lib/asp/fotos-execucao.ts. Ficam no formulário como qualquer outra foto:
+   *  dá para trocar a legenda, a vaga ou remover. */
+  const coletaCarregada = useRef(false);
+  useEffect(() => {
+    if (coletaCarregada.current || !coletaFotos?.inspecao_id || !catalogoPronto) return;
+    if (modeloLido === null || modeloLido !== (caminhoModelo || "")) return;
+    coletaCarregada.current = true;
+    const reg = coletaFotos;
+
+    // Seleção de tópicos que vale para este procedimento — a mesma que o
+    // efeito do Catálogo aplica; lida aqui porque o setVisiveis dele pode
+    // ainda não ter chegado neste render.
+    const vis = estadoSalvo?.visiveis || selecaoDoCatalogo() || visiveis;
+    const marcado = (n: number) => vis[n] !== false;
+    const topicos = topicosModelo.length > 0 ? topicosModelo : TOPICOS_PADRAO;
+    const plano = planejarFotosNoRelatorio(reg, {
+      numeroDaChave: (chave) => numeroDaSecao(topicos, chave),
+      ativo: marcado,
+      vagas: vagasModelo,
+      primeiraSecao: topicos.find((t) => marcado(t.numero))?.numero ?? 1,
+    });
+
+    // pH e cloro medidos → marcadores [dado coletado] das legendas do modelo
+    // da limpeza robotizada. Não sobrescreve o que já foi digitado.
+    const medido = (id: string, exigido: boolean) => {
+      const n = exigido ? valorDoSlot(reg, id) : null;
+      return n == null ? undefined : numeroBr(n);
+    };
+    setD((x) => ({
+      ...x,
+      phAntes: x.phAntes || medido("agua_antes_ph", reg.agua_antes) || x.phAntes,
+      cloroAntes: x.cloroAntes || medido("agua_antes_cloro", reg.agua_antes) || x.cloroAntes,
+      phDepois: x.phDepois || medido("agua_depois_ph", reg.agua_depois) || x.phDepois,
+      cloroDepois: x.cloroDepois || medido("agua_depois_cloro", reg.agua_depois) || x.cloroDepois,
+    }));
+
+    if (plano.length === 0) return;
+    setInfoColeta(`Baixando ${plano.length} foto(s) da coleta…`);
+    const base = `/api/inspecoes/${reg.inspecao_id}/fotos?caminho=`;
+    Promise.all(plano.map(async (p): Promise<FotoTopico | null> => {
+      try {
+        const r = await fetch(base + encodeURIComponent(p.caminho));
+        if (!r.ok) return null;
+        const blob = await r.blob();
+        const ext = p.caminho.toLowerCase().endsWith(".png") ? "png" : "jpg";
+        const arquivo = new File([blob], `${p.slotId}.${ext}`, { type: blob.type || `image/${ext === "png" ? "png" : "jpeg"}` });
+        return {
+          arquivo, legenda: p.legenda, topico: p.topico, ancora: p.ancora,
+          vaga: p.vaga, vagaIndice: p.vagaIndice, coleta: p.rotulo, previa: URL.createObjectURL(arquivo),
+        };
+      } catch {
+        return null;
+      }
+    })).then((lista) => {
+      const ok = lista.filter((f): f is FotoTopico => !!f);
+      setFotos((p) => [...ok, ...p]);
+      const falhas = plano.length - ok.length;
+      setInfoColeta(falhas > 0 ? `${falhas} foto(s) da coleta não puderam ser baixadas (sem conexão?).` : null);
+    });
+  }, [coletaFotos, catalogoPronto, modeloLido, caminhoModelo]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Onde a foto sai, em texto: "9. Coletas das amostras · vaga 3". */
+  function destinoDaFoto(f: FotoTopico): string {
+    const t = TOPICOS_EM_USO.find((x) => x.numero === f.topico);
+    const nome = t ? `${t.numero}. ${t.titulo}` : `Tópico ${f.topico}`;
+    const onde = f.ancora ? ` · ${f.ancora}` : f.vaga ? "" : " · fim da seção";
+    return `${nome}${onde}${ativo(f.topico) ? "" : " — tópico desmarcado, não sai"}`;
+  }
+
+  /** Move uma foto para outra vaga do mesmo tópico. Se a vaga já tinha foto
+   *  com posição fixa, as duas trocam de lugar. -1 = fora das vagas. */
+  function moverParaVaga(i: number, destino: number) {
+    setFotos((p) => {
+      const alvo = p[i];
+      const anterior = alvo.vagaIndice;
+      return p.map((x, k) => {
+        if (k === i) return destino < 0 ? { ...x, vaga: false, vagaIndice: undefined } : { ...x, vaga: true, vagaIndice: destino };
+        if (destino >= 0 && x.vaga && x.topico === alvo.topico && x.vagaIndice === destino) {
+          return { ...x, vagaIndice: alvo.vaga ? anterior : undefined };
+        }
+        return x;
+      });
+    });
+  }
+
+  /** Painel das fotos que vieram da coleta: miniatura, destino, legenda ou
+   *  vaga, e remover. Mostra todas num lugar só — algumas caem em tópicos
+   *  cujo bloco não lista fotos fora de vaga. */
+  function PainelColeta() {
+    if (!coletaFotos) return null;
+    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.coleta);
+    return (
+      <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
+        <strong style={{ fontSize: 13.5 }}>
+          Fotos da coleta de execução <span className="detalhe">— {minhas.length} carregada(s) automaticamente</span>
+        </strong>
+        {pendColeta.length > 0 && (
+          <div className="detalhe" style={{ margin: "6px 0 0", color: "#c2410c" }}>
+            ⚠ A coleta de fotos da execução está incompleta ({pendColeta.length} pendência(s)):
+            <ul style={{ margin: "4px 0 4px 18px", padding: 0 }}>
+              {pendColeta.map((p) => <li key={p}>{p}</li>)}
+            </ul>
+            Você pode gerar assim mesmo — o que falta só não entra no relatório. Para completar,
+            use o card “Coleta de fotos da execução” da inspeção.
+          </div>
+        )}
+        {infoColeta && <p className="detalhe" style={{ margin: "6px 0 0" }}>{infoColeta}</p>}
+        {minhas.length === 0 && !infoColeta && (
+          <p className="vazio" style={{ margin: "6px 0 0" }}>Nenhuma foto coletada nesta inspeção.</p>
+        )}
+        {minhas.map(({ f, i }) => {
+          const vagas = vagasModelo.filter((v) => v.topico === f.topico);
+          return (
+            <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 8, paddingTop: 8,
+              borderTop: "1px solid var(--borda)", flexWrap: "wrap" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {f.previa && <img src={f.previa} alt="" style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />}
+              <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{f.coleta}</span>
+                <span className="detalhe" style={{ margin: 0 }}>→ {destinoDaFoto(f)}</span>
+                {vagas.length > 0 && (
+                  <select style={campo} value={f.vaga && f.vagaIndice !== undefined ? f.vagaIndice : -1}
+                    onChange={(e) => moverParaVaga(i, Number(e.target.value))}>
+                    {vagas.map((v, k) => (
+                      <option key={k} value={k}>Vaga {k + 1}: {(v.legenda || v.marcador).slice(0, 90)}</option>
+                    ))}
+                    <option value={-1}>Fora das vagas (figura no fim da seção)</option>
+                  </select>
+                )}
+                {!f.vaga && (
+                  <input style={campo} placeholder="Legenda" value={f.legenda}
+                    onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
+                )}
+              </div>
+              <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   /** Aplica a sugestão do procedimento: preenche os métodos e marca os
    *  equipamentos previstos (o usuário ajusta depois). */
@@ -398,6 +586,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           topico: f.topico, ancora: f.ancora || ancoraDaSecaoNova.get(f.topico),
           fonte: f.fonte?.trim() || undefined,
           vaga: f.vaga,
+          vagaIndice: f.vaga ? f.vagaIndice : undefined,
         });
       }
       return gerarRelatorioDocx({
@@ -547,13 +736,13 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             }} />
         )}
         <span className="detalhe" style={{ display: "block" }}>{minhas.length} de {max} vaga(s)</span>
-        {minhas.map(({ f, i }, ordem) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+        {distribuirVagas(minhas, Math.max(max, minhas.length)).map((x, ordem) => x && (
+          <div key={x.i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
             <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {ordem + 1}. {f.arquivo.name}
+              {ordem + 1}. {x.f.coleta || x.f.arquivo.name}
             </span>
             <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-              onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
+              onClick={() => setFotos((p) => p.filter((_, k) => k !== x.i))}>Remover</button>
           </div>
         ))}
       </div>
@@ -588,13 +777,13 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {/* Vagas preenchidas na ordem em que as fotos são anexadas — mesma
             ordem em que o gerador as consome no documento. A legenda ajuda a
             saber qual foto vai em qual vaga antes de anexar. */}
-        {vagas.map((v, i) => {
-          const anexo = minhas[i];
+        {distribuirVagas(minhas, vagas.length).map((anexo, i) => {
+          const v = vagas[i];
           return (
             <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
               <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {i + 1}. {v.legenda || "(sem legenda no modelo)"}
-                {anexo && ` — ${anexo.f.arquivo.name}`}
+                {anexo && ` — ${anexo.f.coleta || anexo.f.arquivo.name}`}
               </span>
               {anexo && (
                 <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
@@ -770,6 +959,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             </p>
           )}
         </div>
+
+        {PainelColeta()}
 
         {Topico({ numero: 0, titulo: TOPICO_CAPA.titulo, children: <>
           <div style={grade}>
@@ -1185,6 +1376,11 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         </div>
 
         {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
+        {pendColeta.length > 0 && (
+          <p className="detalhe" style={{ margin: 0, color: "#c2410c", textAlign: "right" }}>
+            ⚠ Coleta de fotos da execução incompleta — {pendColeta.length} pendência(s), listadas no início do formulário.
+          </p>
+        )}
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button className="btn-azul btn-sec" onClick={onFechar} disabled={gerando || enviando}>Cancelar</button>
           <button className="btn-azul btn-sec" onClick={baixar} disabled={gerando || enviando}>

@@ -182,6 +182,43 @@ create index if not exists idx_gp_relatorios_excluido on public.gp_relatorios (e
 -- ============================================================================
 alter table public.gp_inspecoes add column if not exists tanque jsonb;
 
+-- ============================================================================
+-- ASP — Coleta de fotos da execução (fase 7).
+-- Checklist fotográfico por inspeção: tanque, robô no local, coletas de água
+-- antes/depois da limpeza (pH e cloro com valor) e a limpeza (antes, durante
+-- e depois — mínimo 3 fotos cada). As fotos entram sozinhas no Relatório de
+-- Execução. `agua_potavel` no procedimento define se as coletas de água já
+-- nascem marcadas como necessárias; depois a escolha é por inspeção.
+-- Itens (jsonb), por vaga:
+--   { "tanque_geral":  { "caminho": "fotos-execucao/<id>/tanque_geral/1.jpg", "por": …, "em": … },
+--     "agua_antes_ph": { "caminho": …, "valor": 7.2, "por": …, "em": … },
+--     "limpeza_antes": [ { "caminho": …, "por": …, "em": … }, … ] }
+-- Coleta incompleta só AVISA (ao avançar a fase 7 e no relatório).
+-- ============================================================================
+alter table public.gp_procedimentos
+  add column if not exists agua_potavel boolean not null default false;
+
+create table if not exists public.gp_fotos_execucao (
+  id uuid primary key default gen_random_uuid(),
+  inspecao_id uuid not null unique references public.gp_inspecoes (id) on delete cascade,
+  agua_antes boolean not null default false,
+  agua_depois boolean not null default false,
+  limpeza_confirmada boolean not null default false,
+  itens jsonb not null default '{}'::jsonb,
+  criado_por uuid references public.gp_profiles (id),
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+alter table public.gp_fotos_execucao enable row level security;
+drop policy if exists gp_fotos_execucao_select on public.gp_fotos_execucao;
+create policy gp_fotos_execucao_select on public.gp_fotos_execucao for select to authenticated
+  using (public.gp_perfil_atual_asp() is not null);
+drop policy if exists gp_fotos_execucao_write on public.gp_fotos_execucao;
+create policy gp_fotos_execucao_write on public.gp_fotos_execucao for all to authenticated
+  using (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'))
+  with check (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'));
+
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
 
@@ -199,6 +236,8 @@ with esperado(tabela, coluna) as (values
   ('gp_equipamentos','especificacoes'), ('gp_equipamentos','fotos'),
   ('gp_procedimentos','metodos'), ('gp_procedimentos','equipamentos'),
   ('gp_checklist_equipamentos','itens'),
+  ('gp_procedimentos','agua_potavel'),
+  ('gp_fotos_execucao','itens'), ('gp_fotos_execucao','agua_antes'),
   ('gp_push_subscriptions','endpoint')
 )
 select e.tabela, e.coluna,

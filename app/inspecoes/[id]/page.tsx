@@ -16,6 +16,8 @@ import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarMode
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
+import ColetaFotosExecucao from "@/app/components/ColetaFotosExecucao";
+import { pendenciasColeta, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
 import FormularioTanque from "@/app/components/FormularioTanque";
 import { dadosRelatorioDoTanque, erroDoTanque, resumoTanque, tanqueParaForm, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 import AvisoCliente from "@/app/components/AvisoCliente";
@@ -180,6 +182,9 @@ export default function InspecaoDetalhePage() {
   const [salvandoAgenda, setSalvandoAgenda] = useState(false);
   const [usuarios, setUsuarios] = useState<UsuarioOpcao[]>([]);
   const [arquivos, setArquivos] = useState<ArquivoProjeto[]>([]);
+  /** Coleta de fotos da execução, como o card a mostra — alimenta o aviso ao
+   *  concluir a Execução e as fotos do Relatório de Execução. */
+  const [fotosExec, setFotosExec] = useState<RegistroFotosExecucao | null>(null);
 
   const carregar = useCallback(() => {
     fetch(`/api/inspecoes/${id}`)
@@ -326,8 +331,17 @@ export default function InspecaoDetalhePage() {
   }
 
   function clicarAcao(opcao: OpcaoAcao) {
-    if (opcao.exigeMotivo) { setMotivo(""); setReprovar(opcao); }
-    else aplicar(opcao.acao);
+    if (opcao.exigeMotivo) { setMotivo(""); setReprovar(opcao); return; }
+    // Execução → Relatório de Execução: coleta de fotos incompleta só AVISA.
+    // Quem está em campo decide se segue assim mesmo (ex.: vaga sem acesso).
+    if (insp?.fase === 7 && opcao.acao === "avancar" && fotosExec) {
+      const pend = pendenciasColeta(fotosExec);
+      if (pend.length > 0 && !confirm(
+        `A coleta de fotos da execução está incompleta (${pend.length} pendência(s)):\n\n• ${pend.join("\n• ")}\n\n` +
+        "As fotos que faltam não entram no Relatório de Execução. Avançar mesmo assim?"
+      )) return;
+    }
+    aplicar(opcao.acao);
   }
 
   async function anexarColeta(arquivo: File) {
@@ -1032,6 +1046,10 @@ export default function InspecaoDetalhePage() {
         />
       )}
 
+      {insp && bloco === "execucao" && (
+        <ColetaFotosExecucao inspecaoId={id} onMudar={setFotosExec} />
+      )}
+
       {/* Relatórios (Operações envia; Gerência aprova nas fases 5/9) */}
       <div className="card" style={{ marginTop: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1266,6 +1284,8 @@ export default function InspecaoDetalhePage() {
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
           coletas={coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0)}
+          // Relatório de Execução: as fotos da coleta entram já posicionadas.
+          coletaFotos={(tipoRelatorio || bloco) === "execucao" ? fotosExec : undefined}
           onSalvar={async (blob, snapshot) => {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "inspecao"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
