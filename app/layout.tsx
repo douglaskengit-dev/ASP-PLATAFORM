@@ -1,27 +1,32 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import { Antonio, Inter, Montserrat } from "next/font/google";
+import localFont from "next/font/local";
 import BarraUsuario from "./components/BarraUsuario";
 import RegistrarSW from "./components/RegistrarSW";
 
+// Fontes hospedadas no próprio projeto (app/fonts, licença OFL) em vez de
+// next/font/google: o build não depende mais de baixar do Google Fonts, que
+// falhava de forma intermitente na Vercel. Arquivos variáveis, subset latin.
+
 // D25: tipografia da marca Grupo BRID — títulos/nav em Montserrat (bold,
 // geométrica, igual ao site institucional), corpo de texto em Inter.
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+const montserrat = localFont({
+  src: "./fonts/Montserrat-Variable.woff2",
+  weight: "100 900",
   variable: "--fonte-titulo",
   display: "swap",
 });
-const inter = Inter({
-  subsets: ["latin"],
+const inter = localFont({
+  src: "./fonts/Inter-Variable.woff2",
+  weight: "100 900",
   variable: "--fonte-corpo",
   display: "swap",
 });
 // D52: fonte dos títulos do site institucional (grupobrid.com) — usada na
 // página inicial pública.
-const antonio = Antonio({
-  subsets: ["latin"],
-  weight: ["600", "700"],
+const antonio = localFont({
+  src: "./fonts/Antonio-Variable.woff2",
+  weight: "100 700",
   variable: "--fonte-brid",
   display: "swap",
 });
