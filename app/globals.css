@@ -721,3 +721,45 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
   .modal-caixa { max-height: calc(100dvh - 20px); border-radius: 10px; }
   .modal-caixa > div:first-child { padding: 12px 14px; }
 }
+
+/* ---- Inspeção: seções recolhíveis (SecaoRecolhivel) ----
+ * O título é um <button> dentro do <h3>; as ações ficam ao lado, fora dele.
+ * O corpo recolhido usa `hidden` (continua montado). Alvos ≥ 44px. */
+.secao-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.secao-cabeca { flex: 1 1 220px; min-width: 0; }
+.secao-titulo { margin: 0; }
+.secao-alternar {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px;
+  margin: 0 0 0 -6px; padding: 4px 6px; border: none; border-radius: 8px;
+  background: none; color: var(--texto); font: inherit; text-align: left; cursor: pointer;
+}
+.secao-alternar:hover { background: var(--bg-suave); }
+.secao-alternar:focus-visible, .secao-link:focus-visible, .secao-resumo:focus-visible {
+  outline: 2px solid var(--primaria); outline-offset: 2px;
+}
+.secao-chevron {
+  display: inline-block; flex-shrink: 0; width: 18px; text-align: center;
+  color: var(--cinza); transition: transform .15s;
+}
+.secao-alternar[aria-expanded="true"] .secao-chevron { transform: rotate(90deg); }
+.secao-acoes { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+/* Resumo quebra linha no celular — nunca corta com reticências. */
+.secao-resumo {
+  margin: 2px 0 0; padding-left: 20px; font-size: 13px; color: var(--texto-suave);
+  overflow-wrap: anywhere; cursor: pointer;
+}
+.secao-resumo .alerta { color: #92400e; font-weight: 600; }
+[data-theme="dark"] .secao-resumo .alerta { color: #fbbf24; }
+.secao-corpo { margin-top: 8px; }
+.secao-corpo[hidden] { display: none !important; }
+
+/* Barra "Expandir tudo / Recolher tudo / Restaurar padrão da fase". */
+.secoes-controles { display: flex; gap: 4px 16px; flex-wrap: wrap; align-items: center; margin: -4px 0 12px; }
+.secao-link {
+  min-height: 44px; padding: 0 2px; border: none; background: none; cursor: pointer;
+  color: var(--primaria); font: inherit; font-size: 13px; font-weight: 600; border-radius: 6px;
+}
+.secao-link:hover { text-decoration: underline; }
+/* Card de ações recebe o foco depois de uma ação de fase. */
+.card-acoes:focus { outline: none; }
+.card-acoes:focus-visible { outline: 2px solid var(--primaria); outline-offset: 2px; }

@@ -100,3 +100,69 @@ export function acoesDisponiveis(perfil: string | null | undefined, faseAtual: n
 
   return [{ acao: "avancar", rotulo: "Concluir e avançar", destino: faseAtual + 1 }];
 }
+
+// ── Seções da página da inspeção ─────────────────────────────────────────────
+
+/** Seções recolhíveis da página da inspeção. O id também é a âncora da URL
+ *  (`/inspecoes/<id>#relatorios` abre e rola até a seção). */
+export type SecaoInspecao =
+  | "coletas" | "agendamentos" | "checklist" | "fotos" | "relatorios" | "arquivos" | "historico";
+
+export const SECOES_INSPECAO: SecaoInspecao[] =
+  ["coletas", "agendamentos", "checklist", "fotos", "relatorios", "arquivos", "historico"];
+
+/** Como a seção nasce: aberta, recolhida (só o resumo) ou oculta. */
+export type EstadoSecao = "aberta" | "recolhida" | "oculta";
+
+const A = "aberta", R = "recolhida", H = "oculta";
+type LinhaSecoes = Record<SecaoInspecao, EstadoSecao>;
+const linha = (
+  coletas: EstadoSecao, agendamentos: EstadoSecao, checklist: EstadoSecao, fotos: EstadoSecao,
+  relatorios: EstadoSecao, arquivos: EstadoSecao, historico: EstadoSecao,
+): LinhaSecoes => ({ coletas, agendamentos, checklist, fotos, relatorios, arquivos, historico });
+
+/**
+ * Padrão de cada seção por fase: abre o que a fase pede, recolhe o resto.
+ * Fotos fica oculta no bloco de inspeção (2–5) — a coleta de fotos é da
+ * execução. Tabela aprovada pelo produto; mudar aqui muda para todo mundo.
+ */
+export const SECOES_POR_FASE: Record<number, LinhaSecoes> = {
+  //          Coletas Agend. Checkl. Fotos Relat. Arquiv. Hist.
+  2:  linha(R, A, A, H, R, R, R),
+  3:  linha(A, R, A, H, R, R, R),
+  4:  linha(A, R, R, H, A, R, R),
+  5:  linha(A, R, R, H, A, R, R),
+  6:  linha(R, A, A, R, R, R, R),
+  7:  linha(R, R, A, A, R, R, R),
+  8:  linha(R, R, R, A, A, R, R),
+  9:  linha(R, R, R, R, A, R, R),
+  10: linha(R, R, R, R, A, A, A),
+};
+
+/**
+ * Estado padrão das seções para a fase e o perfil. Função pura — a página
+ * soma a escolha do usuário (localStorage) e as aberturas forçadas (erro,
+ * fila de fotos, âncora da URL) por cima disto.
+ *
+ * - `reprovadoAgora`: a última movimentação foi uma reprovação que trouxe a
+ *   inspeção para esta fase → abre Relatórios e Histórico (onde está o motivo).
+ * - Comercial nas fases de Operações/Gerência (3–5, 7–9) acompanha pela
+ *   agenda: Agendamentos abre e Coletas recolhe.
+ */
+export function secoesPadrao(
+  fase: number,
+  perfil: string | null | undefined,
+  opcoes: { reprovadoAgora?: boolean } = {},
+): LinhaSecoes {
+  const base = SECOES_POR_FASE[fase] ?? (fase > ULTIMA_FASE ? SECOES_POR_FASE[ULTIMA_FASE] : SECOES_POR_FASE[PRIMEIRA_FASE_INSPECAO]);
+  const r: LinhaSecoes = { ...base };
+  if (perfil === "comercial" && ((fase >= 3 && fase <= 5) || (fase >= 7 && fase <= 9))) {
+    r.agendamentos = A;
+    if (r.coletas === A) r.coletas = R;
+  }
+  if (opcoes.reprovadoAgora) {
+    r.relatorios = A;
+    r.historico = A;
+  }
+  return r;
+}

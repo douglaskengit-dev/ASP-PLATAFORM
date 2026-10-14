@@ -9,7 +9,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { acoesDisponiveis, definicaoFase, descreverAcaoFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
+import { acoesDisponiveis, definicaoFase, descreverAcaoFase, perfilAtuaNaFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
+import { useSecoes } from "@/lib/asp/useSecoes";
+import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
 import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
 import { podeAprovarColeta } from "@/lib/asp/permissoes";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
@@ -17,7 +19,7 @@ import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
 import ColetaFotosExecucao from "@/app/components/ColetaFotosExecucao";
-import { pendenciasColeta, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
+import { pendenciasColeta, progressoColeta, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
 import FormularioTanque from "@/app/components/FormularioTanque";
 import { dadosRelatorioDoTanque, erroDoTanque, resumoTanque, tanqueParaForm, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 import AvisoCliente from "@/app/components/AvisoCliente";
@@ -180,11 +182,24 @@ export default function InspecaoDetalhePage() {
   const [agChecklist, setAgChecklist] = useState<{ item: string; ok: boolean }[]>([]);
   const [agNovoItem, setAgNovoItem] = useState("");
   const [salvandoAgenda, setSalvandoAgenda] = useState(false);
+  /** Erro do modal de agendamento — mostrado dentro dele, não no card de
+   *  ações, que fica escondido atrás do modal aberto. */
+  const [erroAgenda, setErroAgenda] = useState<string | null>(null);
   const [usuarios, setUsuarios] = useState<UsuarioOpcao[]>([]);
   const [arquivos, setArquivos] = useState<ArquivoProjeto[]>([]);
   /** Coleta de fotos da execução, como o card a mostra — alimenta o aviso ao
    *  concluir a Execução e as fotos do Relatório de Execução. */
   const [fotosExec, setFotosExec] = useState<RegistroFotosExecucao | null>(null);
+  // Seções recolhíveis: o que os componentes filhos contam para o resumo e
+  // para abrir a seção sozinha (erro, fotos na fila).
+  const [fotosLocais, setFotosLocais] = useState({ fila: 0, enviando: 0 });
+  const [erroFotos, setErroFotos] = useState<string | null>(null);
+  const [erroChecklist, setErroChecklist] = useState<string | null>(null);
+  const [resumoChecklist, setResumoChecklist] = useState("");
+  /** Lista completa das 10 fases no cabeçalho (recolhida por padrão). */
+  const [verFases, setVerFases] = useState(false);
+  /** Card "Ações desta fase" — recebe o foco depois de aplicar uma ação. */
+  const cardAcoesRef = useRef<HTMLDivElement>(null);
 
   const carregar = useCallback(() => {
     fetch(`/api/inspecoes/${id}`)
@@ -315,6 +330,24 @@ export default function InspecaoDetalhePage() {
   const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "");
   const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao });
 
+  // Reprovação que trouxe a inspeção de volta para esta fase (o histórico
+  // vem do mais recente para o mais antigo): abre Relatórios e Histórico e
+  // o motivo aparece no card de ações.
+  const ultimaMov = historico[0];
+  const reprovacao = insp && ultimaMov?.acao === "reprovar" && ultimaMov.fase_para === insp.fase ? ultimaMov : null;
+  const secoes = useSecoes({
+    inspecaoId: id,
+    // null até a página renderizar as seções (a âncora precisa delas no DOM).
+    fase: carregando || !insp ? null : insp.fase,
+    perfil,
+    reprovadoAgora: !!reprovacao,
+    forcadas: {
+      relatorios: !!erroRelatorio,
+      checklist: !!erroChecklist,
+      fotos: !!erroFotos || fotosLocais.fila + fotosLocais.enviando > 0,
+    },
+  });
+
   async function aplicar(acao: string, motivoTexto?: string) {
     setErro(null);
     setProcessando(true);
@@ -325,6 +358,10 @@ export default function InspecaoDetalhePage() {
       setReprovar(null);
       setMotivo("");
       carregar();
+      // A fase mudou: as seções abaixo se rearrumam para o novo padrão. O
+      // foco volta ao card de ações, que mostra o que fazer agora.
+      cardAcoesRef.current?.focus({ preventScroll: true });
+      cardAcoesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } finally {
       setProcessando(false);
     }
@@ -653,7 +690,7 @@ export default function InspecaoDetalhePage() {
       if (!res.ok) { setErroRelatorio(data?.erro || "Falha ao excluir o rascunho."); return; }
       carregar();
     } catch {
-      setErro("Sem conexão — tente novamente quando estiver online.");
+      setErroRelatorio("Sem conexão — tente novamente quando estiver online.");
     } finally {
       setExcluindoRelatorio(null);
     }
@@ -672,7 +709,7 @@ export default function InspecaoDetalhePage() {
       if (!res.ok) { setErroRelatorio(data?.erro || "Falha ao enviar para aprovação."); return; }
       carregar();
     } catch {
-      setErro("Sem conexão — tente novamente quando estiver online.");
+      setErroRelatorio("Sem conexão — tente novamente quando estiver online.");
     } finally {
       setEnviandoRelatorio(false);
     }
@@ -724,7 +761,7 @@ export default function InspecaoDetalhePage() {
     setAgEquipeIds([]); setAgEquipamentos([]); setAgEquipInput("");
     setAgChecklist(CHECKLIST_PADRAO.map((item) => ({ item, ok: false })));
     setAgNovoItem("");
-    setErro(null);
+    setErroAgenda(null);
     setModalAgenda(true);
   }
 
@@ -736,7 +773,7 @@ export default function InspecaoDetalhePage() {
     setAgEquipInput("");
     setAgChecklist((a.checklist || []).map((c) => ({ item: c.item, ok: !!c.ok })));
     setAgNovoItem("");
-    setErro(null);
+    setErroAgenda(null);
     setModalAgenda(true);
   }
 
@@ -748,8 +785,8 @@ export default function InspecaoDetalhePage() {
   }
 
   async function salvarAgenda() {
-    setErro(null);
-    if (!agData) { setErro("Informe a data da visita."); return; }
+    setErroAgenda(null);
+    if (!agData) { setErroAgenda("Informe a data da visita."); return; }
     setSalvandoAgenda(true);
     try {
       const equipe = usuarios.filter((u) => agEquipeIds.includes(u.id)).map((u) => ({ id: u.id, nome: u.nome }));
@@ -760,7 +797,7 @@ export default function InspecaoDetalhePage() {
         agendaEditando ? payload : { inspecaoId: id, tipo: bloco, ...payload },
         "Agendamento"
       );
-      if (!res.queued && !res.ok) { setErro(res.data?.erro || "Falha ao salvar o agendamento."); return; }
+      if (!res.queued && !res.ok) { setErroAgenda(res.data?.erro || "Falha ao salvar o agendamento."); return; }
       setModalAgenda(false);
       setAgendaEditando(null);
       if (res.queued) alert("Sem conexão — agendamento salvo offline e enviado ao reconectar.");
@@ -790,6 +827,47 @@ export default function InspecaoDetalhePage() {
 
   const def = definicaoFase(insp.fase);
   const pct = Math.round(((insp.fase - 1) / (ULTIMA_FASE - 1)) * 100);
+
+  // Resumos de uma linha das seções recolhidas.
+  const aprovadas = coletas.filter((c) => c.aprovada_em).length;
+  // A partir do relatório (fase 4), falta de medição aprovada é pendência.
+  const classeAprovada = aprovadas === 0 && insp.fase >= 4 ? "alerta" : undefined;
+  const resumoColetas = coletas.length === 0 ? <span className={classeAprovada}>Nenhuma coleta</span> : (
+    <>
+      {coletas.length} coleta{coletas.length === 1 ? "" : "s"} ·{" "}
+      <span className={classeAprovada}>
+        {aprovadas === 0 ? "nenhuma aprovada" : `${aprovadas} aprovada${aprovadas === 1 ? "" : "s"}`}
+      </span>
+    </>
+  );
+  /** "12/11 09:00" do agendamento mais recente da etapa; execução sem
+   *  agendamento próprio mostra a data prevista, se houver. */
+  const quandoAgenda = (tipo: "inspecao" | "execucao") => {
+    const a = agendamentos.find((x) => x.tipo === tipo);
+    if (a?.data_visita) return `${formatarData(a.data_visita).slice(0, 5)}${a.hora ? ` ${a.hora.slice(0, 5)}` : ""}`;
+    const prevista = tipo === "execucao" && agendamentos.find((x) => x.data_execucao)?.data_execucao;
+    return prevista ? `${formatarData(prevista).slice(0, 5)} (prevista)` : "—";
+  };
+  const resumoAgendamentos = `Inspeção ${quandoAgenda("inspecao")} · Execução ${quandoAgenda("execucao")}`;
+  const progFotos = progressoColeta(fotosExec);
+  const resumoFotos = `${fotosExec ? `${progFotos.feitos} de ${progFotos.total} itens` : "Carregando…"}`
+    + (fotosLocais.fila > 0 ? ` · ${fotosLocais.fila} na fila` : "")
+    + (fotosLocais.enviando > 0 ? ` · enviando ${fotosLocais.enviando}` : "");
+  // Relatórios vêm da versão mais alta para a mais baixa: o primeiro de cada tipo é o atual.
+  const ultimosRelatorios = (["inspecao", "execucao"] as const)
+    .map((t) => relatorios.find((r) => r.tipo === t))
+    .filter((r): r is Relatorio => !!r);
+  const resumoRelatorios = ultimosRelatorios.length === 0 ? "Nenhum relatório enviado" : (
+    <>
+      {ultimosRelatorios.map((r, i) => (
+        <span key={r.id}>
+          {i > 0 && " · "}
+          {r.tipo === "execucao" ? "Execução" : "Inspeção"} v{r.versao} —{" "}
+          <span style={{ color: corStatus(r.status) }}>{rotuloStatus(r.status)}</span>
+        </span>
+      ))}
+    </>
+  );
 
   return (
     <div className="page-larga">
@@ -883,11 +961,22 @@ export default function InspecaoDetalhePage() {
           </span>
         </div>
 
-        <div className="fu-progresso" style={{ marginTop: 14 }} title={`Fase ${insp.fase} de ${ULTIMA_FASE}`}>
+        {/* Fase atual em uma linha; a lista das 10 fases abre sob demanda. */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 12 }}>
+          <strong style={{ fontSize: 13.5, color: "var(--texto)" }}>
+            Fase {insp.fase} de {ULTIMA_FASE} · {nomeFase(insp.fase)}
+          </strong>
+          <button type="button" className="secao-link" aria-expanded={verFases} aria-controls="lista-fases"
+            onClick={() => setVerFases((v) => !v)}>
+            {verFases ? "ocultar fases" : "ver todas as fases"}
+          </button>
+        </div>
+        <div className="fu-progresso" style={{ marginTop: 4 }} title={`Fase ${insp.fase} de ${ULTIMA_FASE}`}>
           <div className="fu-barra" style={{ width: `${pct}%` }} />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 16 }}>
+        <div id="lista-fases" hidden={!verFases}
+          style={{ display: verFases ? "flex" : undefined, flexDirection: "column", gap: 4, marginTop: 12 }}>
           {TODAS_FASES.map((n) => {
             const estado = n < insp.fase ? "feita" : n === insp.fase ? "atual" : "futura";
             return (
@@ -912,11 +1001,18 @@ export default function InspecaoDetalhePage() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
+      <div ref={cardAcoesRef} tabIndex={-1} className="card card-acoes" style={{ marginTop: 16 }}>
         <h3 style={{ marginTop: 0 }}>Ações desta fase</h3>
+        {reprovacao && (
+          <p className="erro-texto" style={{ margin: "0 0 10px" }}>
+            Reprovado{reprovacao.motivo ? `: ${reprovacao.motivo}` : ""} — ajuste o relatório.
+          </p>
+        )}
         {acoes.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>
-            {insp.fase >= ULTIMA_FASE ? "Inspeção encerrada." : "Nenhuma ação disponível para o seu perfil nesta fase."}
+            {insp.fase >= ULTIMA_FASE ? "Inspeção encerrada."
+              : perfil && !perfilAtuaNaFase(perfil, insp.fase) ? `Fase com ${def?.area || "outra área"} — você está em modo consulta.`
+              : "Nenhuma ação disponível para o seu perfil nesta fase."}
           </p>
         ) : (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -930,13 +1026,23 @@ export default function InspecaoDetalhePage() {
         {erro && <p className="erro-texto" style={{ marginBottom: 0 }}>{erro}</p>}
       </div>
 
+      {/* Seções recolhíveis: o padrão vem da fase (lib/asp/fases.ts); a
+          escolha do usuário fica guardada por inspeção e fase. */}
+      <div className="secoes-controles">
+        <button type="button" className="secao-link" onClick={secoes.expandirTudo}>Expandir tudo</button>
+        <button type="button" className="secao-link" onClick={secoes.recolherTudo}>Recolher tudo</button>
+        {secoes.alterado && (
+          <button type="button" className="secao-link" onClick={secoes.restaurar}>Restaurar padrão da fase</button>
+        )}
+      </div>
+
       {/* Coleta (Operações) + Agendamento (Comercial) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginTop: 16 }}>
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0 }}>Coletas ({coletas.length})</h3>
-            {podeColeta && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", flex: "1 1 auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
+        <SecaoRecolhivel id="coletas" titulo={`Coletas (${coletas.length})`}
+          aberta={secoes.aberta("coletas")} onAlternar={() => secoes.alternar("coletas")}
+          resumo={resumoColetas}
+          acoesCabecalho={podeColeta && (
+              <>
                 <button className="btn-azul" style={btnColeta} onClick={abrirMedidorNovo}>📐 Nova medição</button>
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={abrirImport}>⬆ Importar batimetria</button>
@@ -946,10 +1052,9 @@ export default function InspecaoDetalhePage() {
                 </button>
                 <input ref={coletaInputRef} type="file" accept="application/pdf" style={{ display: "none" }}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) anexarColeta(f); }} />
-              </div>
-            )}
-          </div>
-          <p className="detalhe" style={{ marginTop: 6 }}>Medidor de sedimento: a medição vira um Relatório Técnico interno editável.</p>
+              </>
+          )}>
+          <p className="detalhe" style={{ marginTop: 0 }}>Medidor de sedimento: a medição vira um Relatório Técnico interno editável.</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             {FERRAMENTAS_FUTURAS.map((f) => (
               <span key={f} className="fu-badge manual" style={{ opacity: 0.75 }}>{f} · em desenvolvimento</span>
@@ -999,13 +1104,12 @@ export default function InspecaoDetalhePage() {
               );
             })
           )}
-        </div>
+        </SecaoRecolhivel>
 
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <h3 style={{ margin: 0 }}>Agendamentos ({agendamentos.length})</h3>
-            {podeAgenda && <button className="btn-azul" onClick={abrirAgenda}>+ Agendar ({bloco})</button>}
-          </div>
+        <SecaoRecolhivel id="agendamentos" titulo={`Agendamentos (${agendamentos.length})`}
+          aberta={secoes.aberta("agendamentos")} onAlternar={() => secoes.alternar("agendamentos")}
+          resumo={resumoAgendamentos}
+          acoesCabecalho={podeAgenda && <button className="btn-azul" onClick={abrirAgenda}>+ Agendar ({bloco})</button>}>
           {agendamentos.length === 0 ? (
             <p className="vazio" style={{ margin: "8px 0 0" }}>Nenhum agendamento.</p>
           ) : (
@@ -1034,28 +1138,40 @@ export default function InspecaoDetalhePage() {
               </div>
             ))
           )}
-        </div>
+        </SecaoRecolhivel>
       </div>
 
-      {insp && (
+      <SecaoRecolhivel id="checklist" titulo="Checklist de equipamentos" style={{ marginTop: 16 }}
+        aberta={secoes.aberta("checklist")} onAlternar={() => secoes.alternar("checklist")}
+        resumo={resumoChecklist}>
         <ChecklistEquipamentos
           inspecaoId={id}
           etapa={bloco}
           nomeUsuario={nomeUsuarioAtual}
           clienteId={insp.projeto?.cliente?.id}
+          embutido
+          onResumo={setResumoChecklist}
+          onErro={setErroChecklist}
         />
-      )}
+      </SecaoRecolhivel>
 
-      {insp && bloco === "execucao" && (
-        <ColetaFotosExecucao inspecaoId={id} onMudar={setFotosExec} />
+      {/* Fotos só existem no bloco de execução. Recolhida, segue montada:
+          alimenta o aviso ao concluir a Execução e as fotos do relatório. */}
+      {bloco === "execucao" && (
+        <SecaoRecolhivel id="fotos" titulo="Coleta de fotos da execução" style={{ marginTop: 16 }}
+          aberta={secoes.aberta("fotos")} onAlternar={() => secoes.alternar("fotos")}
+          resumo={resumoFotos}>
+          <ColetaFotosExecucao inspecaoId={id} onMudar={setFotosExec} embutido
+            onLocais={setFotosLocais} onErro={setErroFotos} />
+        </SecaoRecolhivel>
       )}
 
       {/* Relatórios (Operações envia; Gerência aprova nas fases 5/9) */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <h3 style={{ margin: 0 }}>Relatórios ({relatorios.length})</h3>
-          {podeRelatorio && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <SecaoRecolhivel id="relatorios" titulo={`Relatórios (${relatorios.length})`} style={{ marginTop: 16 }}
+        aberta={secoes.aberta("relatorios")} onAlternar={() => secoes.alternar("relatorios")}
+        resumo={resumoRelatorios}
+        acoesCabecalho={podeRelatorio && (
+            <>
               <select value={tipoRelatorio || bloco}
                 onChange={(e) => setTipoRelatorio(e.target.value as "inspecao" | "execucao")}
                 title="Tipo do relatório a enviar"
@@ -1070,13 +1186,12 @@ export default function InspecaoDetalhePage() {
               </button>
               <input ref={relatorioInputRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) enviarRelatorio(f); }} />
-            </div>
-          )}
-        </div>
+            </>
+        )}>
         {erroRelatorio && (
-          <p className="erro-texto" style={{ margin: "8px 0 0" }}>{erroRelatorio}</p>
+          <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erroRelatorio}</p>
         )}
-        <p className="detalhe" style={{ marginTop: 6 }}>Cada envio gera uma nova versão. Envio manual (PDF/DOCX); a Gerência aprova ou marca “Ajustar”.</p>
+        <p className="detalhe" style={{ marginTop: 0 }}>Cada envio gera uma nova versão. Envio manual (PDF/DOCX); a Gerência aprova ou marca “Ajustar”.</p>
         {relatorios.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum relatório enviado.</p>
         ) : (
@@ -1115,11 +1230,12 @@ export default function InspecaoDetalhePage() {
             ))}
           </div>
         )}
-      </div>
+      </SecaoRecolhivel>
 
       {/* Arquivos do projeto inteiro, para consulta sem sair da inspeção. */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Arquivos do projeto ({arquivos.length})</h3>
+      <SecaoRecolhivel id="arquivos" titulo={`Arquivos do projeto (${arquivos.length})`} style={{ marginTop: 16 }}
+        aberta={secoes.aberta("arquivos")} onAlternar={() => secoes.alternar("arquivos")}
+        resumo={arquivos.length === 0 ? "Nenhum arquivo" : `${arquivos.length} arquivo${arquivos.length === 1 ? "" : "s"}`}>
         {arquivos.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum arquivo anexado neste projeto.</p>
         ) : (
@@ -1146,10 +1262,13 @@ export default function InspecaoDetalhePage() {
             );
           })
         )}
-      </div>
+      </SecaoRecolhivel>
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Histórico de fases</h3>
+      <SecaoRecolhivel id="historico" titulo="Histórico de fases" style={{ marginTop: 16 }}
+        aberta={secoes.aberta("historico")} onAlternar={() => secoes.alternar("historico")}
+        resumo={ultimaMov
+          ? `${descreverAcaoFase(ultimaMov.acao, ultimaMov.fase_de, ultimaMov.fase_para)} · ${formatar(ultimaMov.data_autenticacao || ultimaMov.criado_em)}`
+          : "Sem movimentações ainda"}>
         {historico.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Sem movimentações ainda.</p>
         ) : (
@@ -1167,7 +1286,7 @@ export default function InspecaoDetalhePage() {
             ))}
           </div>
         )}
-      </div>
+      </SecaoRecolhivel>
 
       {/* Modal: baixar modelo vazio (N vetores × m pontos) */}
       {modalModelo && (
@@ -1330,7 +1449,7 @@ export default function InspecaoDetalhePage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita *</label>
-                <input type="date" style={{ ...inputStyle, borderColor: erro && !agData ? "#dc2626" : "var(--borda)" }} value={agData} onChange={(e) => setAgData(e.target.value)} />
+                <input type="date" style={{ ...inputStyle, borderColor: erroAgenda && !agData ? "#dc2626" : "var(--borda)" }} value={agData} onChange={(e) => setAgData(e.target.value)} />
               </div>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Hora</label>
@@ -1404,7 +1523,7 @@ export default function InspecaoDetalhePage() {
                 <button type="button" className="btn-azul btn-sec" onClick={() => { if (agNovoItem.trim()) { setAgChecklist((p) => [...p, { item: agNovoItem.trim(), ok: false }]); setAgNovoItem(""); } }}>+ Item</button>
               </div>
             </div>
-            {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
+            {erroAgenda && <p className="erro-texto" style={{ margin: 0 }}>{erroAgenda}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button className="btn-azul btn-sec" onClick={() => setModalAgenda(false)} disabled={salvandoAgenda}>Cancelar</button>
               <button className="btn-azul" onClick={salvarAgenda} disabled={salvandoAgenda}>{salvandoAgenda ? "Salvando…" : "Salvar agendamento"}</button>
