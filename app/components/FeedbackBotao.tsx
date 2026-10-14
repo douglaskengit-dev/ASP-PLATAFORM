@@ -56,6 +56,7 @@ export default function FeedbackBotao() {
       <button
         onClick={abrir}
         title="Relatar um erro ou sugerir uma melhoria"
+        aria-label="Relatar um erro ou sugerir uma melhoria"
         style={{
           background: "none",
           border: "1px solid #3a3529",
