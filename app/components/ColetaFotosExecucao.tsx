@@ -215,8 +215,8 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
     return (
       <div key={slot.id} style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: 10,
         display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-          <strong style={{ fontSize: 13 }}>{slot.rotulo}</strong>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <strong style={{ fontSize: 13, minWidth: 0, overflowWrap: "anywhere" }}>{slot.rotulo}</strong>
           <Selo ok={completo} texto={completo ? "✓" : "pendente"} />
         </div>
         {local ? <Miniatura src={local.url} tamanho="100%" naFila />
