@@ -8,7 +8,10 @@
  * aparece só para COMPOR a lista (escolher do Catálogo), que aí sim é edição.
  *
  * A lista nasce do procedimento escolhido e aceita itens extras. Cada item
- * guarda quem conferiu, quando e uma observação (avaria, nº de série). */
+ * guarda quem conferiu, quando e uma observação (avaria, nº de série).
+ *
+ * `embutido`: dentro de uma SecaoRecolhivel (página da inspeção) — a seção
+ * já dá o card e o título; aqui fica só o conteúdo. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Modal from "./Modal";
 import AvisoCliente from "./AvisoCliente";
@@ -28,7 +31,7 @@ const campo: React.CSSProperties = {
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 13,
 };
 
-export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, clienteId }: {
+export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, clienteId, embutido, onResumo, onErro }: {
   inspecaoId: string;
   /** Etapa corrente da inspeção — define qual checklist é o principal. */
   etapa: "inspecao" | "execucao";
@@ -36,6 +39,12 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
   /** Cliente da inspeção — o aviso dele é repetido aqui, pois é na hora de
    *  conferir os equipamentos que a exigência precisa ser lembrada. */
   clienteId?: string | null;
+  /** Sem card nem título próprios (a SecaoRecolhivel já os dá). */
+  embutido?: boolean;
+  /** Resumo para a seção recolhida: "Inspeção 5/7 · Execução 0/6". */
+  onResumo?: (texto: string) => void;
+  /** Avisa a página do erro, para ela abrir a seção recolhida. */
+  onErro?: (erro: string | null) => void;
 }) {
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [podeEditar, setPodeEditar] = useState(false);
@@ -66,6 +75,17 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
 
   const atual = useMemo(() => checklists.find((c) => c.tipo === etapa) || null, [checklists, etapa]);
   const outro = useMemo(() => checklists.find((c) => c.tipo !== etapa) || null, [checklists, etapa]);
+
+  useEffect(() => {
+    if (!onResumo) return;
+    const parte = (tipo: "inspecao" | "execucao", rotulo: string) => {
+      const c = checklists.find((x) => x.tipo === tipo);
+      return c ? `${rotulo} ${c.itens.filter((i) => i.conferido).length}/${c.itens.length}` : null;
+    };
+    const partes = [parte("inspecao", "Inspeção"), parte("execucao", "Execução")].filter(Boolean);
+    onResumo(partes.length ? partes.join(" · ") : "Nenhum checklist montado");
+  }, [checklists]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onErro?.(erro); }, [erro]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Ao escolher o procedimento, já marca os equipamentos previstos. */
   function escolherProcedimento(codigo: string) {
@@ -162,9 +182,9 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
   }
 
   return (
-    <div className="card" style={{ marginTop: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0 }}>Checklist de equipamentos</h3>
+    <div className={embutido ? undefined : "card"} style={embutido ? undefined : { marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: embutido ? "flex-end" : "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {!embutido && <h3 style={{ margin: 0 }}>Checklist de equipamentos</h3>}
         {podeEditar && (
           <button className="btn-azul" onClick={() => { setCompondo(true); setSelecionados(atual?.itens.map((i) => i.slug || "").filter(Boolean) || []); }}>
             {atual ? "Refazer lista" : "Montar lista"}

@@ -13,7 +13,12 @@
  * lib/asp/fotos-execucao.ts — a mesma fonte do aviso de fase e do relatório.
  *
  * Coleta incompleta não trava nada: o aviso aparece ao avançar a fase e no
- * formulário do Relatório de Execução. */
+ * formulário do Relatório de Execução.
+ *
+ * `embutido`: dentro de uma SecaoRecolhivel (página da inspeção) — sem card
+ * nem título próprios. Mesmo recolhido o componente segue montado, e a fila
+ * e os envios em andamento são avisados à página (onLocais) para ela abrir
+ * a seção e mostrar a contagem no resumo. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { enviarArquivo, enviarJson } from "@/lib/pwa/sync";
 import { comprimirImagem } from "@/lib/pwa/imagem";
@@ -66,10 +71,16 @@ function Miniatura({ src, tamanho, onRemover, naFila }: {
   );
 }
 
-export default function ColetaFotosExecucao({ inspecaoId, onMudar }: {
+export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onLocais, onErro }: {
   inspecaoId: string;
   /** Avisa a página a cada mudança — o aviso de fase e o relatório usam. */
   onMudar?: (r: RegistroFotosExecucao) => void;
+  /** Sem card nem título próprios (a SecaoRecolhivel já os dá). */
+  embutido?: boolean;
+  /** Fotos na fila offline deste aparelho e envios em andamento. */
+  onLocais?: (n: { fila: number; enviando: number }) => void;
+  /** Avisa a página do erro, para ela abrir a seção recolhida. */
+  onErro?: (erro: string | null) => void;
 }) {
   const [registro, setRegistro] = useState<RegistroFotosExecucao | null>(null);
   const [podeEditar, setPodeEditar] = useState(false);
@@ -92,6 +103,9 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar }: {
 
   useEffect(() => { carregar(); }, [carregar]);
   useEffect(() => { if (registro) onMudar?.(registro); }, [registro]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const emEnvio = Object.values(enviando).reduce((s, n) => s + n, 0);
+  useEffect(() => { onLocais?.({ fila: locais.length, enviando: emEnvio }); }, [locais.length, emEnvio]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onErro?.(erro); }, [erro]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fila offline esvaziou: as fotos locais já estão no servidor — recarrega.
   useEffect(() => {
@@ -312,9 +326,9 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar }: {
   const { feitos, total } = progressoColeta(registro);
 
   return (
-    <div className="card" style={{ marginTop: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0 }}>Coleta de fotos da execução</h3>
+    <div className={embutido ? undefined : "card"} style={embutido ? undefined : { marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: embutido ? "flex-start" : "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {!embutido && <h3 style={{ margin: 0 }}>Coleta de fotos da execução</h3>}
         {registro && <Selo ok={total > 0 && feitos === total} texto={`${feitos} de ${total} itens`} />}
       </div>
       <p className="detalhe" style={{ marginTop: 6 }}>
