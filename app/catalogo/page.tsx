@@ -29,6 +29,9 @@ interface Procedimento {
   /** Usa o modelo de relatório da limpeza robotizada (Sanitização, Coletas,
    *  Análise Físico Química e Laboratorial…) em vez do padrão de batimetria. */
   limpeza_robotizada: boolean;
+  /** Serviço em reservatório de água potável: a coleta de fotos da execução
+   *  já nasce pedindo as coletas de água antes e depois da limpeza. */
+  agua_potavel: boolean;
   /** Tópicos próprios deste procedimento: título + posição (`apos`). */
   topicos_extras: { titulo: string; apos?: number }[];
   /** Tópicos do relatório deste procedimento — a lista real, editável.
@@ -86,6 +89,7 @@ export default function CatalogoPage() {
             topicos: Array.isArray(p.topicos) ? p.topicos : null,
             template_path: p.template_path || null,
             limpeza_robotizada: !!p.limpeza_robotizada,
+            agua_potavel: !!p.agua_potavel,
             topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
             topicos_lista: lista,
             lista_recuperada: salva.length === 0 && lista.length > 0,
@@ -135,6 +139,7 @@ export default function CatalogoPage() {
       : { codigo: item.codigo, nome: item.nome, metodos: item.metodos,
           equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos,
           template_path: item.template_path || null, limpeza_robotizada: !!item.limpeza_robotizada,
+          agua_potavel: !!item.agua_potavel,
           topicos_extras: item.topicos_extras || [], topicos_lista: item.topicos_lista || [] };
     const r = item.id
       ? await api("PATCH", { tipo, id: item.id, dados })
@@ -267,7 +272,7 @@ export default function CatalogoPage() {
   });
   const novoProc = (): Procedimento => ({
     id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
-    topicos: null, template_path: null, limpeza_robotizada: false, topicos_extras: [], topicos_lista: [],
+    topicos: null, template_path: null, limpeza_robotizada: false, agua_potavel: false, topicos_extras: [], topicos_lista: [],
   });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -373,6 +378,18 @@ export default function CatalogoPage() {
                   Marque para este procedimento usar o modelo de relatório da limpeza robotizada
                   (Sanitização, Coletas, valores de cloro/pH, laudo e Análise Físico Química e
                   Laboratorial) em vez do modelo padrão de batimetria.
+                </p>
+              </span>
+            </label>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: podeEditar ? "pointer" : "default" }}>
+              <input type="checkbox" style={{ marginTop: 3 }} checked={edProc.agua_potavel} disabled={!podeEditar}
+                onChange={(ev) => setEdProc({ ...edProc, agua_potavel: ev.target.checked })} />
+              <span>
+                <strong style={{ fontSize: 13 }}>Procedimento de água potável</strong>
+                <p className="detalhe" style={{ margin: "2px 0 0" }}>
+                  A coleta de fotos da execução já começa com as coletas de água antes e depois da
+                  limpeza marcadas como necessárias (pH, cloro e procedimento de coleta). Na
+                  inspeção, dá para desmarcar caso a caso.
                 </p>
               </span>
             </label>

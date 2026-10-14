@@ -47,6 +47,10 @@ export interface ImagemRelatorio {
    *  As vagas de um tópico são preenchidas na ordem em que as fotos chegam;
    *  a legenda não é gerada, pois o modelo já a traz escrita abaixo da vaga. */
   vaga?: boolean;
+  /** Vaga EXATA do tópico (0 = primeira), para foto que já sabe onde entra —
+   *  as da coleta de fotos da execução. Sem índice, a foto ocupa a próxima
+   *  vaga livre, na ordem em que chegou. */
+  vagaIndice?: number;
 }
 
 export interface DadosRelatorio {
@@ -947,6 +951,15 @@ function chaveDoTitulo(texto: string): string | null {
   return CHAVES_TOPICO.find((c) => c.re.test(texto))?.chave || null;
 }
 
+/** Número, NESTE modelo, da seção com aquela chave (ver CHAVES_TOPICO).
+ *  Recebe a lista de `lerTopicosDoModelo`, cujos títulos vêm sem o número —
+ *  ele é recolocado porque algumas chaves só casam com o título numerado. */
+export function numeroDaSecao(
+  topicos: { numero: number; titulo: string }[], chave: string,
+): number | undefined {
+  return topicos.find((t) => chaveDoTitulo(`${t.numero}. ${t.titulo}`) === chave)?.numero;
+}
+
 /**
  * Converte a configuração ANTIGA de tópicos — `gp_procedimentos.topicos`, uma
  * lista de números visíveis como [0,1,2,3,4,5,6,8,9,10] — na lista nova
@@ -1458,6 +1471,19 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   /** Fotos destinadas às VAGAS do modelo, na ordem, por tópico. Ficam sem
    *  legenda gerada porque o modelo já traz a legenda de cada vaga. */
   const vagasDoTopico = new Map<number, string[]>();
+  /** Fotos com vaga exata (`vagaIndice`), por tópico e posição. */
+  const vagasFixas = new Map<number, Map<number, string>>();
+  /** Quantas vagas de cada tópico já foram percorridas no documento. */
+  const vagasVistas = new Map<number, number>();
+  /** Foto da próxima vaga do tópico: a que pediu aquela posição ou, se
+   *  nenhuma pediu, a próxima sem índice. */
+  const proximaVaga = (n: number): string | null => {
+    const pos = vagasVistas.get(n) ?? 0;
+    vagasVistas.set(n, pos + 1);
+    const fixa = vagasFixas.get(n)?.get(pos);
+    if (fixa) return fixa;
+    return vagasDoTopico.get(n)?.shift() ?? null;
+  };
   (dados.imagens || []).forEach((img, i) => {
     // Vaga de foto da limpeza robotizada não tem checkbox próprio — o
     // formulário nunca oferece como escondê-la. `ocultos` reflete o que o
@@ -1483,9 +1509,15 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       // Vai para uma vaga do modelo: só a figura, sem legenda nem fonte —
       // o modelo já traz a legenda escrita logo abaixo da vaga.
       const so = figuraXml(rId, i + 1, largura, altura);
-      const lista = vagasDoTopico.get(img.topico) || [];
-      lista.push(so);
-      vagasDoTopico.set(img.topico, lista);
+      if (img.vagaIndice !== undefined && img.vagaIndice >= 0) {
+        const fixas = vagasFixas.get(img.topico) || new Map<number, string>();
+        fixas.set(img.vagaIndice, so);
+        vagasFixas.set(img.topico, fixas);
+      } else {
+        const lista = vagasDoTopico.get(img.topico) || [];
+        lista.push(so);
+        vagasDoTopico.set(img.topico, lista);
+      }
     } else if (img.ancora) {
       figurasDaAncora.set(img.ancora, (figurasDaAncora.get(img.ancora) || "") + bloco);
     } else {
@@ -1618,15 +1650,13 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
         // Vagas DENTRO de uma tabela (a grade 2×2 da sanitização): cada
         // célula tem seu marcador, então trocamos parágrafo a parágrafo.
         if (bx.startsWith("<w:tbl>") && /\[\s*(imagem\s*\d*|imagem do laudo)\s*\]/i.test(t)) {
-          const lista = vagasDoTopico.get(nTop) || [];
           bx = bx.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (par) => {
             if (!ehVagaDeImagem(textoDe(par))) return par;
-            const foto = lista.shift();
+            const foto = proximaVaga(nTop);
             if (!foto) return '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>';
             figurasUsadas = true;
             return foto;
           });
-          vagasDoTopico.set(nTop, lista);
           saida += bx;
           continue;
         }
@@ -1634,8 +1664,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
         // legenda gerada — a legenda já está escrita no modelo, logo abaixo.
         // Sem foto, a vaga e a legenda dela são removidas.
         if (ehVagaDeImagem(t)) {
-          const vaga = vagasDoTopico.get(nTop);
-          const proxima = vaga && vaga.length > 0 ? vaga.shift() : null;
+          const proxima = proximaVaga(nTop);
           if (proxima) { saida += proxima; figurasUsadas = true; }
           else {
             // a legenda pode vir 1 ou 2 blocos adiante (há parágrafos de
