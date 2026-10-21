@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Contato, NovoContatoInput, OrgaoComContatos, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
 import { ULTIMA_FASE } from "@/lib/asp/fases";
+import { useClientesConflitantes } from "@/app/components/FormularioOrgao";
+import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
+import {
+  mesclar, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao, ROTULOS_CLIENTE,
+  temErros, validarCliente, validarContato,
+} from "@/lib/validacao";
 
 interface ProjetoCliente {
   id: string;
@@ -40,6 +46,23 @@ export default function OrgaoDetalhePage() {
   const [contatoForm, setContatoForm] = useState<NovoContatoInput | null>(null);
   const [salvandoContato, setSalvandoContato] = useState(false);
   const [mensagemContato, setMensagemContato] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
+  // Validação (lib/validacao/cliente.ts) — as mesmas regras da API.
+  const [tentouEdicao, setTentouEdicao] = useState(false);
+  const [servidorEdicao, setServidorEdicao] = useState<ResultadoValidacao>(novoResultado());
+  const [tentouContato, setTentouContato] = useState(false);
+  const [servidorContato, setServidorContato] = useState<ResultadoValidacao>(novoResultado());
+  const conflitantes = useClientesConflitantes(editando ? cnpj : "", editando ? razaoSocial : "", params.id);
+  const resultadoEdicao = useMemo(
+    () => mesclar(validarCliente({ razaoSocial, cnpj, cidade, uf }, { clientes: conflitantes, excluirId: params.id }), servidorEdicao),
+    [razaoSocial, cnpj, cidade, uf, conflitantes, params.id, servidorEdicao]
+  );
+  const resultadoContato = useMemo(
+    () => contatoForm
+      ? mesclar(validarContato(contatoForm, (orgao?.contatos || []).map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email }))), servidorContato)
+      : novoResultado(),
+    [contatoForm, orgao, servidorContato]
+  );
 
   async function carregar() {
     setCarregando(true);
@@ -76,13 +99,9 @@ export default function OrgaoDetalhePage() {
 
   async function salvarEdicao() {
     setMensagemEdicao(null);
-    const faltando: string[] = [];
-    if (!razaoSocial.trim()) faltando.push("Razão social");
-    if (!cnpj.trim()) faltando.push("CNPJ");
-    if (!cidade.trim()) faltando.push("Cidade");
-    if (!uf.trim()) faltando.push("UF");
-    if (faltando.length > 0) {
-      setMensagemEdicao({ tipo: "erro", texto: "Preencha: " + faltando.join(", ") });
+    setTentouEdicao(true);
+    if (temErros(resultadoEdicao)) {
+      setMensagemEdicao({ tipo: "erro", texto: "Corrija os campos marcados com ⛔." });
       return;
     }
 
@@ -94,7 +113,10 @@ export default function OrgaoDetalhePage() {
         body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco }),
       });
       const dados = await resp.json();
-      if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao salvar.");
+      if (!resp.ok || !dados.ok) {
+        if (dados.erros) setServidorEdicao({ erros: dados.erros, avisos: dados.avisos || {} });
+        throw new Error(dados.erro || "Falha ao salvar.");
+      }
       setOrgao((prev) => (prev ? { ...prev, ...dados.orgao } : prev));
       setEditando(false);
     } catch (err: any) {
@@ -107,6 +129,8 @@ export default function OrgaoDetalhePage() {
   async function salvarNovoContato() {
     if (!contatoForm) return;
     setMensagemContato(null);
+    setTentouContato(true);
+    if (temErros(resultadoContato)) return;
     setSalvandoContato(true);
     try {
       const resp = await fetch(`/api/orgaos/${params.id}/contatos`, {
@@ -115,10 +139,14 @@ export default function OrgaoDetalhePage() {
         body: JSON.stringify(contatoForm),
       });
       const dados = await resp.json();
-      if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao salvar o contato.");
+      if (!resp.ok || !dados.ok) {
+        if (dados.erros) setServidorContato({ erros: dados.erros, avisos: dados.avisos || {} });
+        throw new Error(dados.erro || "Falha ao salvar o contato.");
+      }
 
       setOrgao((prev) => (prev ? { ...prev, contatos: [...prev.contatos, dados.contato as Contato] } : prev));
       setContatoForm(null);
+      setTentouContato(false);
     } catch (err: any) {
       setMensagemContato({ tipo: "erro", texto: err.message || "Erro inesperado ao salvar o contato." });
     } finally {
@@ -186,21 +214,25 @@ export default function OrgaoDetalhePage() {
               <div className="grid">
                 <div className="field">
                   <label>Razão social / Nome *</label>
-                  <input value={razaoSocial} onChange={(e) => setRazaoSocial(e.target.value)} />
+                  <input value={razaoSocial} onChange={(e) => { setRazaoSocial(e.target.value); setServidorEdicao(novoResultado()); }}
+                    onBlur={() => setRazaoSocial((v) => normalizarEspacos(v))} />
+                  <MensagensCampo r={resultadoEdicao} campo="razaoSocial" mostrarErros={tentouEdicao || !!razaoSocial.trim()} />
                 </div>
                 <div className="field">
                   <label>CNPJ *</label>
                   <input
                     value={cnpj}
-                    onChange={(e) => setCnpj(mascaraCnpj(e.target.value))}
+                    onChange={(e) => { setCnpj(mascaraCnpj(e.target.value)); setServidorEdicao(novoResultado()); }}
                     placeholder="00.000.000/0000-00"
                     inputMode="numeric"
                     maxLength={18}
                   />
+                  <MensagensCampo r={resultadoEdicao} campo="cnpj" mostrarErros={tentouEdicao || normalizarCnpj(cnpj).length === 14} />
                 </div>
                 <div className="field">
                   <label>Cidade *</label>
                   <input value={cidade} onChange={(e) => setCidade(e.target.value)} />
+                  <MensagensCampo r={resultadoEdicao} campo="cidade" mostrarErros={tentouEdicao} />
                 </div>
                 <div className="field">
                   <label>Endereço</label>
@@ -217,8 +249,10 @@ export default function OrgaoDetalhePage() {
                       </option>
                     ))}
                   </select>
+                  <MensagensCampo r={resultadoEdicao} campo="uf" mostrarErros={tentouEdicao} />
                 </div>
               </div>
+              {tentouEdicao && <ResumoValidacao r={resultadoEdicao} rotulos={ROTULOS_CLIENTE} />}
               <div className="actions">
                 <button className="btn" onClick={salvarEdicao} disabled={salvandoEdicao}>
                   {salvandoEdicao ? "Salvando..." : "Salvar alterações"}
@@ -261,8 +295,9 @@ export default function OrgaoDetalhePage() {
                   <label>Nome completo do responsável *</label>
                   <input
                     value={contatoForm.nomeCompleto}
-                    onChange={(e) => setContatoForm((f) => (f ? { ...f, nomeCompleto: e.target.value } : f))}
+                    onChange={(e) => { setContatoForm((f) => (f ? { ...f, nomeCompleto: e.target.value } : f)); setServidorContato(novoResultado()); }}
                   />
+                  <MensagensCampo r={resultadoContato} campo="nomeCompleto" mostrarErros={tentouContato || !!contatoForm.nomeCompleto.trim()} />
                 </div>
                 <div className="field">
                   <label>Cargo *</label>
@@ -270,9 +305,10 @@ export default function OrgaoDetalhePage() {
                     value={contatoForm.cargo}
                     onChange={(e) => setContatoForm((f) => (f ? { ...f, cargo: e.target.value } : f))}
                   />
+                  <MensagensCampo r={resultadoContato} campo="cargo" mostrarErros={tentouContato} />
                 </div>
                 <div className="field">
-                  <label>Telefone (com DDD) *</label>
+                  <label>Telefone (com DDD)</label>
                   <input
                     value={contatoForm.telefone || ""}
                     onChange={(e) =>
@@ -282,21 +318,23 @@ export default function OrgaoDetalhePage() {
                     inputMode="numeric"
                     maxLength={15}
                   />
+                  <MensagensCampo r={resultadoContato} campo="telefone" />
                 </div>
                 <div className="field">
                   <label>E-mail *</label>
                   <input
                     type="email"
                     value={contatoForm.email}
-                    onChange={(e) => setContatoForm((f) => (f ? { ...f, email: e.target.value } : f))}
+                    onChange={(e) => { setContatoForm((f) => (f ? { ...f, email: e.target.value } : f)); setServidorContato(novoResultado()); }}
                   />
+                  <MensagensCampo r={resultadoContato} campo="email" mostrarErros={tentouContato || !!contatoForm.email.trim()} />
                 </div>
               </div>
               <div className="actions">
                 <button className="btn" onClick={salvarNovoContato} disabled={salvandoContato}>
                   {salvandoContato ? "Salvando..." : "Salvar contato"}
                 </button>
-                <button className="btn secondary" onClick={() => setContatoForm(null)}>
+                <button className="btn secondary" onClick={() => { setContatoForm(null); setTentouContato(false); }}>
                   Cancelar
                 </button>
                 {mensagemContato && <span className={`msg ${mensagemContato.tipo}`}>{mensagemContato.texto}</span>}

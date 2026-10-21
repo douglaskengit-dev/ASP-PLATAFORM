@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
+import { iniciaisDoPerfil, PERFIS_ESCRITA, validarProjetoNoServidor } from "@/lib/asp/projeto-validacao-api";
+import { normalizarCodigoProjeto, normalizarEspacos, primeiroErro, ROTULOS_PROJETO, temErros } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -46,13 +48,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ ok: true, projeto, inspecoes });
 }
 
-/** Atualiza campos do projeto (Comercial/Gerência/Admin). */
+/** Atualiza campos do projeto (Comercial/Gerência/Admin). Mesmas regras da
+ * abertura (lib/validacao/projeto.ts), com o próprio projeto fora das
+ * checagens de duplicidade e as iniciais comparadas às de quem o abriu. */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
-  if (!["admin", "comercial", "gerencia"].includes(profile.perfil)) {
+  if (!PERFIS_ESCRITA.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Sem permissão." }, { status: 403 });
   }
 
@@ -71,21 +75,59 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ ok: true });
   }
 
-  const patch: Record<string, unknown> = { atualizado_em: new Date().toISOString() };
-  for (const [campo, coluna] of [
+  // O PATCH pode vir parcial: valida o projeto inteiro como ficará.
+  const admin = getSupabaseAdmin();
+  const { data: atual } = await admin
+    .from("gp_projetos")
+    .select("cliente_id, codigo_projeto, pedido_compra, endereco, responsavel_projeto, data_abertura, autor:gp_profiles!criado_por(nome_completo, email)")
+    .eq("id", params.id)
+    .maybeSingle();
+  if (!atual) return NextResponse.json({ erro: "Projeto não encontrado." }, { status: 404 });
+
+  const CAMPOS = [
     ["clienteId", "cliente_id"],
     ["codigoProjeto", "codigo_projeto"],
     ["pedidoCompra", "pedido_compra"],
     ["endereco", "endereco"],
     ["responsavelProjeto", "responsavel_projeto"],
-  ] as const) {
-    if (campo in body) patch[coluna] = body[campo] || null;
+    ["dataAbertura", "data_abertura"],
+  ] as const;
+  const dados: Record<string, any> = {};
+  for (const [campo, coluna] of CAMPOS) dados[campo] = campo in body ? body[campo] : (atual as any)[coluna];
+  dados.usarContato = !!body.usarContato;
+  dados.contatoId = body.contatoId || null;
+
+  const { resultado, conflito } = await validarProjetoNoServidor(dados, {
+    excluirId: params.id,
+    iniciaisCriador: iniciaisDoPerfil((atual as any).autor),
+    clienteAtual: atual.cliente_id,
+  });
+  if (temErros(resultado)) {
+    return NextResponse.json(
+      { erro: primeiroErro(resultado, ROTULOS_PROJETO), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { status: conflito ? 409 : 400 }
+    );
   }
+
+  const patch: Record<string, unknown> = {
+    atualizado_em: new Date().toISOString(),
+    cliente_id: dados.clienteId,
+    codigo_projeto: normalizarCodigoProjeto(dados.codigoProjeto),
+    pedido_compra: normalizarEspacos(dados.pedidoCompra),
+    endereco: normalizarEspacos(dados.endereco) || null,
+    responsavel_projeto: normalizarEspacos(dados.responsavelProjeto) || null,
+    data_abertura: dados.dataAbertura,
+  };
 
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase.from("gp_projetos").update(patch).eq("id", params.id).select("*").single();
-  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, projeto: data });
+  if (error) {
+    if ((error as any).code === "23505") {
+      return NextResponse.json({ erro: "Código do projeto: já usado por outro projeto." }, { status: 409 });
+    }
+    return NextResponse.json({ erro: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, projeto: data, avisos: resultado.avisos });
 }
 
 /** Exclusão do projeto. Padrão = lixeira (soft): marca excluido_em e o projeto

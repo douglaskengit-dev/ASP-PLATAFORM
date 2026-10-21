@@ -2,12 +2,13 @@
 
 /** ASP — Lista de Projetos (fase 1, Comercial). Um projeto = 1 pedido de
  * compra e reúne N inspeções (tanques/pontos). Ver COWORK-ASP.md §2.
- * Reaproveita gp_orgaos (cliente) via FormularioOrgao inline. */
+ * A abertura (cliente, contato, código, pedido…) fica em FormularioProjeto,
+ * com as regras de lib/validacao/projeto.ts. */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Modal from "@/app/components/Modal";
-import FormularioOrgao from "@/app/components/FormularioOrgao";
+import FormularioProjeto from "@/app/components/FormularioProjeto";
 import TituloPagina from "@/app/components/TituloPagina";
 
 interface ClienteResumo {
@@ -52,36 +53,11 @@ const STATUS_OPCOES = [
   { chave: "encerrado", label: "Encerrado" },
   { chave: "sem", label: "Sem inspeções" },
 ];
-interface Orgao {
-  id: string;
-  razao_social: string;
-  cidade?: string | null;
-  uf?: string | null;
-  /** Endereço padrão do cliente — herdado ao abrir projeto. */
-  endereco?: string | null;
-}
-
-const FORM_VAZIO = {
-  clienteId: "",
-  codigoProjeto: "",
-  pedidoCompra: "",
-  endereco: "",
-  responsavelProjeto: "",
-  dataAbertura: "",
-};
-
 export default function ProjetosPage() {
   const router = useRouter();
   const [projetos, setProjetos] = useState<Projeto[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [modalAberto, setModalAberto] = useState(false);
-  const [cadastrarOrgao, setCadastrarOrgao] = useState(false);
-  const [orgaos, setOrgaos] = useState<Orgao[]>([]);
-  /** Sugestões vindas do cadastro do cliente: endereço e contatos. */
-  const [sugEndereco, setSugEndereco] = useState<string[]>([]);
-  const [sugResponsavel, setSugResponsavel] = useState<string[]>([]);
-  const [form, setForm] = useState(FORM_VAZIO);
-  const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [verLixeira, setVerLixeira] = useState(false);
   // Filtros, ordenação e agrupamento da lista.
@@ -119,74 +95,8 @@ export default function ProjetosPage() {
   }
 
   function abrirModal() {
-    setForm(FORM_VAZIO);
     setErro(null);
     setModalAberto(true);
-    fetch("/api/orgaos")
-      .then((r) => r.json())
-      .then((d) => setOrgaos(d.orgaos || []))
-      .catch(() => {});
-  }
-
-  function atualizar(campo: keyof typeof FORM_VAZIO, valor: string) {
-    setForm((f) => ({ ...f, [campo]: valor }));
-  }
-
-  /** Ao escolher o cliente, herda os dados que ele já tem cadastrados —
-   *  hoje o endereço. Só preenche campo vazio, para não sobrescrever o que
-   *  você digitou (a obra pode ficar em endereço diferente do cliente). */
-  function escolherCliente(clienteId: string) {
-    const c = orgaos.find((o) => o.id === clienteId) as any;
-    setForm((f) => ({
-      ...f,
-      clienteId,
-      endereco: f.endereco?.trim() ? f.endereco : (c?.endereco || ""),
-    }));
-    setSugEndereco(c?.endereco ? [c.endereco] : []);
-    setSugResponsavel([]);
-    if (!clienteId) return;
-    // Contatos do cliente alimentam a lista de responsável; se houver só um,
-    // ele já entra preenchido (é o caso mais comum).
-    fetch(`/api/orgaos/${clienteId}`).then((r) => r.ok ? r.json() : {}).then((d: any) => {
-      const nomes = (d.orgao?.contatos || [])
-        .map((x: any) => x.nome_completo || x.nomeCompleto || x.nome)
-        .filter(Boolean);
-      setSugResponsavel(nomes);
-      if (nomes.length === 1) {
-        setForm((f) => ({ ...f, responsavelProjeto: f.responsavelProjeto?.trim() ? f.responsavelProjeto : nomes[0] }));
-      }
-      const end = d.orgao?.endereco;
-      if (end) {
-        setSugEndereco((p) => (p.includes(end) ? p : [...p, end]));
-        setForm((f) => ({ ...f, endereco: f.endereco?.trim() ? f.endereco : end }));
-      }
-    }).catch(() => {});
-  }
-
-  async function salvar() {
-    setErro(null);
-    if (!form.pedidoCompra.trim() && !form.codigoProjeto.trim()) {
-      setErro("Informe ao menos o pedido de compra ou o código do projeto.");
-      return;
-    }
-    setSalvando(true);
-    try {
-      const r = await fetch("/api/projetos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const d = await r.json();
-      if (!r.ok) {
-        setErro(d.erro || "Não foi possível abrir o projeto.");
-        return;
-      }
-      router.push(`/projetos/${d.projeto.id}`);
-    } catch {
-      setErro("Falha de rede ao salvar.");
-    } finally {
-      setSalvando(false);
-    }
   }
 
   /** Filtra, ordena e (opcionalmente) agrupa por cliente. Só vale para a
@@ -382,86 +292,11 @@ export default function ProjetosPage() {
 
       {modalAberto && (
         <Modal titulo="Abrir novo projeto" onFechar={() => setModalAberto(false)}>
-          <div className="form-projeto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Cliente</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                <select value={form.clienteId} onChange={(e) => escolherCliente(e.target.value)}>
-                  <option value="">— Selecione o cliente —</option>
-                  {orgaos.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.razao_social}
-                      {o.cidade ? ` (${o.cidade}${o.uf ? "/" + o.uf : ""})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="btn-azul btn-sec" style={{ whiteSpace: "nowrap" }} onClick={() => setCadastrarOrgao(true)}>
-                  + Cadastrar
-                </button>
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Código do projeto</label>
-                <input value={form.codigoProjeto} onChange={(e) => atualizar("codigoProjeto", e.target.value)} placeholder="ex.: ASP-2026-001" />
-              </div>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Pedido de compra</label>
-                <input value={form.pedidoCompra} onChange={(e) => atualizar("pedidoCompra", e.target.value)} placeholder="nº do pedido" />
-              </div>
-            </div>
-
-            <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Endereço da obra</label>
-              <input list="sug-endereco" value={form.endereco}
-                onChange={(e) => atualizar("endereco", e.target.value)}
-                placeholder="pode diferir do endereço do cliente" />
-              <datalist id="sug-endereco">
-                {sugEndereco.map((x) => <option key={x} value={x} />)}
-              </datalist>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Responsável</label>
-                <input list="sug-responsavel" value={form.responsavelProjeto}
-                  onChange={(e) => atualizar("responsavelProjeto", e.target.value)}
-                  placeholder={sugResponsavel.length ? "escolha um contato ou digite" : "responsável pelo projeto"} />
-                <datalist id="sug-responsavel">
-                  {sugResponsavel.map((x) => <option key={x} value={x} />)}
-                </datalist>
-              </div>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data de abertura</label>
-                <input type="date" value={form.dataAbertura} onChange={(e) => atualizar("dataAbertura", e.target.value)} />
-              </div>
-            </div>
-
-            {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
-
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
-              <button className="btn-azul btn-sec" onClick={() => setModalAberto(false)} disabled={salvando}>
-                Cancelar
-              </button>
-              <button className="btn-azul" onClick={salvar} disabled={salvando}>
-                {salvando ? "Abrindo…" : "Abrir projeto"}
-              </button>
-            </div>
-          </div>
-
-          {cadastrarOrgao && (
-            <Modal titulo="Cadastrar cliente" zIndex={200} onFechar={() => setCadastrarOrgao(false)}>
-              <FormularioOrgao
-                onCancelar={() => setCadastrarOrgao(false)}
-                onSucesso={(orgao) => {
-                  setOrgaos((prev) => [{ id: orgao.id, razao_social: orgao.razao_social, cidade: orgao.cidade, uf: orgao.uf, endereco: (orgao as any).endereco }, ...prev]);
-                  atualizar("clienteId", orgao.id);
-                  setCadastrarOrgao(false);
-                }}
-              />
-            </Modal>
-          )}
+          <FormularioProjeto
+            modo="novo"
+            onCancelar={() => setModalAberto(false)}
+            onSalvo={(projeto) => router.push(`/projetos/${projeto.id}`)}
+          />
         </Modal>
       )}
     </div>

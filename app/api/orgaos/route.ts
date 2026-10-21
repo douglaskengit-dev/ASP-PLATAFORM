@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
-import { contatoValido, NovoContatoInput, orgaoValido, somenteDigitos, TipoEnte } from "@/lib/orgaos/types";
+import { NovoContatoInput, TipoEnte } from "@/lib/orgaos/types";
+import { clientesCadastrados } from "@/lib/orgaos/validacao-api";
+import {
+  cnpjRepetido, contatoParaGravar, contatoVazio, mesclar, normalizarCnpj, normalizarEspacos, primeiroErro,
+  ROTULOS_CLIENTE, temErros, validarCliente, validarContatos,
+} from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -79,54 +84,34 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as NovoOrgaoBody;
 
-  const faltando = orgaoValido(body);
-  if (faltando.length > 0) {
+  // Contatos são opcionais no cadastro, mas um bloco começado é validado
+  // inteiro. Regras em lib/validacao/cliente.ts (as mesmas da tela); a lista
+  // vai inteira para o índice das mensagens casar com o bloco na tela.
+  const ctx = { clientes: await clientesCadastrados() };
+  const resultado = mesclar(validarCliente(body, ctx), validarContatos(body.contatos || []));
+  const contatos = (body.contatos || []).filter((c) => !contatoVazio(c));
+  if (!body.tipoEnte) resultado.erros.tipoEnte = ["Informe o tipo do ente."];
+  if (temErros(resultado)) {
+    const conflito = cnpjRepetido(body.cnpj, ctx);
     return NextResponse.json(
-      { erro: "Campos obrigatórios não preenchidos: " + faltando.join(", ") },
-      { status: 400 }
+      { erro: primeiroErro(resultado, ROTULOS_CLIENTE), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { status: conflito ? 409 : 400 }
     );
-  }
-
-  // Contatos são opcionais no cadastro, mas se o usuário começou a
-  // preencher um bloco de contato, validamos os campos obrigatórios dele.
-  const contatos = (body.contatos || []).filter(
-    (c) => c.nomeCompleto?.trim() || c.cargo?.trim() || c.email?.trim() || c.telefone?.trim()
-  );
-  for (const c of contatos) {
-    const faltandoContato = contatoValido(c);
-    if (faltandoContato.length > 0) {
-      return NextResponse.json(
-        { erro: "Contato incompleto — faltam: " + faltandoContato.join(", ") },
-        { status: 400 }
-      );
-    }
   }
 
   const supabase = getSupabaseRouteClient();
-
-  const cnpjDigitos = somenteDigitos(body.cnpj);
-  const { data: existente } = await supabase
-    .from("gp_orgaos")
-    .select("id")
-    .eq("cnpj", cnpjDigitos)
-    .maybeSingle();
-  if (existente) {
-    return NextResponse.json(
-      { erro: "Já existe um órgão cadastrado com este CNPJ." },
-      { status: 409 }
-    );
-  }
+  const cnpjDigitos = normalizarCnpj(body.cnpj);
 
   const { data: orgao, error: erroOrgao } = await supabase
     .from("gp_orgaos")
     .insert({
       criado_por: profile.id,
       tipo_ente: body.tipoEnte,
-      razao_social: body.razaoSocial.trim(),
+      razao_social: normalizarEspacos(body.razaoSocial),
       cnpj: cnpjDigitos,
-      cidade: body.cidade.trim(),
+      cidade: normalizarEspacos(body.cidade),
       uf: body.uf.trim(),
-      endereco: (body.endereco || "").trim() || null,
+      endereco: normalizarEspacos(body.endereco) || null,
     })
     .select("*")
     .single();
@@ -147,13 +132,7 @@ export async function POST(req: NextRequest) {
 
   if (contatos.length > 0) {
     const { error: erroContatos } = await supabase.from("gp_orgaos_contatos").insert(
-      contatos.map((c) => ({
-        orgao_id: orgao.id,
-        nome_completo: c.nomeCompleto.trim(),
-        cargo: c.cargo.trim(),
-        telefone: c.telefone?.trim() || null,
-        email: c.email.trim(),
-      }))
+      contatos.map((c) => ({ orgao_id: orgao.id, ...contatoParaGravar(c) }))
     );
     if (erroContatos) {
       return NextResponse.json(
@@ -163,5 +142,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, orgao });
+  return NextResponse.json({ ok: true, orgao, avisos: resultado.avisos });
 }

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
-import { orgaoValido, somenteDigitos, TipoEnte } from "@/lib/orgaos/types";
+import { TipoEnte } from "@/lib/orgaos/types";
+import { clientesCadastrados } from "@/lib/orgaos/validacao-api";
+import { cnpjRepetido, normalizarCnpj, normalizarEspacos, primeiroErro, ROTULOS_CLIENTE, temErros, validarCliente } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -106,39 +108,31 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ ok: true });
   }
 
-  const faltando = orgaoValido(body);
-  if (faltando.length > 0) {
+  // Regras em lib/validacao/cliente.ts (as mesmas da tela); CNPJ comparado
+  // só pelos dígitos, inclusive com clientes na lixeira.
+  const ctx = { clientes: await clientesCadastrados(), excluirId: params.id };
+  const resultado = validarCliente(body, ctx);
+  if (!body.tipoEnte) resultado.erros.tipoEnte = ["Informe o tipo do ente."];
+  if (temErros(resultado)) {
+    const conflito = cnpjRepetido(body.cnpj, ctx);
     return NextResponse.json(
-      { erro: "Campos obrigatórios não preenchidos: " + faltando.join(", ") },
-      { status: 400 }
+      { erro: primeiroErro(resultado, ROTULOS_CLIENTE), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { status: conflito ? 409 : 400 }
     );
   }
 
   const supabase = getSupabaseRouteClient();
-
-  const cnpjDigitos = somenteDigitos(body.cnpj);
-  const { data: existente } = await supabase
-    .from("gp_orgaos")
-    .select("id")
-    .eq("cnpj", cnpjDigitos)
-    .neq("id", params.id)
-    .maybeSingle();
-  if (existente) {
-    return NextResponse.json(
-      { erro: "Já existe outro órgão cadastrado com este CNPJ." },
-      { status: 409 }
-    );
-  }
+  const cnpjDigitos = normalizarCnpj(body.cnpj);
 
   const { data, error } = await supabase
     .from("gp_orgaos")
     .update({
       tipo_ente: body.tipoEnte,
-      razao_social: body.razaoSocial.trim(),
+      razao_social: normalizarEspacos(body.razaoSocial),
       cnpj: cnpjDigitos,
-      cidade: body.cidade.trim(),
+      cidade: normalizarEspacos(body.cidade),
       uf: body.uf.trim(),
-      endereco: (body.endereco || "").trim() || null,
+      endereco: normalizarEspacos(body.endereco) || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", params.id)
@@ -157,7 +151,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     );
   }
 
-  return NextResponse.json({ ok: true, orgao: data });
+  return NextResponse.json({ ok: true, orgao: data, avisos: resultado.avisos });
 }
 
 /** Exclusão do cliente — lixeira (soft) por padrão; ?definitivo=1 apaga. */
