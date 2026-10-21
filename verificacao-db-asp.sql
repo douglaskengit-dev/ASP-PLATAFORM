@@ -219,6 +219,44 @@ create policy gp_fotos_execucao_write on public.gp_fotos_execucao for all to aut
   using (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'))
   with check (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'));
 
+-- ============================================================================
+-- ASP — RDO (Registro Diário de Operação).
+-- Um RDO por projeto por dia (cobre uma ou mais inspeções), numerado por
+-- projeto (nº 001…), preenchido na Execução e entregue como .docx. Documento
+-- separado do Relatório de Execução. Lixeira como as demais tabelas; o dia é
+-- único só entre os ativos (índice parcial). Sem RDO, a conclusão da Execução
+-- só AVISA.
+-- ============================================================================
+create table if not exists public.gp_rdos (
+  id uuid primary key default gen_random_uuid(),
+  projeto_id uuid not null references public.gp_projetos (id) on delete cascade,
+  data date not null,
+  numero int not null,
+  inspecoes uuid[] not null default '{}',
+  dados jsonb not null default '{}'::jsonb,
+  arquivo_path text,
+  arquivo_em timestamptz,
+  criado_por uuid references public.gp_profiles (id),
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  excluido_em timestamptz,
+  excluido_por uuid references public.gp_profiles (id)
+);
+create unique index if not exists uq_gp_rdos_projeto_data
+  on public.gp_rdos (projeto_id, data) where excluido_em is null;
+create unique index if not exists uq_gp_rdos_projeto_numero on public.gp_rdos (projeto_id, numero);
+create index if not exists idx_gp_rdos_inspecoes on public.gp_rdos using gin (inspecoes);
+create index if not exists idx_gp_rdos_excluido on public.gp_rdos (excluido_em);
+
+alter table public.gp_rdos enable row level security;
+drop policy if exists gp_rdos_select on public.gp_rdos;
+create policy gp_rdos_select on public.gp_rdos for select to authenticated
+  using (public.gp_perfil_atual_asp() is not null);
+drop policy if exists gp_rdos_write on public.gp_rdos;
+create policy gp_rdos_write on public.gp_rdos for all to authenticated
+  using (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'))
+  with check (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'));
+
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
 
@@ -238,6 +276,7 @@ with esperado(tabela, coluna) as (values
   ('gp_checklist_equipamentos','itens'),
   ('gp_procedimentos','agua_potavel'),
   ('gp_fotos_execucao','itens'), ('gp_fotos_execucao','agua_antes'),
+  ('gp_rdos','dados'), ('gp_rdos','inspecoes'), ('gp_rdos','arquivo_em'),
   ('gp_push_subscriptions','endpoint')
 )
 select e.tabela, e.coluna,

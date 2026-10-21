@@ -763,3 +763,62 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
 /* Card de ações recebe o foco depois de uma ação de fase. */
 .card-acoes:focus { outline: none; }
 .card-acoes:focus-visible { outline: 2px solid var(--primaria); outline-offset: 2px; }
+
+/* ---- RDO (Registro Diário de Operação) — formulário ----
+ * Pensado para o celular em campo: uma coluna até onde couber, alvos de
+ * toque de 44px (horários, botões de tempo, frases rápidas, ↑ ↓ ✕). */
+.rdo-form { display: flex; flex-direction: column; gap: 14px; }
+.rdo-bloco { border: 1px solid var(--borda); border-radius: 10px; padding: 12px; min-width: 0; }
+.rdo-bloco h4 { margin: 0 0 10px; font-size: 14px; color: var(--texto); }
+.rdo-bloco-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rdo-bloco-topo h4 { margin: 0; }
+.rdo-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.rdo-aviso { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: #fef3c7; color: #92400e; font-size: 13px; }
+[data-theme="dark"] .rdo-aviso { background: #3b2f0b; color: #fbbf24; }
+.rdo-cobertura { border: none; margin: 12px 0 0; padding: 0; min-width: 0; }
+.rdo-check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; font-size: 14px; color: var(--texto); }
+.rdo-check input { width: 20px; height: 20px; flex-shrink: 0; }
+.rdo-membro { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 44px; gap: 8px; align-items: start; margin-bottom: 8px; }
+.rdo-membro.rdo-nota { grid-template-columns: 28px minmax(0, 1fr) 44px; }
+.rdo-icone {
+  width: 44px; height: 44px; flex-shrink: 0; border: 1px solid var(--borda); border-radius: 8px;
+  background: var(--bg-card); color: var(--texto); font-size: 16px; cursor: pointer;
+}
+.rdo-icone:disabled { opacity: 0.35; cursor: default; }
+.rdo-add { min-height: 44px; }
+.rdo-tempo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.rdo-tempo-rotulo { width: 56px; font-weight: 600; font-size: 14px; color: var(--texto); }
+.rdo-seg { display: flex; flex: 1 1 260px; border: 1px solid var(--borda); border-radius: 8px; overflow: hidden; }
+.rdo-seg button {
+  flex: 1 1 0; min-height: 44px; border: none; border-left: 1px solid var(--borda);
+  background: var(--bg-card); color: var(--texto); font-size: 13.5px; cursor: pointer; padding: 0 6px;
+}
+.rdo-seg button:first-child { border-left: none; flex: 0 0 48px; }
+.rdo-seg button[aria-pressed="true"] { background: var(--primaria); color: var(--escuro); font-weight: 700; }
+.rdo-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.rdo-chip {
+  min-height: 44px; padding: 6px 12px; border-radius: 999px; border: 1px dashed var(--primaria);
+  background: var(--primaria-claro); color: var(--primaria); font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.rdo-atividade { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--borda); }
+.rdo-atividade-topo { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.rdo-num { min-width: 24px; font-size: 14px; color: var(--texto); padding-bottom: 12px; }
+.rdo-membro .rdo-num { padding: 12px 0 0; }
+.rdo-hora { display: flex; flex-direction: column; gap: 2px; flex: 1 1 110px; max-width: 160px; font-size: 12px; color: var(--cinza); }
+.rdo-atividade-acoes { display: flex; gap: 6px; margin-left: auto; }
+.rdo-agua { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.rdo-agua label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--cinza); }
+.rdo-previa { overflow-wrap: anywhere; }
+.rdo-pendencias ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--texto-suave); }
+.rdo-rodape { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.rdo-rodape > button { min-height: 44px; }
+@media (max-width: 520px) {
+  .rdo-bloco { padding: 10px; }
+  .rdo-membro { grid-template-columns: minmax(0, 1fr) 44px; padding-bottom: 8px; border-bottom: 1px dashed var(--borda); }
+  .rdo-membro > input:nth-child(2) { grid-column: 1; }
+  .rdo-membro > .rdo-icone { grid-column: 2; grid-row: 1; }
+  .rdo-membro.rdo-nota { grid-template-columns: 24px minmax(0, 1fr) 44px; padding-bottom: 0; border-bottom: none; }
+  .rdo-membro.rdo-nota > .rdo-icone { grid-column: 3; }
+  .rdo-hora { max-width: none; }
+  .rdo-rodape > button { flex: 1 1 100%; }
+}

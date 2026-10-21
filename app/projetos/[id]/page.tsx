@@ -10,6 +10,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { descreverAcaoFase, tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import FormularioTanque from "@/app/components/FormularioTanque";
+import Rdos from "@/app/components/Rdos";
 import { erroDoTanque, resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 
 interface Cliente {
@@ -325,6 +326,14 @@ export default function ProjetoDetalhePage() {
             );
           })}
         </div>
+      )}
+
+      {/* RDOs do projeto (um por dia) — consulta e download. São criados e
+          editados na inspeção, durante a Execução. */}
+      {!verLixeiraInsp && (
+        <Rdos projetoId={projeto.id} somenteLeitura
+          codigoProjeto={projeto.codigo_projeto || projeto.pedido_compra}
+          cliente={projeto.cliente?.razao_social} clienteId={projeto.cliente?.id} />
       )}
 
       {modalEdit && (

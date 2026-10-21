@@ -1,24 +1,30 @@
 "use client";
 
 /** Arquivos — documentos do novo fluxo (coletas do medidor + relatórios
- * versionados), agrupados por Projeto → Inspeção, com busca e filtros. */
+ * versionados), agrupados por Projeto → Inspeção, com busca e filtros. Os
+ * RDOs são do projeto (um por dia, podem cobrir várias inspeções) e aparecem
+ * logo abaixo do cabeçalho do projeto. */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TituloPagina from "@/app/components/TituloPagina";
 import { tituloFase } from "@/lib/asp/fases";
+import { dataBr, numeroRdo } from "@/lib/asp/rdo";
 
 interface Coleta { id: string; tipo: string; pdf_path: string | null; criado_em: string }
 interface Relatorio { id: string; tipo: string; versao: number; status: string; arquivo_path: string | null; enviado_em: string | null }
 interface Inspecao { id: string; identificacao: string; fase: number; coletas: Coleta[]; relatorios: Relatorio[] }
+/** RDO com arquivo gerado; `inspecoes` já vem com os nomes. */
+interface Rdo { id: string; numero: number; data: string; arquivo_em: string | null; inspecoes: string[] }
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
   pedido_compra: string | null;
   cliente: { id: string; razao_social: string } | null;
   inspecoes: Inspecao[];
+  rdos?: Rdo[];
 }
 
-type FiltroTipo = "todos" | "coletas" | "relatorio_inspecao" | "relatorio_execucao";
+type FiltroTipo = "todos" | "coletas" | "relatorio_inspecao" | "relatorio_execucao" | "rdo";
 
 function fmt(iso?: string | null) {
   if (!iso) return "";
@@ -79,9 +85,14 @@ export default function ArquivosPage() {
             const alvo = `${p.codigo_projeto || ""} ${p.pedido_compra || ""} ${p.cliente?.razao_social || ""} ${i.identificacao}`.toLowerCase();
             return alvo.includes(termo);
           });
-        return { ...p, inspecoes };
+        const rdos = (tipo === "todos" || tipo === "rdo" ? p.rdos || [] : []).filter((r) => {
+          if (!termo) return true;
+          const alvo = `${p.codigo_projeto || ""} ${p.pedido_compra || ""} ${p.cliente?.razao_social || ""} rdo ${r.inspecoes.join(" ")}`.toLowerCase();
+          return alvo.includes(termo);
+        });
+        return { ...p, inspecoes, rdos };
       })
-      .filter((p) => p.inspecoes.length > 0);
+      .filter((p) => p.inspecoes.length > 0 || p.rdos.length > 0);
   }, [projetos, cliente, tipo, termo]);
 
   function limpar(s?: string | null) {
@@ -100,6 +111,13 @@ export default function ArquivosPage() {
     else base = `${cli}/${proj}/${insp}`;
     return `${base}/${nome}`;
   }
+  /** RDO é do projeto: vai numa pasta "RDOs" ao lado das inspeções. */
+  function caminhoRdo(p: Projeto, r: Rdo) {
+    const cli = limpar(p.cliente?.razao_social || "Sem cliente");
+    const proj = limpar(p.codigo_projeto || p.pedido_compra || "Projeto");
+    const nome = `RDO-${numeroRdo(r.numero)}-${r.data}.docx`;
+    return estrutura === "proj/insp" ? `${proj}/RDOs/${nome}` : `${cli}/${proj}/RDOs/${nome}`;
+  }
 
   const CHAVE_ULTIMO = "asp:arqUltimoDownload";
   async function baixarZip(apenasNovos: boolean) {
@@ -110,6 +128,14 @@ export default function ArquivosPage() {
       const corte = apenasNovos ? Number(localStorage.getItem(CHAVE_ULTIMO) || 0) : 0;
       let count = 0;
       for (const p of filtrados) {
+        for (const r of p.rdos) {
+          const dt = r.arquivo_em ? new Date(r.arquivo_em).getTime() : 0;
+          if (apenasNovos && dt <= corte) continue;
+          const resp = await fetch(`/api/rdos/${r.id}/download`);
+          if (!resp.ok) continue;
+          zip.file(caminhoRdo(p, r), await resp.blob());
+          count++;
+        }
         for (const i of p.inspecoes) {
           for (const c of i.coletas) {
             if (!c.pdf_path) continue;
@@ -150,7 +176,7 @@ export default function ArquivosPage() {
 
   return (
     <div className="page-larga">
-      <TituloPagina titulo="Arquivos" subtitulo="Coletas e relatórios, organizados por projeto e inspeção." />
+      <TituloPagina titulo="Arquivos" subtitulo="Coletas, relatórios e RDOs, organizados por projeto e inspeção." />
 
       <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 20 }}>
         <div style={{ flex: 2, minWidth: 200 }}>
@@ -171,6 +197,7 @@ export default function ArquivosPage() {
             <option value="coletas">Coletas</option>
             <option value="relatorio_inspecao">Relatório de inspeção</option>
             <option value="relatorio_execucao">Relatório de execução</option>
+            <option value="rdo">RDO (diário de operação)</option>
           </select>
         </div>
       </div>
@@ -203,6 +230,22 @@ export default function ArquivosPage() {
               </Link>
               <span className="detalhe" style={{ margin: 0 }}>{p.cliente?.razao_social || "Cliente não informado"}</span>
             </div>
+
+            {p.rdos.length > 0 && (
+              <div style={{ marginTop: 14, borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
+                <span style={{ fontWeight: 600, color: "var(--texto)" }}>RDOs — Registro Diário de Operação</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  {p.rdos.map((r) => (
+                    <div key={r.id} className="downloads" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="detalhe" style={{ margin: 0 }}>
+                        📋 RDO nº {numeroRdo(r.numero)} · {dataBr(r.data)}{r.inspecoes.length ? ` · ${r.inspecoes.join(", ")}` : ""}
+                      </span>
+                      <a className="btn-dl" href={`/api/rdos/${r.id}/download`} target="_blank" rel="noopener noreferrer">⬇ Baixar</a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {p.inspecoes.map((i) => (
               <div key={i.id} style={{ marginTop: 14, borderTop: "1px solid var(--borda)", paddingTop: 10 }}>

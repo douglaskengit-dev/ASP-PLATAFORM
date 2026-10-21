@@ -23,6 +23,8 @@ import { pendenciasColeta, progressoColeta, type RegistroFotosExecucao } from "@
 import FormularioTanque from "@/app/components/FormularioTanque";
 import { dadosRelatorioDoTanque, erroDoTanque, resumoTanque, tanqueParaForm, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 import AvisoCliente from "@/app/components/AvisoCliente";
+import Rdos from "@/app/components/Rdos";
+import { dataBr, numeroRdo, resumoRdos, type RegistroRdo } from "@/lib/asp/rdo";
 
 interface Projeto {
   id: string;
@@ -65,7 +67,7 @@ interface Agendamento {
 interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null }
 /** Arquivo do projeto, classificado para exibição agrupada. */
 interface ArquivoProjeto {
-  grupo: "inspecao" | "execucao" | "medicao";
+  grupo: "inspecao" | "execucao" | "medicao" | "rdo";
   inspecao: string; rotulo: string; data?: string | null; href: string;
 }
 
@@ -196,6 +198,12 @@ export default function InspecaoDetalhePage() {
   const [erroFotos, setErroFotos] = useState<string | null>(null);
   const [erroChecklist, setErroChecklist] = useState<string | null>(null);
   const [resumoChecklist, setResumoChecklist] = useState("");
+  /** RDOs que cobrem esta inspeção — resumo da seção e aviso ao concluir a
+   *  Execução. null = ainda não carregou (não avisa sem saber). */
+  const [rdosInsp, setRdosInsp] = useState<RegistroRdo[] | null>(null);
+  const [erroRdos, setErroRdos] = useState<string | null>(null);
+  /** Incrementa para o componente de RDOs abrir o formulário de um novo. */
+  const [pedidoNovoRdo, setPedidoNovoRdo] = useState(0);
   /** Lista completa das 10 fases no cabeçalho (recolhida por padrão). */
   const [verFases, setVerFases] = useState(false);
   /** Card "Ações desta fase" — recebe o foco depois de aplicar uma ação. */
@@ -263,9 +271,15 @@ export default function InspecaoDetalhePage() {
             href: `/api/relatorios/${r.id}/download` });
         }
       }
+      // RDOs são do projeto (um por dia, podem cobrir várias inspeções).
+      for (const r of proj?.rdos || []) {
+        lista.push({ grupo: "rdo", inspecao: `RDO nº ${numeroRdo(r.numero)}`,
+          rotulo: `${dataBr(r.data)}${r.inspecoes?.length ? ` — ${r.inspecoes.join(", ")}` : ""}`,
+          href: `/api/rdos/${r.id}/download` });
+      }
       setArquivos(lista);
     }).catch(() => {});
-  }, [projetoId, relatorios, coletas]);
+  }, [projetoId, relatorios, coletas, rdosInsp]);
 
   /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
    *  cliente, última medição salva (volume, altura, diâmetro) e a equipe do
@@ -345,6 +359,7 @@ export default function InspecaoDetalhePage() {
       relatorios: !!erroRelatorio,
       checklist: !!erroChecklist,
       fotos: !!erroFotos || fotosLocais.fila + fotosLocais.enviando > 0,
+      rdos: !!erroRdos,
     },
   });
 
@@ -369,14 +384,19 @@ export default function InspecaoDetalhePage() {
 
   function clicarAcao(opcao: OpcaoAcao) {
     if (opcao.exigeMotivo) { setMotivo(""); setReprovar(opcao); return; }
-    // Execução → Relatório de Execução: coleta de fotos incompleta só AVISA.
-    // Quem está em campo decide se segue assim mesmo (ex.: vaga sem acesso).
-    if (insp?.fase === 7 && opcao.acao === "avancar" && fotosExec) {
-      const pend = pendenciasColeta(fotosExec);
-      if (pend.length > 0 && !confirm(
-        `A coleta de fotos da execução está incompleta (${pend.length} pendência(s)):\n\n• ${pend.join("\n• ")}\n\n` +
-        "As fotos que faltam não entram no Relatório de Execução. Avançar mesmo assim?"
-      )) return;
+    // Execução → Relatório de Execução: coleta de fotos incompleta e falta de
+    // RDO só AVISAM, num confirm só. Quem está em campo decide se segue assim
+    // mesmo (ex.: vaga sem acesso, RDO feito no papel).
+    if (insp?.fase === 7 && opcao.acao === "avancar") {
+      const pend = fotosExec ? pendenciasColeta(fotosExec) : [];
+      const semRdo = rdosInsp !== null && rdosInsp.length === 0;
+      const blocos: string[] = [];
+      if (pend.length > 0) {
+        blocos.push(`Coleta de fotos da execução incompleta (${pend.length} pendência(s)):\n• ${pend.join("\n• ")}\n` +
+          "As fotos que faltam não entram no Relatório de Execução.");
+      }
+      if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta inspeção.");
+      if (blocos.length > 0 && !confirm(`Pendências da Execução:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
     }
     aplicar(opcao.acao);
   }
@@ -1166,6 +1186,24 @@ export default function InspecaoDetalhePage() {
         </SecaoRecolhivel>
       )}
 
+      {/* RDO — Registro Diário de Operação: um por dia no projeto, preenchido
+          na Execução. Recolhido segue montado: alimenta o aviso da fase 7. */}
+      {insp.fase >= 6 && insp.projeto && (
+        <SecaoRecolhivel id="rdos" titulo={`RDOs — diário de operação${rdosInsp ? ` (${rdosInsp.length})` : ""}`} style={{ marginTop: 16 }}
+          aberta={secoes.aberta("rdos")} onAlternar={() => secoes.alternar("rdos")}
+          resumo={erroRdos ? <span className="alerta">Erro — abra a seção</span>
+            : rdosInsp === null ? "Carregando…"
+            : rdosInsp.length === 0 && insp.fase >= 7 ? <span className="alerta">Nenhum RDO</span>
+            : resumoRdos(rdosInsp)}
+          acoesCabecalho={podeColeta && <button className="btn-azul" onClick={() => setPedidoNovoRdo((n) => n + 1)}>+ Novo RDO</button>}>
+          <Rdos projetoId={insp.projeto.id} inspecaoId={id}
+            codigoProjeto={insp.projeto.codigo_projeto || insp.projeto.pedido_compra}
+            cliente={insp.projeto.cliente?.razao_social} clienteId={insp.projeto.cliente?.id}
+            podeEditar={podeColeta} embutido pedidoNovo={pedidoNovoRdo}
+            onMudar={setRdosInsp} onErro={setErroRdos} />
+        </SecaoRecolhivel>
+      )}
+
       {/* Relatórios (Operações envia; Gerência aprova nas fases 5/9) */}
       <SecaoRecolhivel id="relatorios" titulo={`Relatórios (${relatorios.length})`} style={{ marginTop: 16 }}
         aberta={secoes.aberta("relatorios")} onAlternar={() => secoes.alternar("relatorios")}
@@ -1239,11 +1277,12 @@ export default function InspecaoDetalhePage() {
         {arquivos.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum arquivo anexado neste projeto.</p>
         ) : (
-          (["inspecao", "execucao", "medicao"] as const).map((grupo) => {
+          (["inspecao", "execucao", "rdo", "medicao"] as const).map((grupo) => {
             const itens = arquivos.filter((a) => a.grupo === grupo);
             if (itens.length === 0) return null;
             const titulo = grupo === "inspecao" ? "Relatórios de inspeção"
-              : grupo === "execucao" ? "Relatórios de execução" : "Medições";
+              : grupo === "execucao" ? "Relatórios de execução"
+              : grupo === "rdo" ? "RDOs — diário de operação" : "Medições";
             return (
               <div key={grupo} style={{ marginTop: 14 }}>
                 <h4 style={{ margin: "0 0 8px", fontSize: 14, borderBottom: "1px solid var(--borda)", paddingBottom: 6 }}>

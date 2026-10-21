@@ -106,10 +106,10 @@ export function acoesDisponiveis(perfil: string | null | undefined, faseAtual: n
 /** Seções recolhíveis da página da inspeção. O id também é a âncora da URL
  *  (`/inspecoes/<id>#relatorios` abre e rola até a seção). */
 export type SecaoInspecao =
-  | "coletas" | "agendamentos" | "checklist" | "fotos" | "relatorios" | "arquivos" | "historico";
+  | "coletas" | "agendamentos" | "checklist" | "fotos" | "rdos" | "relatorios" | "arquivos" | "historico";
 
 export const SECOES_INSPECAO: SecaoInspecao[] =
-  ["coletas", "agendamentos", "checklist", "fotos", "relatorios", "arquivos", "historico"];
+  ["coletas", "agendamentos", "checklist", "fotos", "rdos", "relatorios", "arquivos", "historico"];
 
 /** Como a seção nasce: aberta, recolhida (só o resumo) ou oculta. */
 export type EstadoSecao = "aberta" | "recolhida" | "oculta";
@@ -118,25 +118,26 @@ const A = "aberta", R = "recolhida", H = "oculta";
 type LinhaSecoes = Record<SecaoInspecao, EstadoSecao>;
 const linha = (
   coletas: EstadoSecao, agendamentos: EstadoSecao, checklist: EstadoSecao, fotos: EstadoSecao,
-  relatorios: EstadoSecao, arquivos: EstadoSecao, historico: EstadoSecao,
-): LinhaSecoes => ({ coletas, agendamentos, checklist, fotos, relatorios, arquivos, historico });
+  rdos: EstadoSecao, relatorios: EstadoSecao, arquivos: EstadoSecao, historico: EstadoSecao,
+): LinhaSecoes => ({ coletas, agendamentos, checklist, fotos, rdos, relatorios, arquivos, historico });
 
 /**
  * Padrão de cada seção por fase: abre o que a fase pede, recolhe o resto.
- * Fotos fica oculta no bloco de inspeção (2–5) — a coleta de fotos é da
- * execução. Tabela aprovada pelo produto; mudar aqui muda para todo mundo.
+ * Fotos e RDOs ficam ocultos no bloco de inspeção (2–5) — os dois são da
+ * execução; o RDO (diário de operação) abre na fase 7, quando é preenchido.
+ * Tabela aprovada pelo produto; mudar aqui muda para todo mundo.
  */
 export const SECOES_POR_FASE: Record<number, LinhaSecoes> = {
-  //          Coletas Agend. Checkl. Fotos Relat. Arquiv. Hist.
-  2:  linha(R, A, A, H, R, R, R),
-  3:  linha(A, R, A, H, R, R, R),
-  4:  linha(A, R, R, H, A, R, R),
-  5:  linha(A, R, R, H, A, R, R),
-  6:  linha(R, A, A, R, R, R, R),
-  7:  linha(R, R, A, A, R, R, R),
-  8:  linha(R, R, R, A, A, R, R),
-  9:  linha(R, R, R, R, A, R, R),
-  10: linha(R, R, R, R, A, A, A),
+  //          Coletas Agend. Checkl. Fotos RDOs Relat. Arquiv. Hist.
+  2:  linha(R, A, A, H, H, R, R, R),
+  3:  linha(A, R, A, H, H, R, R, R),
+  4:  linha(A, R, R, H, H, A, R, R),
+  5:  linha(A, R, R, H, H, A, R, R),
+  6:  linha(R, A, A, R, R, R, R, R),
+  7:  linha(R, R, A, A, A, R, R, R),
+  8:  linha(R, R, R, A, R, A, R, R),
+  9:  linha(R, R, R, R, R, A, R, R),
+  10: linha(R, R, R, R, R, A, A, A),
 };
 
 /**
