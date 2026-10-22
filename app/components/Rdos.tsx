@@ -18,19 +18,32 @@
  * /templates — vai pela fila logo atrás (enviarArquivo). Se o arquivo não
  * subir, a lista oferece "Gerar arquivo" depois.
  *
+ * Fase 7 (validação, validarRdo em lib/asp/rdo.ts — a API repete): ⛔ que
+ * impedem SALVAR (pessoa repetida, atividade repetida, ordem impossível,
+ * assinante do cliente na equipe ASP, data futura, pH/cloro fora da faixa);
+ * ⛔ que impedem só GERAR (o que falta preencher); ⚠️ que só avisam. Cada
+ * mensagem aparece junto do campo, com o resumo perto dos botões.
+ *
  * `somenteLeitura`: página do projeto — só a lista com download.
  * `embutido`: dentro de uma SecaoRecolhivel (página da inspeção). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import { enviarArquivo, enviarJson } from "@/lib/pwa/sync";
-import { valorDoSlot, numeroBr, lerNumero, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
+import {
+  valorDoSlot, numeroBr, lerNumero, cloroDoProcedimento, UNIDADE_CLORO_PADRAO,
+  type RegistroFotosExecucao, type UnidadeCloro,
+} from "@/lib/asp/fotos-execucao";
 import { contemDia, periodoDe } from "@/lib/validacao/periodo";
+import { execucaoAtiva } from "@/lib/validacao/execucao";
+import { hojeBrasil } from "@/lib/validacao/formatos";
+import { MensagensCampo } from "./MensagensCampo";
 import {
   CONTRATADA, FUNCOES_RDO, FRASES_RAPIDAS, OPCOES_TEMPO, PERIODOS,
   arquivoEmDia, assinanteAspPadrao, dadosRdoVazio, dataBr, fraseCloro, funcaoDoPerfil, gerarRdoDocx,
-  hojeIso, horaValida, nomeArquivoRdo, normalizarDadosRdo, numeroLinha, numeroRdo, ordenarAtividades,
-  semFraseCloro, textoAtividade, textoDaFrase, validarRdo,
-  type AtividadeRdo, type DadosRdo, type MembroRdo, type RegistroRdo, type Tempo,
+  hojeIso, horaValida, horariosNoTexto, nomeArquivoRdo, normalizarDadosRdo, numeroLinha, numeroPh, numeroRdo,
+  ordenarAtividades, osDaAmostra, removerEquipamentosRepetidos, removerHorarioDoTexto, semFraseCloro,
+  textoAtividade, textoDaFrase, validarRdo,
+  type AtividadeRdo, type ContextoRdo, type DadosRdo, type MembroRdo, type RegistroRdo, type Tempo,
 } from "@/lib/asp/rdo";
 
 /** Inspeção do projeto, para marcar a cobertura do RDO. */
@@ -39,12 +52,14 @@ interface Agendamento {
   tipo: string; data_visita: string | null; data_execucao: string | null; criado_em?: string; equipe: { id: string; nome: string }[];
   /** Execução de vários dias (Fase 6): último dia. */
   data_fim?: string | null;
+  a_definir?: boolean;
+  substituido_em?: string | null;
 }
 
 /** O que o sistema já sabe e alimenta as sugestões do formulário. */
 interface Fontes {
   usuarios: { id: string; nome: string; funcao: string | null }[];
-  procedimentos: { codigo: string; nome: string; equipamentos?: string[] }[];
+  procedimentos: { codigo: string; nome: string; equipamentos?: string[]; cloro_unidade?: string; cloro_limite_aviso?: number }[];
   equipamentos: { slug?: string; id?: string; nome: string }[];
   contato: { nome: string; cargo: string } | null;
   /** Por inspeção — carregados conforme a cobertura muda. */
@@ -95,13 +110,16 @@ function ordemFuncao(f: string): number {
 
 /** Limpa o que vai ao banco: linhas vazias saem, frase de cloro digitada à
  *  mão sai quando há valor (a oficial é gerada). */
-function limparDados(d: DadosRdo): DadosRdo {
+function limparDados(d: DadosRdo, cloroUnidade: UnidadeCloro): DadosRdo {
   return {
     ...d,
+    cloroUnidade,
     equipe: d.equipe.filter((m) => m.nome.trim() || m.funcao.trim()),
     atividades: d.atividades.map((a) => ({
       ...a, fim: a.fim || undefined,
       texto: a.cloro != null ? semFraseCloro(a.texto) : a.texto,
+      ph: a.momento ? a.ph ?? null : null,
+      inspecaoId: a.momento ? a.inspecaoId || null : null,
     })),
     fiscalizacao: d.fiscalizacao.map((s) => s.trim()).filter(Boolean),
     ddsms: d.ddsms.map((s) => s.trim()).filter(Boolean),
@@ -281,14 +299,27 @@ export default function Rdos({
     return Array.from(nomes).join(" / ");
   }
 
-  /** Cloro medido na coleta de fotos das inspeções cobertas. */
-  function cloroSugerido(momento: "antes" | "depois"): { valor: number; de: string } | null {
-    for (const id of cobertas) {
+  /** Cloro medido na coleta de fotos — da OS da amostra; sem OS definida
+   *  (RDO de várias OSs), a primeira coberta que tiver valor. */
+  function cloroSugerido(momento: "antes" | "depois", os?: string | null): { valor: number; de: string } | null {
+    const ids = os ? [os] : cobertas;
+    for (const id of ids) {
       const v = valorDoSlot(fontes.fotos[id], momento === "antes" ? "agua_antes_cloro" : "agua_depois_cloro");
       if (v != null) return { valor: v, de: nomeInspecao(id) };
     }
     return null;
   }
+
+  /** Unidade do cloro: a do procedimento das OSs cobertas (Catálogo). */
+  const unidadesCobertas = useMemo(() => {
+    const us = cobertas.map((id) => {
+      const cod = inspecoesProjeto.find((i) => i.id === id)?.procedimento;
+      const proc = fontes.procedimentos.find((p) => p.codigo === cod);
+      return proc ? cloroDoProcedimento(proc).unidade : null;
+    }).filter((u): u is UnidadeCloro => !!u);
+    return Array.from(new Set(us));
+  }, [cobertas, inspecoesProjeto, fontes.procedimentos]);
+  const unidadeCloro: UnidadeCloro = unidadesCobertas[0] || dados.cloroUnidade || UNIDADE_CLORO_PADRAO;
 
   // ── Abrir / fechar ─────────────────────────────────────────────────────────
 
@@ -367,10 +398,14 @@ export default function Rdos({
   function inserirFrase(i: number) {
     const f = FRASES_RAPIDAS[i];
     setDados((d) => {
-      const sug = f.momento ? cloroSugerido(f.momento) : null;
+      // Amostra de água num RDO de várias OSs: a OS (tanque) fica para
+      // escolher — o seletor aparece na atividade.
+      const os = f.momento && cobertas.length === 1 ? cobertas[0] : null;
+      const sug = f.momento && (os || cobertas.length <= 1) ? cloroSugerido(f.momento, os) : null;
       const nova: AtividadeRdo = {
         inicio: f.inicio || proximaHora(d), fim: f.fim,
         texto: textoDaFrase(f, d.cliente), momento: f.momento || null, cloro: sug ? sug.valor : null,
+        ph: null, inspecaoId: null,
       };
       return { ...d, atividades: [...d.atividades, nova] };
     });
@@ -380,7 +415,28 @@ export default function Rdos({
     setCobertas((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
   }
 
-  const validacao = useMemo(() => validarRdo(dados, data, cobertas), [dados, data, cobertas]);
+  /** O que a validação precisa saber das OSs cobertas e dos outros RDOs. */
+  const contexto = useMemo<ContextoRdo>(() => ({
+    hoje: hojeBrasil(),
+    oss: Object.fromEntries(cobertas.map((id) => {
+      const insp = inspecoesProjeto.find((i) => i.id === id);
+      const fotos = fontes.fotos[id];
+      return [id, {
+        nome: insp?.identificacao || "OS",
+        fase: insp?.fase ?? null,
+        periodo: periodoDe(execucaoAtiva(fontes.agendamentos[id] || [])),
+        cloroColeta: fotos ? {
+          antes: fotos.agua_antes ? valorDoSlot(fotos, "agua_antes_cloro") : null,
+          depois: fotos.agua_depois ? valorDoSlot(fotos, "agua_depois_cloro") : null,
+        } : null,
+      }];
+    })),
+    outros: rdos.filter((r) => r.id !== form?.id).map((r) => ({ numero: r.numero, data: r.data, equipe: r.dados.equipe })),
+  }), [cobertas, inspecoesProjeto, fontes, rdos, form?.id]);
+  const validacao = useMemo(() => validarRdo(dados, data, cobertas, contexto), [dados, data, cobertas, contexto]);
+  const vr = validacao.r;
+  /** ⛔ que só impedem gerar (falta preencher) — salvar como rascunho pode. */
+  const errosSoGerar = validacao.erros.filter((e) => !validacao.bloqueios.includes(e));
   const doMesmoDia = form ? rdos.find((r) => r.data === data && r.id !== form.id) : undefined;
 
   // ── Salvar / gerar ─────────────────────────────────────────────────────────
@@ -407,20 +463,26 @@ export default function Rdos({
   async function salvar(gerar: boolean) {
     if (!form) return;
     setErroForm(null);
+    setMostrarAvisos(true);
+    if (validacao.bloqueios.length > 0) {
+      setErroForm("Corrija antes de salvar:\n• " + validacao.bloqueios.join("\n• "));
+      return;
+    }
     if (gerar && validacao.erros.length > 0) {
       setErroForm("Corrija antes de gerar o arquivo:\n• " + validacao.erros.join("\n• "));
       return;
     }
     if (!data) { setErroForm("Informe a data do RDO."); return; }
     if (cobertas.length === 0) { setErroForm("Marque ao menos uma OS coberta por este RDO."); return; }
-    const limpos = limparDados(dados);
+    const limpos = limparDados(dados, unidadeCloro);
     setSalvando(gerar ? "gerar" : "salvar");
     try {
       const res = form.novo
         ? await enviarJson("/api/rdos", "POST", { id: form.id, projetoId, data, inspecoes: cobertas, dados: limpos }, `RDO ${dataBr(data)}`)
         : await enviarJson(`/api/rdos/${form.id}`, "PATCH", { data, inspecoes: cobertas, dados: limpos }, `RDO ${dataBr(data)}`);
       if (!res.queued && !res.ok) {
-        setErroForm(res.data?.erro || "Não foi possível salvar o RDO.");
+        const lista: string[] = Array.isArray(res.data?.bloqueios) ? res.data.bloqueios : [];
+        setErroForm(lista.length > 1 ? "Corrija antes de salvar:\n• " + lista.join("\n• ") : res.data?.erro || "Não foi possível salvar o RDO.");
         return;
       }
       if (gerar) await gerarEEnviar(form.id, limpos, data);
@@ -556,15 +618,18 @@ export default function Rdos({
                 <div>
                   <label style={rotulo} htmlFor="rdo-data">Data</label>
                   <input id="rdo-data" type="date" style={campo} value={data} onChange={(e) => setData(e.target.value)} />
+                  <MensagensCampo r={vr} campo="data" />
                 </div>
                 <div>
                   <label style={rotulo} htmlFor="rdo-resp">Responsável (cliente)</label>
                   <input id="rdo-resp" style={campo} value={dados.responsavel} onChange={(e) => mudar({ responsavel: e.target.value })} />
+                  <MensagensCampo r={vr} campo="responsavel" />
                 </div>
                 <div>
                   <label style={rotulo} htmlFor="rdo-desc">Projeto (descrição do serviço)</label>
                   <input id="rdo-desc" style={campo} value={dados.descricao} placeholder="Ex.: Limpeza em Tanque de água potável (VRO)"
                     onChange={(e) => mudar({ descricao: e.target.value })} />
+                  <MensagensCampo r={vr} campo="descricao" />
                 </div>
               </div>
               {doMesmoDia && (
@@ -589,6 +654,7 @@ export default function Rdos({
                     </label>
                   );
                 })}
+                <MensagensCampo r={vr} campo="inspecoes" />
               </fieldset>
             </section>
 
@@ -610,8 +676,13 @@ export default function Rdos({
                     onChange={(e) => mudar({ equipe: dados.equipe.map((x, k) => (k === i ? { ...x, funcao: e.target.value } : x)) })} />
                   <button type="button" className="rdo-icone" title="Remover da equipe" aria-label={`Remover ${m.nome || "pessoa"}`}
                     onClick={() => mudar({ equipe: dados.equipe.filter((_, k) => k !== i) })}>✕</button>
+                  <div className="rdo-membro-msg">
+                    <MensagensCampo r={vr} campo={`equipe.${i}.nome`} />
+                    <MensagensCampo r={vr} campo={`equipe.${i}.funcao`} />
+                  </div>
                 </div>
               ))}
+              <MensagensCampo r={vr} campo="equipe" />
               <button type="button" className="btn-azul btn-sec rdo-add"
                 onClick={() => mudar({ equipe: [...dados.equipe, { nome: "", funcao: "" }] })}>+ Pessoa</button>
             </section>
@@ -633,6 +704,7 @@ export default function Rdos({
                   </div>
                 </div>
               ))}
+              <MensagensCampo r={vr} campo="tempo" />
               <div className="rdo-bloco-topo" style={{ marginTop: 14 }}>
                 <label style={{ ...rotulo, marginBottom: 0 }} htmlFor="rdo-equip">Equipamentos utilizados</label>
                 <button type="button" className="secao-link"
@@ -642,6 +714,13 @@ export default function Rdos({
               </div>
               <textarea id="rdo-equip" rows={3} style={{ ...campo, resize: "vertical" }} value={dados.equipamentos}
                 onChange={(e) => mudar({ equipamentos: e.target.value })} />
+              <MensagensCampo r={vr} campo="equipamentos">
+                {vr.avisos.equipamentos?.length ? (
+                  <button type="button" className="val-acao" onClick={() => mudar({ equipamentos: removerEquipamentosRepetidos(dados.equipamentos) })}>
+                    Remover repetidos
+                  </button>
+                ) : null}
+              </MensagensCampo>
             </section>
 
             {/* 5. Atividades */}
@@ -655,6 +734,7 @@ export default function Rdos({
                 )}
               </div>
               <p className="detalhe" style={{ marginTop: 0 }}>Toque numa frase para incluir a atividade; ajuste o horário e o texto.</p>
+              <MensagensCampo r={vr} campo="atividades" />
               <div className="rdo-chips">
                 {FRASES_RAPIDAS.map((f, i) => (
                   <button key={f.rotulo} type="button" className="rdo-chip" title={textoDaFrase(f, dados.cliente)} onClick={() => inserirFrase(i)}>
@@ -662,12 +742,15 @@ export default function Rdos({
                   </button>
                 ))}
                 <button type="button" className="rdo-chip"
-                  onClick={() => setDados((d) => ({ ...d, atividades: [...d.atividades, { inicio: proximaHora(d), texto: "", momento: null, cloro: null }] }))}>
+                  onClick={() => setDados((d) => ({ ...d, atividades: [...d.atividades, { inicio: proximaHora(d), texto: "", momento: null, cloro: null, ph: null, inspecaoId: null }] }))}>
                   + Em branco
                 </button>
               </div>
               {dados.atividades.map((a, i) => {
-                const sug = a.momento ? cloroSugerido(a.momento) : null;
+                const osAmostra = a.momento ? osDaAmostra(a, cobertas) : "";
+                const sug = a.momento && (osAmostra || cobertas.length <= 1) ? cloroSugerido(a.momento, osAmostra || null) : null;
+                const proprias = [a.inicio, a.fim].filter(Boolean);
+                const horaNoTexto = horariosNoTexto(semFraseCloro(a.texto)).some((h) => !proprias.includes(h.hora));
                 return (
                   <div key={i} className="rdo-atividade">
                     <div className="rdo-atividade-topo">
@@ -687,42 +770,86 @@ export default function Rdos({
                           onClick={() => mudar({ atividades: dados.atividades.filter((_, k) => k !== i) })}>✕</button>
                       </span>
                     </div>
+                    <MensagensCampo r={vr} campo={`atividades.${i}`} />
                     <textarea rows={2} style={{ ...campo, resize: "vertical" }} aria-label={`Texto da atividade ${numeroLinha(i)}`}
                       value={a.texto} onChange={(e) => mudarAtividade(i, { texto: e.target.value })} />
+                    <MensagensCampo r={vr} campo={`atividades.${i}.texto`}>
+                      {horaNoTexto && (vr.avisos[`atividades.${i}.texto`] || []).length > 0 ? (
+                        <button type="button" className="val-acao" onClick={() => mudarAtividade(i, { texto: removerHorarioDoTexto(a.texto) })}>
+                          Remover horário do texto
+                        </button>
+                      ) : null}
+                    </MensagensCampo>
                     <div className="rdo-agua">
                       <label>
                         <span>Amostra de água</span>
                         <select style={campo} value={a.momento || ""}
                           onChange={(e) => {
                             const m = (e.target.value || null) as AtividadeRdo["momento"];
-                            const s = m ? cloroSugerido(m) : null;
-                            mudarAtividade(i, { momento: m, cloro: m ? (a.cloro ?? s?.valor ?? null) : null });
+                            const os = osDaAmostra(a, cobertas);
+                            const s = m && (os || cobertas.length <= 1) ? cloroSugerido(m, os || null) : null;
+                            mudarAtividade(i, { momento: m, cloro: m ? (a.cloro ?? s?.valor ?? null) : null, ph: m ? a.ph ?? null : null });
                           }}>
                           <option value="">Não é coleta</option>
                           <option value="antes">Coleta antes da limpeza</option>
                           <option value="depois">Coleta após a limpeza</option>
                         </select>
                       </label>
+                      {a.momento && cobertas.length > 1 && (
+                        <label>
+                          <span>OS (tanque) da amostra</span>
+                          <select style={campo} value={a.inspecaoId || ""}
+                            onChange={(e) => {
+                              const os = e.target.value || null;
+                              const s = os && a.momento ? cloroSugerido(a.momento, os) : null;
+                              mudarAtividade(i, { inspecaoId: os, cloro: a.cloro ?? s?.valor ?? null });
+                            }}>
+                            <option value="">— escolha —</option>
+                            {cobertas.map((id) => <option key={id} value={id}>{nomeInspecao(id)}</option>)}
+                          </select>
+                        </label>
+                      )}
                       {a.momento && (
                         <label>
-                          <span>Cloro livre (PPM)</span>
+                          <span>Cloro livre ({unidadeCloro})</span>
+                          {/* negativo fica no campo para o ⛔ aparecer (não some calado) */}
                           <input inputMode="decimal" style={campo} placeholder="0,00"
                             defaultValue={a.cloro != null ? numeroBr(a.cloro) : ""}
                             key={`cloro-${i}-${a.cloro ?? "x"}`}
-                            onBlur={(e) => { const n = lerNumero(e.target.value); mudarAtividade(i, { cloro: n != null && n >= 0 ? n : null }); }} />
+                            onBlur={(e) => mudarAtividade(i, { cloro: lerNumero(e.target.value) })} />
+                        </label>
+                      )}
+                      {a.momento && (
+                        <label>
+                          <span>pH (opcional)</span>
+                          <input inputMode="decimal" style={campo} placeholder="ex.: 7,2"
+                            defaultValue={a.ph != null ? numeroBr(a.ph) : ""}
+                            key={`ph-${i}-${a.ph ?? "x"}`}
+                            onBlur={(e) => mudarAtividade(i, { ph: lerNumero(e.target.value) })} />
                         </label>
                       )}
                     </div>
-                    {a.momento && sug && sug.valor !== a.cloro && (
+                    <MensagensCampo r={vr} campo={`atividades.${i}.os`} />
+                    <MensagensCampo r={vr} campo={`atividades.${i}.cloro`}>
+                      {a.momento && sug && a.cloro != null && Math.round(sug.valor * 100) !== Math.round(a.cloro * 100) ? (
+                        <button type="button" className="val-acao" onClick={() => mudarAtividade(i, { cloro: sug.valor })}>
+                          Usar valor da coleta ({numeroBr(sug.valor)} {unidadeCloro})
+                        </button>
+                      ) : null}
+                    </MensagensCampo>
+                    <MensagensCampo r={vr} campo={`atividades.${i}.ph`} />
+                    {a.momento && sug && a.cloro == null && (
                       <p className="detalhe" style={{ margin: 0 }}>
-                        Coleta de fotos ({sug.de}): {numeroBr(sug.valor)} PPM.{" "}
+                        Coleta de fotos ({sug.de}): {numeroBr(sug.valor)} {unidadeCloro}.{" "}
                         <button type="button" className="secao-link" onClick={() => mudarAtividade(i, { cloro: sug.valor })}>Usar este valor</button>
                       </p>
                     )}
                     {horaValida(a.inicio) && semFraseCloro(a.texto) ? (
-                      <p className="detalhe rdo-previa" style={{ margin: 0 }}>No documento: {numeroLinha(i)} · {textoAtividade(a)}</p>
+                      <p className="detalhe rdo-previa" style={{ margin: 0 }}>No documento: {numeroLinha(i)} · {textoAtividade(a, unidadeCloro)}</p>
                     ) : a.cloro != null && (
-                      <p className="detalhe rdo-previa" style={{ margin: 0 }}>Frase gerada: {fraseCloro(a.cloro)}</p>
+                      <p className="detalhe rdo-previa" style={{ margin: 0 }}>
+                        Frase gerada: {a.ph != null ? `(pH ${numeroPh(a.ph)}) ` : ""}{fraseCloro(a.cloro, unidadeCloro)}
+                      </p>
                     )}
                   </div>
                 );
@@ -741,6 +868,7 @@ export default function Rdos({
                       onChange={(e) => mudar({ [chave]: dados[chave].map((x, k) => (k === i ? e.target.value : x)) } as Partial<DadosRdo>)} />
                     <button type="button" className="rdo-icone" title="Remover" aria-label={`Remover ${titulo} ${numeroLinha(i)}`}
                       onClick={() => mudar({ [chave]: dados[chave].filter((_, k) => k !== i) } as Partial<DadosRdo>)}>✕</button>
+                    <div className="rdo-membro-msg"><MensagensCampo r={vr} campo={`${chave}.${i}`} /></div>
                   </div>
                 ))}
                 <button type="button" className="btn-azul btn-sec rdo-add"
@@ -765,6 +893,7 @@ export default function Rdos({
                       <option value={dados.assinaturaAsp.nome}>{dados.assinaturaAsp.nome} (fora da equipe)</option>
                     )}
                   </select>
+                  <MensagensCampo r={vr} campo="assinaturaAsp" />
                 </div>
                 <div>
                   <label style={rotulo} htmlFor="rdo-ass-asp-cargo">Cargo (ASP)</label>
@@ -775,6 +904,7 @@ export default function Rdos({
                   <label style={rotulo} htmlFor="rdo-ass-cli">Cliente — nome</label>
                   <input id="rdo-ass-cli" style={campo} value={dados.assinaturaCliente.nome}
                     onChange={(e) => mudar({ assinaturaCliente: { ...dados.assinaturaCliente, nome: e.target.value } })} />
+                  <MensagensCampo r={vr} campo="assinaturaCliente" />
                 </div>
                 <div>
                   <label style={rotulo} htmlFor="rdo-ass-cli-cargo">Cliente — cargo</label>
@@ -784,17 +914,41 @@ export default function Rdos({
               </div>
             </section>
 
+            {unidadesCobertas.length > 1 && (
+              <p className="val-msg val-aviso" style={{ margin: 0 }}>
+                ⚠️ As OSs cobertas usam unidades de cloro diferentes no Catálogo ({unidadesCobertas.join(" e ")}) — o RDO sai em {unidadeCloro}.
+              </p>
+            )}
             {(validacao.erros.length > 0 || validacao.avisos.length > 0) && (
-              <div className="rdo-pendencias">
-                <button type="button" className="secao-link" aria-expanded={mostrarAvisos} onClick={() => setMostrarAvisos((v) => !v)}>
-                  {validacao.erros.length > 0 ? `${validacao.erros.length} item(ns) a corrigir` : "Tudo certo para gerar"}
-                  {validacao.avisos.length > 0 ? ` · ${validacao.avisos.length} aviso(s)` : ""} {mostrarAvisos ? "▴" : "▾"}
+              <div className="rdo-pendencias val-resumo" role="status">
+                <button type="button" className="secao-link" aria-expanded={mostrarAvisos || validacao.bloqueios.length > 0}
+                  onClick={() => setMostrarAvisos((v) => !v)}>
+                  {validacao.bloqueios.length > 0 ? `⛔ ${validacao.bloqueios.length} impede(m) salvar`
+                    : errosSoGerar.length > 0 ? `${errosSoGerar.length} item(ns) a completar para gerar` : "Tudo certo para gerar"}
+                  {validacao.bloqueios.length > 0 && errosSoGerar.length > 0 ? ` · ${errosSoGerar.length} a completar` : ""}
+                  {validacao.avisos.length > 0 ? ` · ${validacao.avisos.length} aviso(s)` : ""} {mostrarAvisos || validacao.bloqueios.length > 0 ? "▴" : "▾"}
                 </button>
-                {mostrarAvisos && (
-                  <ul>
-                    {validacao.erros.map((t) => <li key={t} className="erro-texto">{t}</li>)}
-                    {validacao.avisos.map((t) => <li key={t}>{t}</li>)}
-                  </ul>
+                {(mostrarAvisos || validacao.bloqueios.length > 0) && (
+                  <>
+                    {validacao.bloqueios.length > 0 && (
+                      <>
+                        <strong className="val-erro">⛔ Corrija para salvar:</strong>
+                        <ul>{validacao.bloqueios.map((t) => <li key={t}>{t}</li>)}</ul>
+                      </>
+                    )}
+                    {errosSoGerar.length > 0 && (
+                      <>
+                        <strong className="val-erro">⛔ Complete para gerar o .docx (salvar pode):</strong>
+                        <ul>{errosSoGerar.map((t) => <li key={t}>{t}</li>)}</ul>
+                      </>
+                    )}
+                    {validacao.avisos.length > 0 && (
+                      <>
+                        <strong className="val-aviso">⚠️ Confira (não impede):</strong>
+                        <ul>{validacao.avisos.map((t) => <li key={t}>{t}</li>)}</ul>
+                      </>
+                    )}
+                  </>
                 )}
               </div>
             )}

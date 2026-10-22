@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { unidadeCloroValida } from "@/lib/asp/fotos-execucao";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,16 @@ function validarProcedimento(dados: any): string | null {
   }
   dados.codigo = dados.codigo.trim();
   if (typeof dados.nome === "string") dados.nome = dados.nome.trim();
+  // Fase 7: unidade e limite de aviso do cloro (o banco também confere).
+  if (dados.cloro_unidade !== undefined && !unidadeCloroValida(dados.cloro_unidade)) {
+    return "Unidade do cloro inválida — use mg/L ou PPM.";
+  }
+  if (dados.cloro_limite_aviso !== undefined) {
+    const n = Number(dados.cloro_limite_aviso);
+    if (typeof dados.cloro_limite_aviso !== "number" || !isFinite(n) || n <= 0) {
+      return "Limite de aviso do cloro inválido — informe um número maior que zero.";
+    }
+  }
   return null;
 }
 

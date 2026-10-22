@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { dataIsoValida } from "@/lib/asp/rdo";
-import { CAMPOS_RDO, PERFIS_RDO, MSG_DIA_DUPLICADO, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
+import { CAMPOS_RDO, PERFIS_RDO, MSG_DIA_DUPLICADO, bloqueiosDoRdo, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
 
 export const runtime = "nodejs";
 
@@ -27,7 +27,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const b = await req.json().catch(() => ({}));
   const supabase = getSupabaseRouteClient();
   const { data: atual } = await supabase.from("gp_rdos")
-    .select("id, projeto_id, excluido_em").eq("id", params.id).maybeSingle();
+    .select("id, projeto_id, excluido_em, data, inspecoes, dados").eq("id", params.id).maybeSingle();
   if (!atual) return NextResponse.json({ erro: "RDO não encontrado." }, { status: 404 });
 
   const mudanca: Record<string, unknown> = {};
@@ -52,6 +52,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     mudanca.inspecoes = Array.from(new Set(b.inspecoes as string[]));
   }
   if (Object.keys(mudanca).length === 0) return NextResponse.json({ erro: "Nada para alterar." }, { status: 400 });
+
+  // Fase 7: o RDO como fica depois da mudança não pode ter dado duplicado,
+  // ambíguo ou impossível (só restaurar da lixeira não revalida).
+  if (b?.dados !== undefined || b?.data !== undefined || b?.inspecoes !== undefined) {
+    const bloq = bloqueiosDoRdo(
+      mudanca.dados ?? atual.dados, String(mudanca.data ?? atual.data),
+      (mudanca.inspecoes ?? atual.inspecoes ?? []) as string[],
+    );
+    if (bloq) return NextResponse.json(bloq, { status: 400 });
+  }
 
   const { data, error } = await supabase.from("gp_rdos")
     .update({ ...mudanca, atualizado_em: new Date().toISOString() })

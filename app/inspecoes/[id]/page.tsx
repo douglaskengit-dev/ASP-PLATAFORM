@@ -46,7 +46,7 @@ import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
 import ColetaFotosExecucao from "@/app/components/ColetaFotosExecucao";
-import { pendenciasColeta, progressoColeta, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
+import { cloroDoProcedimento, pendenciasColeta, progressoColeta, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
 import FormularioTanque from "@/app/components/FormularioTanque";
 import { dadosRelatorioDoTanque, erroDoTanque, resumoTanque, tanqueParaForm, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 import AvisoCliente from "@/app/components/AvisoCliente";
@@ -456,6 +456,8 @@ export default function InspecaoDetalhePage() {
   /** O agendamento de execução ativo com data e o período dele. */
   const agExec = useMemo(() => execucaoAtiva(agAtivos), [agAtivos]);
   const periodoExec = periodoDe(agExec);
+  /** Unidade e limite de aviso do cloro do procedimento (Fase 7). */
+  const cloroOS = cloroDoProcedimento(procOS);
   const avisosExec = avisosExecucao({ ag: agExec, hoje: hojeExec, equipamentosProcedimento: equipProcOS, funcoes: funcoesUsuarios });
   /** Água potável no procedimento × coletas de água desmarcadas nas fotos. */
   const avisoAgua = aguaPotavelDesmarcada(procOS?.agua_potavel, fotosExec);
@@ -1962,7 +1964,8 @@ export default function InspecaoDetalhePage() {
           aberta={secoes.aberta("fotos")} onAlternar={() => secoes.alternar("fotos")}
           resumo={resumoFotos}>
           <ColetaFotosExecucao inspecaoId={id} onMudar={setFotosExec} embutido
-            onLocais={setFotosLocais} onErro={setErroFotos} aguaPotavel={!!procOS?.agua_potavel} />
+            onLocais={setFotosLocais} onErro={setErroFotos} aguaPotavel={!!procOS?.agua_potavel}
+            cloroUnidade={cloroOS.unidade} cloroLimiteAviso={cloroOS.limite} periodoExecucao={periodoExec} />
         </SecaoRecolhivel>
       )}
 

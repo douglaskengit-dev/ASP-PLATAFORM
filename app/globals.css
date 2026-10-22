@@ -809,6 +809,8 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
 .rdo-agua { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
 .rdo-agua label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--cinza); }
 .rdo-previa { overflow-wrap: anywhere; }
+.rdo-membro-msg { grid-column: 1 / -1; }
+.rdo-membro-msg:empty { display: none; }
 .rdo-pendencias ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--texto-suave); }
 .rdo-rodape { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .rdo-rodape > button { min-height: 44px; }

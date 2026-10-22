@@ -22,7 +22,7 @@ import {
   type DadosRelatorio, type ImagemRelatorio, type VagaImagem,
 } from "@/lib/asp/relatorio";
 import {
-  pendenciasColeta, planejarFotosNoRelatorio, valorDoSlot, numeroBr,
+  pendenciasColeta, planejarFotosNoRelatorio, valorDoSlot, numeroBr, cloroDoProcedimento,
   type RegistroFotosExecucao,
 } from "@/lib/asp/fotos-execucao";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -296,6 +296,8 @@ export default function GerarRelatorio({
     () => PROCEDIMENTOS.find((p) => p.codigo === d.procedimento) || null,
     [d.procedimento, PROCEDIMENTOS]
   );
+  /** Unidade do cloro do procedimento (Catálogo, Fase 7): legendas e valores. */
+  const unidadeCloro = cloroDoProcedimento(proc).unidade;
 
   // Cada procedimento pode ter o seu modelo, com outras seções. A lista de
   // escolha vem do próprio arquivo — é o que garante que você marque as
@@ -502,13 +504,15 @@ export default function GerarRelatorio({
       ativo: marcado,
       vagas: vagasModelo,
       primeiraSecao: topicos.find((t) => marcado(t.numero))?.numero ?? 1,
+      unidadeCloro,
     });
 
     // pH e cloro medidos → marcadores [dado coletado] das legendas do modelo
     // da limpeza robotizada. Não sobrescreve o que já foi digitado.
     const medido = (id: string, exigido: boolean) => {
       const n = exigido ? valorDoSlot(reg, id) : null;
-      return n == null ? undefined : numeroBr(n);
+      if (n == null) return undefined;
+      return id.endsWith("_cloro") ? `${numeroBr(n)} ${unidadeCloro}` : numeroBr(n);
     };
     setD((x) => ({
       ...x,
@@ -1135,9 +1139,9 @@ export default function GerarRelatorio({
             Entram nas legendas das figuras de coleta do modelo.
           </p>
           <div style={grade}>
-            <div><label style={rotulo}>Cloro livre — antes (PPM)</label>
+            <div><label style={rotulo}>Cloro livre — antes ({unidadeCloro})</label>
               <input style={campo} value={d.cloroAntes || ""} onChange={set("cloroAntes")} /></div>
-            <div><label style={rotulo}>Cloro livre — depois (PPM)</label>
+            <div><label style={rotulo}>Cloro livre — depois ({unidadeCloro})</label>
               <input style={campo} value={d.cloroDepois || ""} onChange={set("cloroDepois")} /></div>
             <div><label style={rotulo}>pH — antes</label>
               <input style={campo} value={d.phAntes || ""} onChange={set("phAntes")} /></div>

@@ -10,8 +10,19 @@ import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
 import { TOPICOS_PADRAO, TOPICO_CAPA, lerTopicosDoModelo, topicosDoProcedimento, ehLimpezaRobotizada, capaVisivel } from "@/lib/asp/relatorio";
 
+import {
+  CLORO_LIMITE_AVISO_PADRAO, UNIDADES_CLORO, UNIDADE_CLORO_PADRAO, cloroDoProcedimento, lerNumero, numeroBr,
+  unidadeCloroValida, type UnidadeCloro,
+} from "@/lib/asp/fotos-execucao";
+
 /** Tópicos que o relatório pode ter — o procedimento escolhe quais entram. */
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
+
+/** ⛔ do limite de aviso do cloro (texto do campo, aceita vírgula). */
+function erroLimiteCloro(texto: string): string | null {
+  const n = lerNumero(String(texto ?? ""));
+  return n == null || n <= 0 ? "Informe um número maior que zero (ex.: 5)." : null;
+}
 
 interface Espec { rotulo: string; valor: string }
 interface Foto { caminho: string; legenda?: string }
@@ -32,6 +43,10 @@ interface Procedimento {
   /** Serviço em reservatório de água potável: a coleta de fotos da execução
    *  já nasce pedindo as coletas de água antes e depois da limpeza. */
   agua_potavel: boolean;
+  /** Unidade do cloro livre (card da coleta, frase do RDO, relatório). */
+  cloro_unidade: UnidadeCloro;
+  /** Cloro acima disso gera aviso na coleta de fotos (texto do campo). */
+  cloro_limite_aviso: string;
   /** Tópicos próprios deste procedimento: título + posição (`apos`). */
   topicos_extras: { titulo: string; apos?: number }[];
   /** Tópicos do relatório deste procedimento — a lista real, editável.
@@ -90,6 +105,8 @@ export default function CatalogoPage() {
             template_path: p.template_path || null,
             limpeza_robotizada: !!p.limpeza_robotizada,
             agua_potavel: !!p.agua_potavel,
+            cloro_unidade: cloroDoProcedimento(p).unidade,
+            cloro_limite_aviso: numeroBr(cloroDoProcedimento(p).limite),
             topicos_extras: Array.isArray(p.topicos_extras) ? p.topicos_extras : [],
             topicos_lista: lista,
             lista_recuperada: salva.length === 0 && lista.length > 0,
@@ -133,6 +150,12 @@ export default function CatalogoPage() {
       setErro("Informe o código do procedimento (ex.: PO 011) — é por ele que a OS e o relatório o identificam.");
       return;
     }
+    let limiteCloro = CLORO_LIMITE_AVISO_PADRAO;
+    if (tipo === "procedimento") {
+      const erroCloro = erroLimiteCloro(item.cloro_limite_aviso);
+      if (erroCloro) { setErro(erroCloro); return; }
+      limiteCloro = lerNumero(String(item.cloro_limite_aviso)) as number;
+    }
     setSalvando(true);
     const dados = tipo === "equipamento"
       ? { slug: item.slug, nome: item.nome, especificacoes: item.especificacoes, fotos: item.fotos, ordem: item.ordem }
@@ -140,6 +163,8 @@ export default function CatalogoPage() {
           equipamentos: item.equipamentos, ordem: item.ordem, topicos: item.topicos,
           template_path: item.template_path || null, limpeza_robotizada: !!item.limpeza_robotizada,
           agua_potavel: !!item.agua_potavel,
+          cloro_unidade: unidadeCloroValida(item.cloro_unidade) ? item.cloro_unidade : UNIDADE_CLORO_PADRAO,
+          cloro_limite_aviso: limiteCloro,
           topicos_extras: item.topicos_extras || [], topicos_lista: item.topicos_lista || [] };
     const r = item.id
       ? await api("PATCH", { tipo, id: item.id, dados })
@@ -272,7 +297,9 @@ export default function CatalogoPage() {
   });
   const novoProc = (): Procedimento => ({
     id: "", codigo: "", nome: "", metodos: "", equipamentos: [], ordem: procedimentos.length + 1,
-    topicos: null, template_path: null, limpeza_robotizada: false, agua_potavel: false, topicos_extras: [], topicos_lista: [],
+    topicos: null, template_path: null, limpeza_robotizada: false, agua_potavel: false,
+    cloro_unidade: UNIDADE_CLORO_PADRAO, cloro_limite_aviso: numeroBr(CLORO_LIMITE_AVISO_PADRAO),
+    topicos_extras: [], topicos_lista: [],
   });
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -393,6 +420,27 @@ export default function CatalogoPage() {
                 </p>
               </span>
             </label>
+            <div style={grade}>
+              <div>
+                <label style={rot} htmlFor="proc-cloro-unidade">Unidade do cloro livre</label>
+                <select id="proc-cloro-unidade" style={campo} value={edProc.cloro_unidade} disabled={!podeEditar}
+                  onChange={(ev) => setEdProc({ ...edProc, cloro_unidade: ev.target.value as UnidadeCloro })}>
+                  {UNIDADES_CLORO.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={rot} htmlFor="proc-cloro-limite">Avisar cloro acima de ({edProc.cloro_unidade})</label>
+                <input id="proc-cloro-limite" style={campo} inputMode="decimal" value={edProc.cloro_limite_aviso} disabled={!podeEditar}
+                  onChange={(ev) => setEdProc({ ...edProc, cloro_limite_aviso: ev.target.value })} />
+                {erroLimiteCloro(edProc.cloro_limite_aviso) && (
+                  <p className="val-msg val-erro" style={{ margin: "4px 0 0" }}>⛔ {erroLimiteCloro(edProc.cloro_limite_aviso)}</p>
+                )}
+              </div>
+            </div>
+            <p className="detalhe" style={{ margin: "-4px 0 0" }}>
+              A unidade sai no card da coleta de fotos, na frase do cloro do RDO (CVS 6) e no
+              relatório. Valor medido acima do limite só gera aviso — não bloqueia.
+            </p>
             <div>
               <label style={rot}>Modelo do relatório (.docx)</label>
               <p className="detalhe" style={{ margin: "2px 0 6px" }}>
