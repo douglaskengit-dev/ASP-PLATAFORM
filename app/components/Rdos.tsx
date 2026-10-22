@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import { enviarArquivo, enviarJson } from "@/lib/pwa/sync";
 import { valorDoSlot, numeroBr, lerNumero, type RegistroFotosExecucao } from "@/lib/asp/fotos-execucao";
+import { contemDia, periodoDe } from "@/lib/validacao/periodo";
 import {
   CONTRATADA, FUNCOES_RDO, FRASES_RAPIDAS, OPCOES_TEMPO, PERIODOS,
   arquivoEmDia, assinanteAspPadrao, dadosRdoVazio, dataBr, fraseCloro, funcaoDoPerfil, gerarRdoDocx,
@@ -34,7 +35,11 @@ import {
 
 /** Inspeção do projeto, para marcar a cobertura do RDO. */
 interface InspecaoOpcao { id: string; identificacao: string; fase: number; procedimento?: string | null }
-interface Agendamento { tipo: string; data_visita: string | null; data_execucao: string | null; criado_em?: string; equipe: { id: string; nome: string }[] }
+interface Agendamento {
+  tipo: string; data_visita: string | null; data_execucao: string | null; criado_em?: string; equipe: { id: string; nome: string }[];
+  /** Execução de vários dias (Fase 6): último dia. */
+  data_fim?: string | null;
+}
 
 /** O que o sistema já sabe e alimenta as sugestões do formulário. */
 interface Fontes {
@@ -227,14 +232,16 @@ export default function Rdos({
   const nomeInspecao = useCallback((id: string) =>
     inspecoesProjeto.find((i) => i.id === id)?.identificacao || "OS", [inspecoesProjeto]);
 
-  /** Equipe do agendamento de execução do dia (ou o mais recente), com a
+  /** Equipe do agendamento de execução do dia — o dia cai DENTRO do período
+   *  da execução (ou é a data prevista); senão o mais recente —, com a
    *  função do cadastro de cada usuário. */
   function equipeSugerida(f: Fontes, ids: string[], dia: string): MembroRdo[] {
     const vistos = new Set<string>();
     const lista: MembroRdo[] = [];
     for (const id of ids) {
       const execs = (f.agendamentos[id] || []).filter((a) => a.tipo === "execucao");
-      const ag = execs.find((a) => a.data_visita === dia || a.data_execucao === dia)
+      const ag = execs.find((a) => { const p = periodoDe(a); return !!p && contemDia(p, dia); })
+        || execs.find((a) => a.data_execucao === dia)
         || [...execs].sort((a, b) => String(b.data_execucao || b.data_visita || "").localeCompare(String(a.data_execucao || a.data_visita || "")))[0];
       for (const m of ag?.equipe || []) {
         const chave = m.id || m.nome;

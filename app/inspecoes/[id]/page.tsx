@@ -21,7 +21,14 @@
  * aprovar: mesma pessoa que preparou/enviou, arquivo não baixado, OS mudou
  * depois do envio, inspeção sem medição aprovada. Aprovado, o Comercial/
  * Gerência envia a versão ASSINADA (PDF), que vira o documento final.
- * Regras em lib/validacao/aprovacao.ts. */
+ * Regras em lib/validacao/aprovacao.ts.
+ *
+ * Fase 6 (agendamento da execução): a execução tem PERÍODO (início + último
+ * dia); conflitos, fim de semana/feriado e remarcação olham o período todo.
+ * O card da execução avisa checklist de segurança, equipamento do
+ * procedimento fora da lista (um clique adiciona) e equipe sem Coordenador/
+ * Engenheiro; 6 → 7 confirma segurança e água potável; 7 → 8 lista os dias
+ * do período sem RDO. Regras em lib/validacao/agendamento.ts + execucao.ts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -56,6 +63,8 @@ import {
   tipoDaFase, type FormatoRelatorio, type TipoRelatorio,
   avisosAprovacao, avisosAssinatura, CATEGORIAS_REPROVACAO, formatarMotivo, mudancasDesdeEnvio, PERFIS_ASSINADO,
   PERFIS_TROCAR_ASSINADO, resumoValidacao, ROTULOS_REPROVACAO, validarReprovacao,
+  aguaPotavelDesmarcada, avisosExecucao, CHECKLIST_PADRAO, diasSemRdo, execucaoAtiva, nomesEquipamentosProcedimento,
+  periodoDe, periodoMudou, periodosSobrepoem, textoDiasSemRdo, textoPeriodo, equipamentosFaltando,
 } from "@/lib/validacao";
 
 interface Projeto {
@@ -120,6 +129,8 @@ interface Relatorio {
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
   id: string; tipo: string; data_visita: string | null; data_execucao: string | null; hora: string | null;
+  /** Execução de vários dias: último dia (null = um dia só). */
+  data_fim?: string | null;
   equipe: MembroEquipe[]; equipamentos: string[]; checklist: { item: string; ok?: boolean }[];
   criado_em: string;
   /** "Data a definir": pendente, sem data da visita. */
@@ -142,8 +153,9 @@ function nomeFase(n: number) {
 
 // Ferramentas de coleta: só o medidor de sedimento está ativo (COWORK-ASP §2.5).
 const FERRAMENTAS_FUTURAS = ["Ultrassom", "Drone", "MFL"];
-// Itens iniciais do checklist de campo (extensível) — COWORK-ASP §3.2.
-const CHECKLIST_PADRAO = ["NR-33 (espaço confinado)", "NR-10 (elétrica)", "EPIs", "Permissão de Trabalho (PT)"];
+// Itens iniciais do checklist de campo (extensível) — COWORK-ASP §3.2:
+// CHECKLIST_PADRAO, em lib/validacao/agendamento.ts (a Fase 6 avisa os de
+// segurança sem marcar quando a execução começa).
 
 // Botões compactos da barra de Coletas (cabem melhor no card).
 const btnColeta: React.CSSProperties = { padding: "5px 9px", fontSize: 12, lineHeight: 1.2 };
@@ -275,6 +287,9 @@ export default function InspecaoDetalhePage() {
   const [modalAgenda, setModalAgenda] = useState(false);
   const [agendaEditando, setAgendaEditando] = useState<string | null>(null);
   const [agData, setAgData] = useState("");
+  /** Execução de vários dias: último dia (vazio = um dia só). */
+  const [agDataFim, setAgDataFim] = useState("");
+  const [agDataFimOriginal, setAgDataFimOriginal] = useState<string | null>(null);
   const [agDataExec, setAgDataExec] = useState("");
   const [agHora, setAgHora] = useState("");
   const [agEquipeIds, setAgEquipeIds] = useState<string[]>([]);
@@ -300,6 +315,10 @@ export default function InspecaoDetalhePage() {
   const [agServidor, setAgServidor] = useState<ResultadoValidacao>(novoResultado());
   /** Equipamentos do Catálogo — sugestões (datalist) e "seria …?". */
   const [catalogoEquip, setCatalogoEquip] = useState<string[]>([]);
+  /** Catálogo completo (slug + nome): equipamentos previstos no procedimento. */
+  const [catalogoEquipCompleto, setCatalogoEquipCompleto] = useState<{ slug?: string; id?: string; nome?: string }[]>([]);
+  /** Card da execução: adicionando os equipamentos do procedimento. */
+  const [adicionandoEquip, setAdicionandoEquip] = useState<string | null>(null);
   // Renomear: OSs do projeto para checar identificação repetida.
   const [ordensProjeto, setOrdensProjeto] = useState<OSRef[]>([]);
   const [servidorTitulo, setServidorTitulo] = useState<string | null>(null);
@@ -362,6 +381,7 @@ export default function InspecaoDetalhePage() {
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
       setProcedimentos(d.procedimentos || []);
       setCatalogoEquip((d.equipamentos || []).map((e: any) => e.nome).filter(Boolean));
+      setCatalogoEquipCompleto(d.equipamentos || []);
     }).catch(() => {});
   }, [carregar]);
 
@@ -417,6 +437,30 @@ export default function InspecaoDetalhePage() {
   // remarcados (substituídos) só aparecem no histórico da seção.
   const agAtivos = useMemo(() => agendamentos.filter((a) => !a.substituido_em), [agendamentos]);
   const agRemarcados = useMemo(() => agendamentos.filter((a) => a.substituido_em), [agendamentos]);
+
+  // ── Fase 6: execução ─────────────────────────────────────────────────────
+  const hojeExec = hojeBrasil();
+  /** Procedimento da OS no Catálogo (equipamentos previstos, água potável). */
+  const procOS = procedimentos.find((p) => p.codigo === insp?.procedimento) || null;
+  /** Nomes previstos no procedimento; undefined enquanto o Catálogo não chega. */
+  const equipProcOS = useMemo(
+    () => (procedimentos.length && catalogoEquipCompleto.length
+      ? nomesEquipamentosProcedimento(procOS?.equipamentos, catalogoEquipCompleto) : undefined),
+    [procedimentos, catalogoEquipCompleto, procOS]
+  );
+  /** Função de cada usuário ativo (Coordenador/Engenheiro/Técnico). */
+  const funcoesUsuarios = useMemo(
+    () => (usuarios.length ? Object.fromEntries(usuarios.map((u) => [u.id, u.funcao])) : undefined),
+    [usuarios]
+  );
+  /** O agendamento de execução ativo com data e o período dele. */
+  const agExec = useMemo(() => execucaoAtiva(agAtivos), [agAtivos]);
+  const periodoExec = periodoDe(agExec);
+  const avisosExec = avisosExecucao({ ag: agExec, hoje: hojeExec, equipamentosProcedimento: equipProcOS, funcoes: funcoesUsuarios });
+  /** Água potável no procedimento × coletas de água desmarcadas nas fotos. */
+  const avisoAgua = aguaPotavelDesmarcada(procOS?.agua_potavel, fotosExec);
+  /** Dias já passados do período sem RDO desta OS (resumo da seção). */
+  const diasSemRdoAteHoje = rdosInsp ? diasSemRdo(periodoExec, rdosInsp.map((r) => r.data), hojeExec, hojeExec) : [];
 
   /** O tipo do relatório é o da fase: inspeção até a 5, execução da 6 em
    *  diante (a API recusa o outro). */
@@ -605,15 +649,33 @@ export default function InspecaoDetalhePage() {
         ? "Nenhuma medição aprovada nesta OS — o relatório usará a medição mais recente, sem validação de Gerência/Coordenação."
         : "Nenhuma medição registrada nesta OS. Se o procedimento não tem medição, pode seguir.");
     }
+    //  · Agendamento de Execução → Execução (6 → 7): checklist de segurança
+    //    sem marcar com a execução começando; água potável desmarcada.
+    if (insp?.fase === 6 && opcao.acao === "avancar") {
+      titulo = "Pendências do Agendamento de Execução";
+      if (avisosExec.seguranca.length) {
+        blocos.push(`Checklist de segurança do agendamento sem marcar (a execução ${periodoExec && periodoExec.inicio < hojeExec ? "já começou" : "começa hoje"}):\n• ${avisosExec.seguranca.join("\n• ")}`);
+      }
+      if (avisoAgua) blocos.push(avisoAgua);
+    }
     if (insp?.fase === 7 && opcao.acao === "avancar") {
       titulo = "Pendências da Execução";
       const pend = fotosExec ? pendenciasColeta(fotosExec) : [];
-      const semRdo = rdosInsp !== null && rdosInsp.length === 0;
       if (pend.length > 0) {
         blocos.push(`Coleta de fotos da execução incompleta (${pend.length} pendência(s)):\n• ${pend.join("\n• ")}\n` +
           "As fotos que faltam não entram no Relatório de Execução.");
       }
-      if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta OS.");
+      // Cada dia do período de execução sem RDO desta OS (fim de semana e
+      // feriado vêm marcados — pode ter havido trabalho). Sem período, vale
+      // o aviso antigo: nenhum RDO.
+      if (rdosInsp !== null) {
+        const faltam = diasSemRdo(periodoExec, rdosInsp.map((r) => r.data), hojeExec);
+        if (periodoExec && faltam.length > 0) {
+          blocos.push(`Dia(s) da execução (${textoPeriodo(periodoExec)}) sem RDO cobrindo esta OS:\n• ${textoDiasSemRdo(faltam).split(", ").join("\n• ")}`);
+        } else if (!periodoExec && rdosInsp.length === 0) {
+          blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta OS.");
+        }
+      }
     }
     //  · Relatório → Aprovação (4 → 5, 8 → 9) sem relatório em aprovação: a
     //    Gerência não teria o que aprovar.
@@ -1248,7 +1310,7 @@ export default function InspecaoDetalhePage() {
   function abrirAgenda() {
     setAgendaEditando(null);
     setAgTipo(bloco);
-    setAgData(""); setAgHora(""); setAgDataExec("");
+    setAgData(""); setAgHora(""); setAgDataExec(""); setAgDataFim(""); setAgDataFimOriginal(null);
     setAgADefinir(false); setAgLembrar(""); setAgDataOriginal(null);
     setAgEquipeIds([]); setAgEquipeGravada([]); setAgEquipamentos([]);
     setAgChecklist(CHECKLIST_PADRAO.map((item) => ({ item, ok: false })));
@@ -1259,6 +1321,7 @@ export default function InspecaoDetalhePage() {
     setAgendaEditando(a.id);
     setAgTipo(a.tipo === "execucao" ? "execucao" : "inspecao");
     setAgData(a.data_visita || ""); setAgHora(a.hora || ""); setAgDataExec(a.data_execucao || "");
+    setAgDataFim(a.data_fim || ""); setAgDataFimOriginal(a.data_fim || null);
     setAgADefinir(!!a.a_definir); setAgLembrar(a.lembrar_em || ""); setAgDataOriginal(a.data_visita);
     setAgEquipeIds((a.equipe || []).map((m) => m.id));
     setAgEquipeGravada(a.equipe || []);
@@ -1278,17 +1341,19 @@ export default function InspecaoDetalhePage() {
   // outras OSs na data escolhida. Debounce e descarte de resposta fora de ordem.
   const seqVerif = useRef(0);
   const dataVerif = agADefinir ? "" : agData;
+  // Execução de vários dias: os conflitos olham o período todo.
+  const fimVerif = agADefinir || agTipo !== "execucao" || !agDataFim || agDataFim <= agData ? "" : agDataFim;
   useEffect(() => {
     if (!modalAgenda) return;
     const n = ++seqVerif.current;
     const t = setTimeout(() => {
-      fetch(`/api/agendamentos/verificar?${new URLSearchParams({ inspecaoId: id, data: dataVerif })}`)
+      fetch(`/api/agendamentos/verificar?${new URLSearchParams({ inspecaoId: id, data: dataVerif, ...(fimVerif ? { fim: fimVerif } : {}) })}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => { if (d && n === seqVerif.current) setAgCtx(d); })
         .catch(() => {});
     }, 300);
     return () => clearTimeout(t);
-  }, [modalAgenda, id, dataVerif]);
+  }, [modalAgenda, id, dataVerif, fimVerif]);
 
   /** Equipe escolhida: usuários ativos e, na edição, quem já estava gravado
    *  (mesmo inativo — aí vira erro para tirar, em vez de sumir calado). */
@@ -1299,6 +1364,7 @@ export default function InspecaoDetalhePage() {
 
   const dadosAgenda = {
     tipo: agTipo, aDefinir: agADefinir, dataVisita: agADefinir ? "" : agData, hora: agHora,
+    dataFim: agADefinir || agTipo !== "execucao" ? "" : agDataFim,
     dataExecucao: agDataExec, lembrarEm: agADefinir ? agLembrar : "",
     equipe: agEquipe, equipamentos: agEquipamentos, checklist: agChecklist,
   };
@@ -1307,15 +1373,28 @@ export default function InspecaoDetalhePage() {
     inspecaoId: id,
     dataAbertura: agCtx.dataAbertura ?? insp?.projeto?.data_abertura ?? null,
     local: agCtx.local,
-    original: agendaEditando ? { id: agendaEditando, data_visita: agDataOriginal } : null,
+    original: agendaEditando ? { id: agendaEditando, data_visita: agDataOriginal, data_fim: agDataFimOriginal } : null,
     // Sem resposta do servidor ainda, vale o que a página já tem.
     daOS: agCtx.daOS || agAtivos.map((a) => ({ ...a, inspecao_id: id })),
-    noDia: (agCtx.noDia || []).filter((a) => !dataVerif || a.data_visita === dataVerif),
+    // Resposta atrasada (de outra data/período) não conta.
+    noDia: (agCtx.noDia || []).filter((a) => {
+      const p = periodoDe(a);
+      return !dataVerif || (!!p && periodosSobrepoem(p, { inicio: dataVerif, fim: fimVerif || dataVerif }));
+    }),
     usuariosAtivos: usuarios.length ? usuarios.map((u) => u.id) : undefined,
     catalogo: agCtx.catalogo || catalogoEquip,
+    relatoriosInspecao: agCtx.relatoriosInspecao
+      || relatorios.filter((r) => r.tipo === "inspecao").map((r) => ({ versao: r.versao, status: r.status })),
+    funcoes: agCtx.funcoes || funcoesUsuarios,
+    equipamentosProcedimento: agCtx.equipamentosProcedimento || equipProcOS,
+    procedimento: agCtx.procedimento ?? insp?.procedimento ?? null,
   };
   const resultadoAgenda = mesclar(validarAgendamento(dadosAgenda, ctxAgenda), agServidor);
   const substituidosAgenda = agendamentosSubstituidos(dadosAgenda, ctxAgenda);
+  /** Equipamentos do procedimento fora da lista do modal (execução). */
+  const faltamNoModal = agTipo === "execucao" ? equipamentosFaltando(ctxAgenda.equipamentosProcedimento, agEquipamentos) : [];
+  const remarcandoAgenda = !!agendaEditando && !!agDataOriginal && !agADefinir
+    && periodoMudou({ data_visita: agDataOriginal, data_fim: agDataFimOriginal }, { data_visita: agData, data_fim: dadosAgenda.dataFim || null });
 
   /** Qualquer mudança no modal invalida a resposta anterior da API. */
   function mexeuAgenda() {
@@ -1375,6 +1454,7 @@ export default function InspecaoDetalhePage() {
       const payload = {
         aDefinir: agADefinir,
         dataVisita: agADefinir ? null : agData,
+        dataFim: agADefinir || agTipo !== "execucao" ? null : agDataFim || null,
         lembrarEm: agADefinir ? agLembrar || null : null,
         dataExecucao: agDataExec || null,
         hora: agADefinir ? null : agHora || null,
@@ -1397,6 +1477,23 @@ export default function InspecaoDetalhePage() {
       else carregar();
     } finally {
       setSalvandoAgenda(false);
+    }
+  }
+
+  /** Card da execução: um clique põe no agendamento os equipamentos do
+   *  procedimento que faltam (PATCH só da lista — mesmas regras da API). */
+  async function adicionarEquipamentosAoAgendamento(a: Agendamento, nomes: string[]) {
+    if (!nomes.length || adicionandoEquip) return;
+    setAdicionandoEquip(a.id);
+    setErro(null);
+    try {
+      const res = await enviarJson(`/api/agendamentos/${a.id}`, "PATCH",
+        { equipamentos: [...(a.equipamentos || []), ...nomes] }, "Agendamento");
+      if (res.queued) { alert("Sem conexão — a lista será atualizada ao reconectar."); return; }
+      if (!res.ok) { setErro(res.data?.erro || "Não foi possível adicionar os equipamentos."); return; }
+      carregar();
+    } finally {
+      setAdicionandoEquip(null);
     }
   }
 
@@ -1460,6 +1557,8 @@ export default function InspecaoDetalhePage() {
    *  agendamento próprio mostra a data prevista, se houver. */
   const quandoAgenda = (tipo: "inspecao" | "execucao") => {
     const a = agAtivos.find((x) => x.tipo === tipo);
+    const p = periodoDe(a);
+    if (a && p && p.fim !== p.inicio) return `${textoPeriodo(p)}${a.hora ? ` ${a.hora.slice(0, 5)}` : ""}`;
     if (a?.data_visita) return `${formatarData(a.data_visita).slice(0, 5)}${a.hora ? ` ${a.hora.slice(0, 5)}` : ""}`;
     if (a?.a_definir) return "a definir";
     const prevista = tipo === "execucao" && agAtivos.find((x) => x.data_execucao)?.data_execucao;
@@ -1773,7 +1872,9 @@ export default function InspecaoDetalhePage() {
               <div key={a.id} style={{ borderLeft: `3px solid ${a.a_definir ? "#c2410c" : "var(--primaria)"}`, paddingLeft: 12, marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                   <div style={{ color: "var(--texto)", fontWeight: 700 }}>
-                    📅 {a.data_visita ? formatarData(a.data_visita) : a.a_definir ? "Data a definir" : "sem data"}{a.hora ? ` às ${a.hora}` : ""}
+                    📅 {a.data_visita
+                      ? (a.data_fim && a.data_fim > a.data_visita ? `${formatarData(a.data_visita)} a ${formatarData(a.data_fim)}` : formatarData(a.data_visita))
+                      : a.a_definir ? "Data a definir" : "sem data"}{a.hora ? ` às ${a.hora}` : ""}
                     <span className="detalhe" style={{ margin: "0 0 0 8px", fontWeight: 400 }}>({rotuloEtapa(a.tipo)})</span>
                     {a.a_definir && (
                       <span className={`detalhe${a.lembrar_em && a.lembrar_em <= hojeBrasil() ? " alerta" : ""}`} style={{ margin: 0, display: "block", fontWeight: 400 }}>
@@ -1798,6 +1899,18 @@ export default function InspecaoDetalhePage() {
                     {a.checklist.map((i) => `${i.ok ? "✓" : "✗"} ${i.item}`).join(" · ")}
                   </div>
                 )}
+                {/* Fase 6: avisos da execução (não impedem nada). */}
+                {agExec?.id === a.id && avisosExec.mensagens.length > 0 && (
+                  <div className="val-campo" aria-live="polite" style={{ marginTop: 4 }}>
+                    {avisosExec.mensagens.map((m) => <p key={m} className="val-msg val-aviso">⚠️ {m}</p>)}
+                    {podeAgenda && avisosExec.faltamEquipamentos.length > 0 && (
+                      <button type="button" className="val-acao" disabled={adicionandoEquip === a.id}
+                        onClick={() => adicionarEquipamentosAoAgendamento(a, avisosExec.faltamEquipamentos)}>
+                        {adicionandoEquip === a.id ? "Adicionando…" : `Adicionar ${avisosExec.faltamEquipamentos.join(", ")}`}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))
           )}
@@ -1809,8 +1922,8 @@ export default function InspecaoDetalhePage() {
               </summary>
               {agRemarcados.map((a) => {
                 const novo = agendamentos.find((x) => x.id === a.substituido_por);
-                const de = a.data_visita ? dataCurta(a.data_visita) : "data a definir";
-                const para = novo?.data_visita ? dataCurta(novo.data_visita) : novo?.a_definir ? "data a definir" : "—";
+                const de = a.data_visita ? textoPeriodo(periodoDe(a)) : "data a definir";
+                const para = novo?.data_visita ? textoPeriodo(periodoDe(novo)) : novo?.a_definir ? "data a definir" : "—";
                 return (
                   <div key={a.id} className="detalhe" style={{ display: "flex", justifyContent: "space-between", gap: 8, margin: "6px 0 0", paddingLeft: 12, borderLeft: "3px solid var(--borda)" }}>
                     <span>
@@ -1849,7 +1962,7 @@ export default function InspecaoDetalhePage() {
           aberta={secoes.aberta("fotos")} onAlternar={() => secoes.alternar("fotos")}
           resumo={resumoFotos}>
           <ColetaFotosExecucao inspecaoId={id} onMudar={setFotosExec} embutido
-            onLocais={setFotosLocais} onErro={setErroFotos} />
+            onLocais={setFotosLocais} onErro={setErroFotos} aguaPotavel={!!procOS?.agua_potavel} />
         </SecaoRecolhivel>
       )}
 
@@ -1860,7 +1973,15 @@ export default function InspecaoDetalhePage() {
           aberta={secoes.aberta("rdos")} onAlternar={() => secoes.alternar("rdos")}
           resumo={erroRdos ? <span className="alerta">Erro — abra a seção</span>
             : rdosInsp === null ? "Carregando…"
-            : rdosInsp.length === 0 && insp.fase >= 7 ? <span className="alerta">Nenhum RDO</span>
+            : rdosInsp.length === 0 && insp.fase >= 7 && !periodoExec ? <span className="alerta">Nenhum RDO</span>
+            : diasSemRdoAteHoje.length > 0 ? (
+              <>
+                {rdosInsp.length ? resumoRdos(rdosInsp) : "Nenhum RDO"} ·{" "}
+                <span className="alerta" title={textoDiasSemRdo(diasSemRdoAteHoje)}>
+                  Dias sem RDO: {diasSemRdoAteHoje.map((d) => dataCurta(d.dia)).join(", ")}
+                </span>
+              </>
+            )
             : resumoRdos(rdosInsp)}
           acoesCabecalho={podeColeta && <button className="btn-azul" onClick={() => setPedidoNovoRdo((n) => n + 1)}>+ Novo RDO</button>}>
           <Rdos projetoId={insp.projeto.id} inspecaoId={id}
@@ -2379,7 +2500,7 @@ export default function InspecaoDetalhePage() {
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
                 <div>
-                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita *</label>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>{agTipo === "execucao" ? "Início da execução *" : "Data da visita *"}</label>
                   <input type="date" min={agendaEditando && agDataOriginal && agDataOriginal < ctxAgenda.hoje ? undefined : ctxAgenda.hoje}
                     className={(agTentou || !!agData) && resultadoAgenda.erros.dataVisita ? "val-invalido" : undefined}
                     style={inputStyle} value={agData} onChange={(e) => { setAgData(e.target.value); mexeuAgenda(); }} />
@@ -2390,6 +2511,18 @@ export default function InspecaoDetalhePage() {
                   <input type="time" style={inputStyle} value={agHora} onChange={(e) => { setAgHora(e.target.value); mexeuAgenda(); }} />
                   <MensagensCampo r={resultadoAgenda} campo="hora" />
                 </div>
+                {/* Execução de vários dias: o período todo entra em conflitos,
+                    agenda, e-mail/.ics e no controle de RDO por dia. */}
+                {agTipo === "execucao" && (
+                  <div>
+                    <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Último dia da execução</label>
+                    <input type="date" min={agData || undefined}
+                      className={resultadoAgenda.erros.dataFim ? "val-invalido" : undefined}
+                      style={inputStyle} value={agDataFim} onChange={(e) => { setAgDataFim(e.target.value); mexeuAgenda(); }} />
+                    <MensagensCampo r={resultadoAgenda} campo="dataFim" />
+                    <small style={{ color: "var(--cinza)" }}>Em branco = um dia só.</small>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2455,6 +2588,13 @@ export default function InspecaoDetalhePage() {
                 </div>
               )}
               <MensagensCampo r={resultadoAgenda} campo="equipamentos">
+                {/* Previstos no procedimento e fora da lista: um clique adiciona. */}
+                {faltamNoModal.length > 0 && (
+                  <button type="button" className="val-acao"
+                    onClick={() => { setAgEquipamentos((p) => [...p, ...faltamNoModal]); mexeuAgenda(); }}>
+                    Adicionar {faltamNoModal.join(", ")}
+                  </button>
+                )}
                 {/* Fora do Catálogo, mas parecido com um item dele: um clique troca. */}
                 {agEquipamentos.map((eq) => {
                   const s = sugestaoCatalogo(eq, ctxAgenda.catalogo);
@@ -2494,7 +2634,7 @@ export default function InspecaoDetalhePage() {
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button className="btn-azul btn-sec" onClick={() => setModalAgenda(false)} disabled={salvandoAgenda}>Cancelar</button>
               <button className="btn-azul" onClick={salvarAgenda} disabled={salvandoAgenda || (agTentou && temErros(resultadoAgenda))}>
-                {salvandoAgenda ? "Salvando…" : substituidosAgenda.length > 0 || (agendaEditando && agDataOriginal && !agADefinir && agData !== agDataOriginal) ? "Remarcar" : "Salvar agendamento"}
+                {salvandoAgenda ? "Salvando…" : substituidosAgenda.length > 0 || remarcandoAgenda ? "Remarcar" : "Salvar agendamento"}
               </button>
             </div>
           </div>

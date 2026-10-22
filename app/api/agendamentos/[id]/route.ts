@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import {
-  contextoAgendamento, limparDados, marcarSubstituidos, notificarADefinir, notificarDesmarcacao, notificarEquipe,
-  PERFIS_AGENDA, resolverAvisoADefinir,
+  contextoAgendamento, erroGravacao, ligarSubstituidos, limparDados, notificarADefinir, notificarDesmarcacao, notificarEquipe,
+  PERFIS_AGENDA, resolverAvisoADefinir, tirarDeCena, voltarACena,
 } from "@/lib/asp/agendamento-api";
-import { primeiroErro, ROTULOS_AGENDAMENTO, temErros, validarAgendamento } from "@/lib/validacao";
+import { periodoMudou, primeiroErro, ROTULOS_AGENDAMENTO, temErros, validarAgendamento } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -18,7 +18,10 @@ export const runtime = "nodejs";
  *  do POST: nasce uma linha nova (a atual) e esta fica substituída, no
  *  histórico ("Remarcado de … para …"); a equipe recebe o aviso de
  *  remarcação. Dar data a um "a definir" não é remarcação: a linha vira
- *  agendamento normal e o aviso pendente é resolvido. */
+ *  agendamento normal e o aviso pendente é resolvido.
+ *
+ *  Fase 6: mudar o INÍCIO ou o FIM do período da execução também é
+ *  remarcação (a equipe precisa saber dos dias novos). */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
@@ -38,6 +41,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     tipo: atual.tipo,
     aDefinir: de("aDefinir", atual.a_definir),
     dataVisita: de("dataVisita", atual.data_visita),
+    dataFim: de("dataFim", atual.data_fim),
     hora: de("hora", atual.hora),
     dataExecucao: de("dataExecucao", atual.data_execucao),
     lembrarEm: de("lembrarEm", atual.lembrar_em),
@@ -47,8 +51,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   });
 
   const { ctx, info } = await contextoAgendamento({
-    inspecaoId: atual.inspecao_id, dataVisita: dados.dataVisita,
-    original: { id: atual.id, data_visita: atual.data_visita },
+    inspecaoId: atual.inspecao_id, dataVisita: dados.dataVisita, dataFim: dados.dataFim,
+    original: { id: atual.id, data_visita: atual.data_visita, data_fim: atual.data_fim || null },
   });
   if (!info) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
   dados.equipamentos = limparDados({ equipamentos: dados.equipamentos }, ctx.catalogo).equipamentos;
@@ -63,6 +67,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const campos = {
     data_visita: dados.aDefinir ? null : dados.dataVisita,
+    data_fim: dados.aDefinir || atual.tipo !== "execucao" ? null : dados.dataFim || null,
     a_definir: !!dados.aDefinir,
     lembrar_em: dados.aDefinir ? dados.lembrarEm || null : null,
     data_execucao: dados.dataExecucao || null,
@@ -72,27 +77,38 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     checklist: dados.checklist,
   };
   const supabase = getSupabaseRouteClient();
-  const remarcacao = !!atual.data_visita && atual.data_visita !== campos.data_visita;
+  const remarcacao = periodoMudou(atual, campos);
 
   if (remarcacao) {
+    // A atual sai de cena antes (uma execução ativa por OS); se o insert
+    // falhar, volta.
+    const tirados = await tirarDeCena(supabase, [atual.id]);
+    if (tirados.erro) return NextResponse.json({ erro: `A data anterior não pôde sair de cena: ${tirados.erro}` }, { status: 500 });
+    if (tirados.ids.length === 0) {
+      return NextResponse.json({ erro: "Este agendamento acabou de ser remarcado por outra pessoa — recarregue a página." }, { status: 409 });
+    }
     const { data: novo, error } = await supabase
       .from("gp_agendamentos")
       .insert({ ...campos, inspecao_id: atual.inspecao_id, tipo: atual.tipo, criado_por: profile.id })
       .select("*")
       .single();
-    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-    const erroSub = await marcarSubstituidos(supabase, [atual.id], novo.id);
-    if (erroSub) return NextResponse.json({ erro: `Remarcado, mas a data anterior não saiu de cena: ${erroSub}` }, { status: 500 });
+    if (error) {
+      await voltarACena(supabase, tirados.ids);
+      const e = erroGravacao(error);
+      return NextResponse.json({ erro: e.erro }, { status: e.status });
+    }
+    const erroSub = await ligarSubstituidos(supabase, tirados.ids, novo.id);
+    if (erroSub) return NextResponse.json({ erro: `Remarcado, mas o histórico não foi ligado: ${erroSub}` }, { status: 500 });
     let email: Record<string, unknown> = { destinatarios: 0, ignorado: true, motivo: "data a definir" };
     if (novo.a_definir) {
       await notificarADefinir({ ag: novo, info, autorId: profile.id });
       await notificarDesmarcacao({ anterior: atual, info, autorId: profile.id });
     } else {
-      email = await notificarEquipe({ ag: novo, info, autorId: profile.id, remarcadoDe: atual.data_visita });
+      email = await notificarEquipe({ ag: novo, info, autorId: profile.id, remarcadoDe: atual });
     }
     return NextResponse.json({
       ok: true, agendamento: novo, avisos: resultado.avisos, email,
-      substituidos: [{ id: atual.id, data_visita: atual.data_visita }],
+      substituidos: [{ id: atual.id, data_visita: atual.data_visita, data_fim: atual.data_fim || null }],
     });
   }
 
@@ -102,7 +118,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     .eq("id", params.id)
     .select("*")
     .single();
-  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  if (error) {
+    const e = erroGravacao(error);
+    return NextResponse.json({ erro: e.erro }, { status: e.status });
+  }
 
   // "A definir" ganhou data: vira agendamento normal — resolve o aviso e
   // avisa a equipe como num agendamento novo.

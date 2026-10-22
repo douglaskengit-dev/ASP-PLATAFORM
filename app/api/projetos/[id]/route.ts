@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data: inspecoesRaw } = await supabase
     .from("gp_inspecoes")
-    .select("*, agendamentos:gp_agendamentos(data_visita, hora, tipo, a_definir, substituido_em)")
+    .select("*, agendamentos:gp_agendamentos(data_visita, data_fim, hora, tipo, a_definir, substituido_em)")
     .eq("projeto_id", params.id)
     .is("excluido_em", null)
     .order("criado_em", { ascending: true });

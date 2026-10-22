@@ -8,15 +8,20 @@ export const runtime = "nodejs";
  *  digita (lib/validacao/agendamento.ts): agendamentos ativos desta OS, os de
  *  outras OSs na data escolhida (conflito de equipe/equipamento), abertura
  *  do projeto, local e nomes do Catálogo. Só leitura.
- *  GET ?inspecaoId=…&data=AAAA-MM-DD */
+ *  Fase 6: &fim= (execução de vários dias) — conflitos em qualquer dia do
+ *  período; vêm também relatórios de inspeção, funções da equipe e os
+ *  equipamentos do procedimento.
+ *  GET ?inspecaoId=…&data=AAAA-MM-DD[&fim=AAAA-MM-DD] */
 export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   const inspecaoId = req.nextUrl.searchParams.get("inspecaoId");
   if (!inspecaoId) return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   const data = req.nextUrl.searchParams.get("data") || "";
+  const fim = req.nextUrl.searchParams.get("fim") || "";
+  const iso = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
 
-  const { ctx, info } = await contextoAgendamento({ inspecaoId, dataVisita: /^\d{4}-\d{2}-\d{2}$/.test(data) ? data : null });
+  const { ctx, info } = await contextoAgendamento({ inspecaoId, dataVisita: iso(data), dataFim: iso(fim) });
   if (!info) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
   // usuariosAtivos fica de fora: a tela já lista só os ativos.
   const resto: Partial<typeof ctx> = { ...ctx };

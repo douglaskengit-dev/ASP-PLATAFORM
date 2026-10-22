@@ -71,8 +71,11 @@ function Miniatura({ src, tamanho, onRemover, naFila }: {
   );
 }
 
-export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onLocais, onErro }: {
+export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onLocais, onErro, aguaPotavel }: {
   inspecaoId: string;
+  /** Procedimento da OS é de água potável (Catálogo): coleta de água
+   *  desmarcada vira aviso (Fase 6) — não trava nada. */
+  aguaPotavel?: boolean;
   /** Avisa a página a cada mudança — o aviso de fase e o relatório usam. */
   onMudar?: (r: RegistroFotosExecucao) => void;
   /** Sem card nem título próprios (a SecaoRecolhivel já os dá). */
@@ -297,6 +300,11 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
               onChange={(e) => marcar(secao.flag!, e.target.checked)} />
             <span>Necessário (água potável)</span>
           </label>
+        )}
+        {secao.flag && aguaPotavel && !exigida && (
+          <p className="val-msg val-aviso" style={{ margin: "6px 0 0" }}>
+            ⚠️ O procedimento desta OS é de água potável, mas esta coleta está desmarcada — as fotos e análises não serão cobradas nem entram no relatório.
+          </p>
         )}
         {!exigida ? (
           <p className="detalhe" style={{ margin: "6px 0 0" }}>

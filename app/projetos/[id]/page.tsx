@@ -17,6 +17,7 @@ import FormularioProjeto from "@/app/components/FormularioProjeto";
 import Rdos from "@/app/components/Rdos";
 import { resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
+import { periodoDe, textoPeriodoLongo } from "@/lib/validacao/periodo";
 import {
   identificacaoRepetida, mesclar, novoResultado, ResultadoValidacao, ROTULOS_OS, temErros, validarOS,
 } from "@/lib/validacao";
@@ -44,7 +45,7 @@ interface Inspecao {
   ferramenta_coleta: string;
   /** Cadastro do tanque: dimensões, capacidade e material. */
   tanque?: Tanque | null;
-  agendamentos?: { data_visita: string | null; hora: string | null; tipo: string; a_definir?: boolean; substituido_em?: string | null }[];
+  agendamentos?: { data_visita: string | null; data_fim?: string | null; hora: string | null; tipo: string; a_definir?: boolean; substituido_em?: string | null }[];
   ultima_acao?: {
     acao: string; fase_de: number; fase_para: number;
     data_autenticacao: string | null; criado_em: string;
@@ -53,15 +54,15 @@ interface Inspecao {
 }
 
 /** Próxima visita entre os agendamentos ATIVOS (remarcados ficam de fora);
- * sem nenhuma data, "data a definir" se houver um pendente. */
+ * sem nenhuma data, "data a definir" se houver um pendente. Execução de
+ * vários dias em andamento conta como a próxima (o período ainda vale). */
 function proximaData(ins: Inspecao): string | null {
   const ativos = (ins.agendamentos || []).filter((a) => !a.substituido_em);
   const datas = ativos.filter((a) => a.data_visita).sort((a, b) => (a.data_visita! < b.data_visita! ? -1 : 1));
   if (datas.length === 0) return ativos.some((a) => a.a_definir) ? "data a definir" : null;
   const hoje = new Date().toISOString().slice(0, 10);
-  const futura = datas.find((a) => (a.data_visita || "") >= hoje) || datas[datas.length - 1];
-  const d = new Date(`${futura.data_visita}T00:00:00`).toLocaleDateString("pt-BR");
-  return `${d}${futura.hora ? " às " + futura.hora : ""}`;
+  const futura = datas.find((a) => (periodoDe(a)?.fim || "") >= hoje) || datas[datas.length - 1];
+  return `${textoPeriodoLongo(periodoDe(futura))}${futura.hora ? " às " + futura.hora : ""}`;
 }
 
 export default function ProjetoDetalhePage() {
