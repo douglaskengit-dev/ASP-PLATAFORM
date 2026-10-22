@@ -15,7 +15,8 @@ interface AcaoBody {
   acao: AcaoFase;
   /** Reprovação: descrição do ajuste (≥ 15 caracteres, com sentido). */
   motivo?: string;
-  /** Reprovação: categoria (lib/validacao/aprovacao.ts CATEGORIAS_REPROVACAO). */
+  /** Reprovação: categoria (lib/validacao/aprovacao.ts CATEGORIAS_REPROVACAO;
+   *  "laudo" só no relatório de execução). */
   categoria?: string;
   /** Aprovar/reprovar: o relatório em aprovação mostrado na tela. */
   relatorioId?: string;
@@ -69,7 +70,8 @@ async function respostaJaAvaliado(inspecaoId: string, relatorioId?: string | nul
  *  · Idempotente: a Idempotency-Key (fila offline) fica no histórico; o
  *    reenvio devolve o resultado já aplicado.
  *  · ⛔ Aprovar/reprovar exige um relatório do tipo da fase em aprovação.
- *  · ⛔ Reprovar exige categoria + descrição com sentido (≥ 15 caracteres).
+ *  · ⛔ Reprovar exige categoria + descrição com sentido (≥ 15 caracteres);
+ *    a categoria "Laudo/Laboratório" só no relatório de execução (fase 9).
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
@@ -118,8 +120,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const motivo = normalizarEspacos(body.motivo);
   const categoria = body.acao === "reprovar" ? String(body.categoria || "") : null;
+  // Tipo do relatório avaliado nesta fase (5 = inspeção, 9 = execução).
+  const tipo = tipoDaFase(faseAtual);
   if (opcao.exigeMotivo) {
-    const v = validarReprovacao({ categoria, descricao: motivo });
+    // "Laudo/Laboratório" só vale para o relatório de execução (fase 9).
+    const v = validarReprovacao({ categoria, descricao: motivo, tipo });
     if (temErros(v)) {
       return NextResponse.json({ erro: primeiroErro(v, ROTULOS_REPROVACAO), erros: v.erros }, { status: 400 });
     }
@@ -128,7 +133,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const novaFase = Math.min(Math.max(opcao.destino, 2), ULTIMA_FASE);
   const agora = new Date().toISOString();
   let alvo: { id: string; versao: number } | null = null;
-  const tipo = tipoDaFase(faseAtual);
 
   // ── 1) Aprovar/reprovar: trava o RELATÓRIO (em_aprovacao → aprovado/ajustar)
   if (body.acao === "aprovar" || body.acao === "reprovar") {

@@ -5,7 +5,7 @@
  * (⛔) bloqueiam e a API repete a checagem; avisos (⚠️) só alertam. Cada
  * fase do fluxo ganha seu arquivo de regras (projeto.ts = Fase 1;
  * ordemServico.ts + agendamento.ts = Fase 2; medicao.ts + coleta.ts +
- * checklist.ts = Fase 3; relatorio.ts = Fase 4; aprovacao.ts = Fases 5/9;
+ * checklist.ts = Fase 3; relatorio.ts = Fase 4; aprovacao.ts = Fases 5/9 (+ aprovacaoExecucao.ts, Fase 9);
  * periodo.ts + execucao.ts = Fase 6; fotosExecucao.ts + as regras do RDO
  * em lib/asp/rdo.ts = Fase 7; relatorioExecucao.ts = Fase 8). */
 export * from "./resultado";
@@ -26,3 +26,4 @@ export * from "./relatorio";
 export * from "./aprovacao";
 export * from "./fotosExecucao";
 export * from "./relatorioExecucao";
+export * from "./aprovacaoExecucao";
