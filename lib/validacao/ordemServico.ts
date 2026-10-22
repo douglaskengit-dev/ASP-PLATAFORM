@@ -32,8 +32,13 @@ export interface ContextoOS {
   excluirId?: string | null;
   /** OSs do projeto, ativas e da lixeira (`excluido`). */
   ordens?: OSRef[];
-  /** Códigos do Catálogo. undefined = não checado. */
+  /** Códigos do Catálogo (ativos e desativados). undefined = não checado. */
   procedimentos?: string[];
+  /** Códigos desativados no Catálogo: não podem ser escolhidos numa OS nova
+   *  nem numa troca — só ficam aceitos como o procedimento ATUAL da OS. */
+  procedimentosInativos?: string[];
+  /** Procedimento que a OS já tem (edição). */
+  procedimentoAtual?: string | null;
   /** false = procedimento não é exigido (edição só do nome). */
   exigirProcedimento?: boolean;
 }
@@ -131,6 +136,8 @@ export function validarOS(d: DadosOS, ctx: ContextoOS = {}): ResultadoValidacao 
     if (!proc) addErro(r, "procedimento", "Escolha o procedimento (Catálogo).");
     else if (ctx.procedimentos && !ctx.procedimentos.includes(proc)) {
       addErro(r, "procedimento", `“${proc}” não está no Catálogo.`);
+    } else if ((ctx.procedimentosInativos || []).includes(proc) && proc !== (ctx.procedimentoAtual || "").trim()) {
+      addErro(r, "procedimento", `“${proc}” está desativado no Catálogo — escolha outro procedimento.`);
     }
   }
 

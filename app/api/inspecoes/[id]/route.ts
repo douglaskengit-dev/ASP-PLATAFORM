@@ -3,7 +3,7 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { erroDoTanque, normalizarTanque } from "@/lib/asp/tanque";
-import { codigosDoCatalogo, conflitoAoRestaurarOS, ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
+import { codigosDoCatalogoComStatus, conflitoAoRestaurarOS, ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
 import { normalizarEspacos, primeiroErro, ROTULOS_OS, temErros } from "@/lib/validacao";
 
 import { garantirOsAberta, projetoDaOS, recalcularConclusaoProjeto } from "@/lib/asp/os-encerrada";
@@ -35,8 +35,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     const proc = body.procedimento.trim();
     if (!proc) return NextResponse.json({ erro: "Procedimento: escolha um procedimento do Catálogo." }, { status: 400 });
-    if (!(await codigosDoCatalogo()).includes(proc)) {
+    const catalogo = await codigosDoCatalogoComStatus();
+    if (!catalogo.todos.includes(proc)) {
       return NextResponse.json({ erro: `Procedimento “${proc}” não está no Catálogo.` }, { status: 400 });
+    }
+    // Desativado no Catálogo: a OS que JÁ o tem continua com ele; escolhê-lo
+    // agora (troca) não pode.
+    if (catalogo.inativos.includes(proc)) {
+      const { data: atualOS } = await getSupabaseAdmin().from("gp_inspecoes").select("procedimento").eq("id", params.id).maybeSingle();
+      if ((atualOS as any)?.procedimento !== proc) {
+        return NextResponse.json({ erro: `Procedimento “${proc}” está desativado no Catálogo — escolha outro.` }, { status: 400 });
+      }
     }
     const { data, error } = await getSupabaseAdmin()
       .from("gp_inspecoes")

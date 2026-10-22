@@ -1,37 +1,42 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual } from "@/lib/supabase/route";
-import { uploadArquivo, baixarArquivo, removerArquivos } from "@/lib/processos/arquivos";
+import { uploadArquivo, baixarArquivo } from "@/lib/processos/arquivos";
+import { examinarFotoCatalogo, PERFIS_EDICAO_CATALOGO, removerSeSemUso } from "@/lib/asp/catalogo-api";
+import { caminhoFotoCatalogoValido, FOTO_CATALOGO_MAX_BYTES, PASTA_FOTOS_CATALOGO } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-const PERFIS_EDICAO = ["admin", "operacoes", "gerencia"];
-
-/** Envia a foto de um equipamento. Devolve o caminho no storage, que fica
- *  guardado no jsonb `fotos` do equipamento. */
+/** Envia a foto de um equipamento. Confere pelos BYTES (JPEG ou PNG — o
+ *  navegador já converteu WebP/GIF/HEIC — até 10 MB) e devolve o caminho e
+ *  o SHA-256. A foto só passa a fazer parte do equipamento quando ele é
+ *  salvo; o PATCH confere de novo. Caminho com uuid (não o slug): a pasta
+ *  não depende de nada que o usuário digita. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS_EDICAO.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Sem permissão para editar o catálogo." }, { status: 403 });
+  if (!PERFIS_EDICAO_CATALOGO.includes(profile.perfil)) {
+    return NextResponse.json({ erro: "Sem permissão para editar o Catálogo." }, { status: 403 });
   }
-  const form = await req.formData();
-  const f = form.get("arquivo");
-  const slug = String(form.get("slug") || "equipamento");
-  if (!(f instanceof Blob) || !(f as File).name) {
-    return NextResponse.json({ erro: "Envie a imagem no campo 'arquivo'." }, { status: 400 });
+  const form = await req.formData().catch(() => null);
+  const f = form?.get("arquivo");
+  if (!(f instanceof Blob)) {
+    return NextResponse.json({ erro: "Envie a imagem no campo “arquivo”." }, { status: 400 });
   }
-  const arquivo = f as File;
-  const ext = (arquivo.name.split(".").pop() || "jpg").toLowerCase();
-  if (!["png", "jpg", "jpeg", "webp"].includes(ext)) {
-    return NextResponse.json({ erro: "Use PNG, JPG ou WEBP." }, { status: 400 });
+  if (f.size > FOTO_CATALOGO_MAX_BYTES) {
+    return NextResponse.json({ erro: "A imagem passa de 10 MB — reduza a resolução e envie de novo." }, { status: 400 });
   }
-  const caminho = `catalogo/${slug}/${Date.now()}.${ext}`;
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  const ex = examinarFotoCatalogo(bytes);
+  if (ex.erro || !ex.formato) return NextResponse.json({ erro: ex.erro }, { status: 400 });
+  const ext = ex.formato === "png" ? "png" : "jpg";
+  const caminho = `${PASTA_FOTOS_CATALOGO}${randomUUID()}.${ext}`;
   try {
-    await uploadArquivo(caminho, Buffer.from(await arquivo.arrayBuffer()), arquivo.type || `image/${ext}`);
+    await uploadArquivo(caminho, bytes, ex.formato === "png" ? "image/png" : "image/jpeg");
   } catch (e) {
     return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar." }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, caminho });
+  return NextResponse.json({ ok: true, caminho, hash: ex.hash });
 }
 
 /** Serve a imagem: /api/catalogo/foto?caminho=... */
@@ -39,7 +44,7 @@ export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   const caminho = req.nextUrl.searchParams.get("caminho");
-  if (!caminho || !caminho.startsWith("catalogo/")) {
+  if (!caminho || !caminhoFotoCatalogoValido(caminho)) {
     return NextResponse.json({ erro: "Caminho inválido." }, { status: 400 });
   }
   try {
@@ -54,17 +59,19 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** Remove a imagem do storage: ?caminho=... */
+/** Descarta uma foto enviada e não usada (ex.: edição cancelada):
+ *  ?caminho=... — só apaga se NENHUM equipamento salvo a usa. Tirar a foto
+ *  de um equipamento acontece ao salvar (o PATCH apaga as que saíram). */
 export async function DELETE(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS_EDICAO.includes(profile.perfil)) {
+  if (!PERFIS_EDICAO_CATALOGO.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Sem permissão." }, { status: 403 });
   }
   const caminho = req.nextUrl.searchParams.get("caminho");
-  if (!caminho || !caminho.startsWith("catalogo/")) {
+  if (!caminho || !caminhoFotoCatalogoValido(caminho)) {
     return NextResponse.json({ erro: "Caminho inválido." }, { status: 400 });
   }
-  try { await removerArquivos([caminho]); } catch { /* órfão não bloqueia */ }
-  return NextResponse.json({ ok: true });
+  const removidos = await removerSeSemUso([caminho]);
+  return NextResponse.json({ ok: true, removida: removidos.length > 0 });
 }

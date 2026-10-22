@@ -134,7 +134,7 @@ export async function contextoAgendamento(opts: {
   let equipamentosProcedimento: string[] | undefined;
   if (info?.procedimento) {
     const { data: proc } = await admin.from("gp_procedimentos").select("equipamentos").eq("codigo", info.procedimento).limit(1).maybeSingle();
-    equipamentosProcedimento = nomesEquipamentosProcedimento((proc as any)?.equipamentos, equipCatalogo);
+    equipamentosProcedimento = nomesEquipamentosProcedimento((proc as any)?.equipamentos, equipCatalogo.filter((e: any) => e.ativo !== false));
   } else if (info) {
     equipamentosProcedimento = [];
   }
@@ -147,7 +147,8 @@ export async function contextoAgendamento(opts: {
     daOS: (daOS.data || []).map(paraRef),
     noDia: (noDia.data || []).filter((a: any) => !daLixeira(a)).map(paraRef),
     usuariosAtivos: (ativos.data || []).map((u: any) => u.id),
-    catalogo: equipCatalogo.map((e: any) => e.nome).filter(Boolean),
+    // Sugestões ("seria …?"): só equipamentos ativos no Catálogo.
+    catalogo: equipCatalogo.filter((e: any) => e.ativo !== false).map((e: any) => e.nome).filter(Boolean),
     funcoes: Object.fromEntries((ativos.data || []).map((u: any) => [u.id, u.funcao || null])),
     relatoriosInspecao: relInsp.error ? undefined : (relInsp.data || []).map((r: any) => ({ versao: r.versao, status: r.status })),
     equipamentosProcedimento,

@@ -21,7 +21,7 @@ import Modal from "./Modal";
 import AvisoCliente from "./AvisoCliente";
 import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
-  chaveItemChecklist, EquipamentoCatalogo, ItemChecklist, ROTULOS_CHECKLIST, temErros, validarItensChecklist,
+  ativoNoCatalogo, chaveItemChecklist, EquipamentoCatalogo, ItemChecklist, ROTULOS_CHECKLIST, temErros, validarItensChecklist,
 } from "@/lib/validacao";
 
 type Item = ItemChecklist & { conferido: boolean };
@@ -103,7 +103,9 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
       setSelecionados(atual.itens.map((i) => i.slug || "").filter(Boolean));
       setExtra(atual.itens.filter((i) => !i.slug).map((i) => i.nome).join("\n"));
     } else {
-      setSelecionados(procOS?.equipamentos || []);
+      // Lista nova: só os previstos que continuam ativos no Catálogo.
+      const ativos = new Set(equipamentos.filter((e) => ativoNoCatalogo(e)).map((e) => e.slug));
+      setSelecionados((procOS?.equipamentos || []).filter((s: string) => ativos.has(s)));
       setExtra("");
     }
     setCompondo(true);
@@ -261,11 +263,13 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
                 <p className="vazio" style={{ margin: 0 }}>Nenhum equipamento no catálogo.</p>
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 6 }}>
-                  {equipamentos.map((e) => (
+                  {/* Desativados só aparecem se já estão marcados (lista
+                      sendo refeita) — dá para tirar, não para pôr. */}
+                  {equipamentos.filter((e) => ativoNoCatalogo(e) || selecionados.includes(e.slug)).map((e) => (
                     <label key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
                       <input type="checkbox" checked={selecionados.includes(e.slug)}
                         onChange={(ev) => setSelecionados((p) => ev.target.checked ? [...p, e.slug] : p.filter((s) => s !== e.slug))} />
-                      <span>{e.nome}</span>
+                      <span>{e.nome}{ativoNoCatalogo(e) ? "" : " (desativado)"}</span>
                     </label>
                   ))}
                 </div>

@@ -5,10 +5,19 @@
 -- DEPOIS do script verificacao-db-asp.sql (que garante as tabelas).
 --
 -- Conteúdo: Catálogo completo (7 equipamentos + 2 procedimentos).
--- Idempotente: on conflict do nothing — pode rodar mais de uma vez.
+--
+-- ATENÇÃO — CARGA INICIAL, UMA VEZ SÓ. Não rode de novo numa base em uso: o
+-- Catálogo agora é mantido pela tela (aba Catálogo).
+-- Por segurança, rodar de novo não duplica nada: cada linha só entra se NÃO
+-- existir item (ativo OU desativado) com o mesmo slug, o mesmo nome ou o
+-- mesmo código pela chave do Catálogo (sem caixa, acento e espaço extra; no
+-- código, também sem pontuação — "PR BAT 001" = "PR-BAT-001"). Um item
+-- renomeado ou desativado não "volta" por causa daqui — mas um item
+-- EXCLUÍDO de vez voltaria (não há como saber que ele existiu).
 -- ============================================================================
 
-insert into public.gp_equipamentos (slug, nome, especificacoes, fotos, ordem) values
+insert into public.gp_equipamentos (slug, nome, especificacoes, fotos, ordem)
+select v.slug, v.nome, v.especificacoes, v.fotos, v.ordem from (values
  ('rov', 'ROV de inspeção visual',
   '[{"rotulo":"Descrição","valor":"Veículo submersível operado remotamente, com câmera de alta definição e iluminação LED"}]'::jsonb, '[]'::jsonb, 1),
  ('sonar', 'Sonar batimétrico',
@@ -23,16 +32,30 @@ insert into public.gp_equipamentos (slug, nome, especificacoes, fotos, ordem) va
   '[{"rotulo":"Descrição","valor":"Medição das dimensões do tanque"}]'::jsonb, '[]'::jsonb, 6),
  ('epi', 'EPIs de espaço confinado',
   '[{"rotulo":"Descrição","valor":"Conforme NR-33, incluindo detector de gases e cinto de segurança"}]'::jsonb, '[]'::jsonb, 7)
-on conflict (slug) do nothing;
+) as v (slug, nome, especificacoes, fotos, ordem)
+where not exists (
+  select 1 from public.gp_equipamentos e
+   where e.slug = v.slug
+      or btrim(regexp_replace(lower(translate(e.nome, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')), '\s+', ' ', 'g'))
+       = btrim(regexp_replace(lower(translate(v.nome, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')), '\s+', ' ', 'g'))
+);
 
-insert into public.gp_procedimentos (codigo, nome, metodos, equipamentos, ordem) values
+insert into public.gp_procedimentos (codigo, nome, metodos, equipamentos, ordem)
+select v.codigo, v.nome, v.metodos, v.equipamentos, v.ordem from (values
  ('PR-BAT-001', 'Batimetria por ROV com sonar',
   'O levantamento batimétrico foi executado por veículo submersível operado remotamente (ROV) equipado com sonar, sem necessidade de esvaziamento do reservatório.',
   '["rov","sonar","regua","umbilical","estacao","epi"]'::jsonb, 1),
  ('PR-INSP-002', 'Inspeção visual submersa',
   'A inspeção visual foi executada por veículo submersível operado remotamente (ROV), com registro em vídeo do costado e do fundo do reservatório.',
   '["rov","umbilical","estacao","epi"]'::jsonb, 2)
-on conflict (codigo) do nothing;
+) as v (codigo, nome, metodos, equipamentos, ordem)
+where not exists (
+  select 1 from public.gp_procedimentos p
+   where regexp_replace(lower(translate(p.codigo, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')), '[^a-z0-9]', '', 'g')
+       = regexp_replace(lower(translate(v.codigo, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')), '[^a-z0-9]', '', 'g')
+      or btrim(regexp_replace(lower(translate(p.nome, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')), '\s+', ' ', 'g'))
+       = btrim(regexp_replace(lower(translate(v.nome, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')), '\s+', ' ', 'g'))
+);
 
 -- ============================================================================
 -- OPCIONAL — clientes da base antiga (parecem teste do sistema anterior:
