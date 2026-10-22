@@ -4,7 +4,8 @@
  * Princípio: o que é digitado não pode ficar ambíguo nem duplicado. Erros
  * (⛔) bloqueiam e a API repete a checagem; avisos (⚠️) só alertam. Cada
  * fase do fluxo ganha seu arquivo de regras (projeto.ts = Fase 1;
- * ordemServico.ts + agendamento.ts = Fase 2). */
+ * ordemServico.ts + agendamento.ts = Fase 2; medicao.ts + coleta.ts +
+ * checklist.ts = Fase 3). */
 export * from "./resultado";
 export * from "./texto";
 export * from "./formatos";
@@ -14,3 +15,6 @@ export * from "./cliente";
 export * from "./feriados";
 export * from "./ordemServico";
 export * from "./agendamento";
+export * from "./medicao";
+export * from "./coleta";
+export * from "./checklist";

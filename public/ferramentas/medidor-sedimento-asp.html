@@ -85,6 +85,7 @@
   }
   .field input[type=number]:focus-visible, .field input[type=text]:focus-visible{outline:2px solid var(--cyan);outline-offset:1px;}
   .field input.invalid{border-color:var(--alert);color:var(--alert);}
+  .field input.acima{border-color:#f59e0b;color:#f59e0b;}
   .stat-line{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--cyan-dim);margin-top:6px;}
 
   /* segmented control */
@@ -162,6 +163,9 @@
   }
   table.matrix td input:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px;}
   table.matrix td input.invalid{color:var(--alert);}
+  /* Espessura acima da altura do tanque (ref. direta/fundo): o cálculo limita à
+     altura, mas a leitura fica marcada para conferência. */
+  table.matrix td input.acima{color:#f59e0b;font-weight:700;}
   table.matrix td.rowhead{
     font-family:'IBM Plex Mono',monospace;color:var(--cyan-dim);font-size:11px;text-align:right;padding-right:8px;
     border:none;
@@ -1178,12 +1182,15 @@
 
   function parseCell(raw, H){
     if(raw===null || raw===undefined) return {status:'empty'};
-    const num = parseFloat(String(raw).replace(',','.'));
-    if(isNaN(num) || num<0) return {status:'invalid'};
+    const lido = parseFloat(String(raw).replace(',','.'));
+    if(isNaN(lido) || lido<0) return {status:'invalid'};
+    // A leitura está na unidade escolhida; H e o resultado, em metros.
+    const num = state.unit==='cm' ? lido/100 : lido;
     if(state.refMode==='top' && num>H+1e-9) return {status:'invalid'};
     const hsed = state.refMode==='top' ? (H-num) : num;
     const clamped = Math.max(0, Math.min(H, hsed));
-    return {status:'ok', hsed:clamped};
+    // Acima da altura (ref. direta/fundo): entra limitado à altura, mas marcado.
+    return {status:'ok', hsed:clamped, acima: state.refMode!=='top' && hsed>H+1e-9};
   }
 
   function lerpColor(c1, c2, t){
@@ -2794,6 +2801,9 @@
           const el = inputs[idx++];
           if(el){
             el.classList.toggle('invalid', cellResults[i][j].status==='invalid');
+            el.classList.toggle('acima', !!cellResults[i][j].acima);
+            if(cellResults[i][j].acima) el.title = 'Acima da altura do tanque — o cálculo usa a altura';
+            else if(el.title && el.title.indexOf('Acima da altura')===0) el.removeAttribute('title');
           }
         }
       }
@@ -2807,6 +2817,8 @@
       else if(maxP.status==='invalid'){ invalidCount++; }
       document.getElementById('rangeMin').classList.toggle('invalid', minP.status==='invalid');
       document.getElementById('rangeMax').classList.toggle('invalid', maxP.status==='invalid');
+      document.getElementById('rangeMin').classList.toggle('acima', !!minP.acima);
+      document.getElementById('rangeMax').classList.toggle('acima', !!maxP.acima);
     }
 
     const avg = count ? sum/count : 0;
@@ -3488,15 +3500,23 @@
     renderMatrix();
     recompute();
   }
+  // Só conversa com a página do próprio sistema (mesma origem).
   window.addEventListener('message', function(ev){
+    if(ev.origin !== window.location.origin) return;
     var msg = ev.data || {};
     if(msg && msg.type === 'asp:load'){ aspApplyState(msg.dados); }
+    else if(msg && msg.type === 'asp:setHeader'){
+      // Data e responsável vêm do registro da coleta (página), não do campo livre.
+      if(msg.reportDate !== undefined){ state.reportDate = msg.reportDate || ''; var d=document.getElementById('reportDate'); if(d) d.value = state.reportDate; }
+      if(msg.reportResponsavel !== undefined){ state.reportResponsavel = msg.reportResponsavel || ''; var r=document.getElementById('reportResponsavel'); if(r) r.value = state.reportResponsavel; }
+      recompute();
+    }
     else if(msg && msg.type === 'asp:requestSave'){
       var alvo = ev.source || window.parent;
-      try { alvo.postMessage({ type:'asp:save', dados: aspSnapshot() }, '*'); } catch(e){}
+      try { alvo.postMessage({ type:'asp:save', dados: aspSnapshot() }, ev.origin); } catch(e){}
     }
   });
-  try { window.parent.postMessage({ type:'asp:ready' }, '*'); } catch(e){}
+  try { if(window.parent !== window) window.parent.postMessage({ type:'asp:ready' }, window.location.origin); } catch(e){}
 })();
 </script>
 </body>

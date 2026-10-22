@@ -2,7 +2,13 @@
  * `enviarArquivo` no lugar do fetch para escritas: se estiver online, envia
  * normal; se a rede falhar (offline), enfileira em IndexedDB e sincroniza
  * depois (evento `online` ou botão manual). Só entra na fila em falha de REDE
- * — erros do servidor (400/403/500) voltam normalmente para a tela. */
+ * — erros do servidor (400/403/500) voltam normalmente para a tela.
+ *
+ * Idempotência: cada envio ganha uma chave (uuid) no cabeçalho
+ * `Idempotency-Key`, guardada junto na fila — o reenvio leva a MESMA chave.
+ * Quem precisa (ex.: /api/coletas) usa a chave para não duplicar o registro
+ * em reenvio ou duplo clique; o chamador pode passar a sua (ex.: o id da
+ * coleta gerado no clique). */
 import { adicionar, listar, remover, contar, ItemFila } from "./fila";
 
 export interface ResultadoEnvio {
@@ -14,6 +20,19 @@ export interface ResultadoEnvio {
 
 export function estaOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine;
+}
+
+/** uuid v4 — crypto.randomUUID quando houver (HTTPS), senão getRandomValues. */
+export function novoId(): string {
+  const c: any = typeof crypto !== "undefined" ? crypto : null;
+  if (c?.randomUUID) return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (c?.getRandomValues) c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 function avisar() {
@@ -37,29 +56,35 @@ function base64ParaBlob(b64: string, tipo: string): Blob {
 }
 
 /** Envia um JSON (POST/PATCH/DELETE). Enfileira se estiver offline. */
-export async function enviarJson(url: string, method: string, body: unknown, descricao: string): Promise<ResultadoEnvio> {
+export async function enviarJson(url: string, method: string, body: unknown, descricao: string, chave: string = novoId()): Promise<ResultadoEnvio> {
   if (estaOnline()) {
     try {
-      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json", "Idempotency-Key": chave }, body: JSON.stringify(body) });
       const data = await r.json().catch(() => ({}));
       return { ok: r.ok, queued: false, status: r.status, data };
     } catch {
       // falha de rede → cai para a fila
     }
   }
-  await adicionar({ url, method, jsonBody: body, descricao, criadoEm: Date.now() });
+  await adicionar({ url, method, jsonBody: body, descricao, criadoEm: Date.now(), chave });
   avisar();
   return { ok: true, queued: true };
 }
 
-/** Envia um arquivo (multipart POST) + campos. Enfileira se estiver offline. */
-export async function enviarArquivo(url: string, campos: Record<string, string>, arquivo: File, descricao: string): Promise<ResultadoEnvio> {
+/** Envia um arquivo (multipart; POST por padrão) + campos. Enfileira se
+ * estiver offline. */
+export async function enviarArquivo(
+  url: string, campos: Record<string, string>, arquivo: File, descricao: string,
+  opcoes: { method?: string; chave?: string } = {}
+): Promise<ResultadoEnvio> {
+  const method = opcoes.method || "POST";
+  const chave = opcoes.chave || novoId();
   if (estaOnline()) {
     try {
       const fd = new FormData();
       Object.entries(campos).forEach(([k, v]) => fd.append(k, v));
       fd.append("arquivo", arquivo);
-      const r = await fetch(url, { method: "POST", body: fd });
+      const r = await fetch(url, { method, body: fd, headers: { "Idempotency-Key": chave } });
       const data = await r.json().catch(() => ({}));
       return { ok: r.ok, queued: false, status: r.status, data };
     } catch {
@@ -67,7 +92,7 @@ export async function enviarArquivo(url: string, campos: Record<string, string>,
     }
   }
   const base64 = await fileParaBase64(arquivo);
-  await adicionar({ url, method: "POST", descricao, criadoEm: Date.now(), arquivo: { nome: arquivo.name, tipo: arquivo.type, campos, base64 } });
+  await adicionar({ url, method, descricao, criadoEm: Date.now(), chave, arquivo: { nome: arquivo.name, tipo: arquivo.type, campos, base64 } });
   avisar();
   return { ok: true, queued: true };
 }
@@ -90,9 +115,13 @@ export async function sincronizar(): Promise<number> {
           Object.entries(it.arquivo.campos).forEach(([k, v]) => fd.append(k, v));
           const blob = base64ParaBlob(it.arquivo.base64, it.arquivo.tipo);
           fd.append("arquivo", new File([blob], it.arquivo.nome, { type: it.arquivo.tipo }));
-          resp = await fetch(it.url, { method: "POST", body: fd });
+          resp = await fetch(it.url, { method: it.method || "POST", body: fd, headers: it.chave ? { "Idempotency-Key": it.chave } : undefined });
         } else {
-          resp = await fetch(it.url, { method: it.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(it.jsonBody) });
+          resp = await fetch(it.url, {
+            method: it.method,
+            headers: { "Content-Type": "application/json", ...(it.chave ? { "Idempotency-Key": it.chave } : {}) },
+            body: JSON.stringify(it.jsonBody),
+          });
         }
         if (resp.ok || (resp.status >= 400 && resp.status < 500)) {
           if (it.id != null) await remover(it.id); // sucesso, ou erro definitivo (não adianta insistir)

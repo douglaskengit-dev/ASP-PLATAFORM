@@ -37,6 +37,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .select("id, procedimento")
       .single();
     if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    // O checklist de equipamentos acompanha o procedimento da OS (não tem um
+    // procedimento próprio que possa divergir).
+    await getSupabaseAdmin().from("gp_checklist_equipamentos").update({ procedimento: proc }).eq("inspecao_id", params.id);
     return NextResponse.json({ ok: true, inspecao: data });
   }
 

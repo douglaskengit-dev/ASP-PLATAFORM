@@ -7,23 +7,24 @@
  * enquanto carrega a van, e um modal fecharia a cada toque fora. O modal
  * aparece só para COMPOR a lista (escolher do Catálogo), que aí sim é edição.
  *
- * A lista nasce do procedimento escolhido e aceita itens extras. Cada item
- * guarda quem conferiu, quando e uma observação (avaria, nº de série).
+ * A lista nasce do procedimento DA OS (o mesmo do topo da página — não há
+ * um procedimento próprio do checklist) e aceita itens extras. Cada item
+ * guarda quem conferiu (usuário da sessão), quando (relógio do servidor) e
+ * uma observação (avaria, nº de série). Regras em lib/validacao/checklist.ts:
+ * item repetido bloqueia; refazer a lista mantém a conferência dos itens que
+ * ficam.
  *
  * `embutido`: dentro de uma SecaoRecolhivel (página da inspeção) — a seção
  * já dá o card e o título; aqui fica só o conteúdo. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Modal from "./Modal";
 import AvisoCliente from "./AvisoCliente";
+import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
+import {
+  chaveItemChecklist, EquipamentoCatalogo, ItemChecklist, ROTULOS_CHECKLIST, temErros, validarItensChecklist,
+} from "@/lib/validacao";
 
-interface Item {
-  slug?: string;
-  nome: string;
-  conferido: boolean;
-  por?: string | null;
-  em?: string | null;
-  obs?: string;
-}
+type Item = ItemChecklist & { conferido: boolean };
 interface Checklist { id: string; tipo: "inspecao" | "execucao"; procedimento: string | null; itens: Item[] }
 
 const campo: React.CSSProperties = {
@@ -31,11 +32,12 @@ const campo: React.CSSProperties = {
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 13,
 };
 
-export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, clienteId, embutido, onResumo, onErro }: {
+export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento, clienteId, embutido, onResumo, onErro }: {
   inspecaoId: string;
   /** Etapa corrente da inspeção — define qual checklist é o principal. */
   etapa: "inspecao" | "execucao";
-  nomeUsuario: string;
+  /** Procedimento da OS (código do Catálogo) — o checklist segue ele. */
+  procedimento?: string | null;
   /** Cliente da inspeção — o aviso dele é repetido aqui, pois é na hora de
    *  conferir os equipamentos que a exigência precisa ser lembrada. */
   clienteId?: string | null;
@@ -53,9 +55,9 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [compondo, setCompondo] = useState(false);
-  const [procEscolhido, setProcEscolhido] = useState("");
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [extra, setExtra] = useState("");
+  const [erroLista, setErroLista] = useState<string | null>(null);
 
   const carregar = useCallback(() => {
     fetch(`/api/checklist?inspecaoId=${inspecaoId}`).then((r) => r.ok ? r.json() : {})
@@ -87,52 +89,86 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
   }, [checklists]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { onErro?.(erro); }, [erro]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Ao escolher o procedimento, já marca os equipamentos previstos. */
-  function escolherProcedimento(codigo: string) {
-    setProcEscolhido(codigo);
-    const p = procedimentos.find((x) => x.codigo === codigo);
-    if (p) setSelecionados(p.equipamentos || []);
+  const catalogo: EquipamentoCatalogo[] = useMemo(
+    () => equipamentos.filter((e) => e.slug && e.nome).map((e) => ({ slug: e.slug, nome: e.nome })),
+    [equipamentos]
+  );
+  const procOS = procedimentos.find((p) => p.codigo === procedimento) || null;
+
+  /** Abre a montagem: refazer parte da lista atual (Catálogo marcado + avulsos
+   *  no texto); lista nova parte dos equipamentos previstos no procedimento. */
+  function abrirMontagem() {
+    setErroLista(null);
+    if (atual) {
+      setSelecionados(atual.itens.map((i) => i.slug || "").filter(Boolean));
+      setExtra(atual.itens.filter((i) => !i.slug).map((i) => i.nome).join("\n"));
+    } else {
+      setSelecionados(procOS?.equipamentos || []);
+      setExtra("");
+    }
+    setCompondo(true);
   }
+
+  /** A lista como ficará: itens do Catálogo marcados + avulsos (um por linha). */
+  const itensMontados = useMemo(() => [
+    ...catalogo.filter((e) => selecionados.includes(e.slug)).map((e) => ({ slug: e.slug as string | null, nome: e.nome })),
+    ...extra.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).map((nome) => ({ slug: null as string | null, nome })),
+  ], [catalogo, selecionados, extra]);
+  const resultadoLista = useMemo(() => validarItensChecklist(itensMontados, catalogo), [itensMontados, catalogo]);
+  /** Itens já conferidos da lista atual que vão sair (perdem a conferência). */
+  const saemConferidos = useMemo(() => {
+    if (!atual) return [];
+    const novas = new Set(itensMontados.map((i) => chaveItemChecklist(i, catalogo)));
+    return atual.itens.filter((i) => i.conferido && !novas.has(chaveItemChecklist(i, catalogo)));
+  }, [atual, itensMontados, catalogo]);
 
   async function criarChecklist() {
-    setSalvando(true); setErro(null);
-    const itens: Item[] = equipamentos
-      .filter((e) => selecionados.includes(e.slug))
-      .map((e) => ({ slug: e.slug, nome: e.nome, conferido: false }));
-    // itens digitados à mão, um por linha
-    for (const linha of extra.split("\n").map((l) => l.trim()).filter(Boolean)) {
-      itens.push({ nome: linha, conferido: false });
+    if (temErros(resultadoLista)) return;
+    setSalvando(true); setErro(null); setErroLista(null);
+    try {
+      const res = await fetch("/api/checklist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inspecaoId, tipo: etapa, itens: itensMontados }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErroLista(d?.erro || "Falha ao montar o checklist."); return; }
+      setCompondo(false); setExtra(""); carregar();
+    } catch {
+      setErroLista("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setSalvando(false);
     }
-    const res = await fetch("/api/checklist", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inspecaoId, tipo: etapa, procedimento: procEscolhido || null, itens }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setSalvando(false);
-    if (!res.ok) { setErro(d?.erro || "Falha ao montar o checklist."); return; }
-    setCompondo(false); setExtra(""); carregar();
   }
 
-  async function gravarItens(c: Checklist, itens: Item[]) {
-    setChecklists((p) => p.map((x) => x.id === c.id ? { ...x, itens } : x));   // otimista
-    const res = await fetch("/api/checklist", {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: c.id, itens }),
-    });
-    if (!res.ok) { setErro("Falha ao salvar o checklist."); carregar(); }
+  /** Grava UM item: o servidor junta a mudança no que está gravado e carimba
+   *  quem conferiu e quando (sessão + relógio do servidor). */
+  async function gravarItem(c: Checklist, i: number, mudanca: { conferido?: boolean; obs?: string }) {
+    const chave = chaveItemChecklist(c.itens[i], catalogo);
+    // Otimista: marca na hora; o carimbo definitivo vem da resposta.
+    setChecklists((p) => p.map((x) => x.id !== c.id ? x : {
+      ...x,
+      itens: x.itens.map((y, k) => k !== i ? y : { ...y, ...mudanca, ...(mudanca.conferido === false ? { por: null, em: null } : {}) }),
+    }));
+    try {
+      const res = await fetch("/api/checklist", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, chave, ...mudanca }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErro(d?.erro || "Falha ao salvar o checklist."); carregar(); return; }
+      setErro(null);
+      if (d.checklist) setChecklists((p) => p.map((x) => x.id === c.id ? { ...d.checklist, itens: d.checklist.itens || [] } : x));
+    } catch {
+      setErro("Sem conexão — a conferência não foi salva."); carregar();
+    }
   }
 
   function alternar(c: Checklist, i: number) {
-    const itens = c.itens.map((it, k) => k !== i ? it : (
-      it.conferido
-        ? { ...it, conferido: false, por: null, em: null }
-        : { ...it, conferido: true, por: nomeUsuario, em: new Date().toISOString() }
-    ));
-    gravarItens(c, itens);
+    gravarItem(c, i, { conferido: !c.itens[i].conferido });
   }
 
   function anotar(c: Checklist, i: number, obs: string) {
-    gravarItens(c, c.itens.map((it, k) => k === i ? { ...it, obs } : it));
+    gravarItem(c, i, { obs });
   }
 
   function render(c: Checklist, principal: boolean) {
@@ -149,11 +185,11 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
           }}>
             {feitos} de {total} conferido(s)
           </span>
-          {c.procedimento && <span className="detalhe" style={{ margin: 0 }}>· {c.procedimento}</span>}
+          {procedimento && <span className="detalhe" style={{ margin: 0 }}>· {procedimento}</span>}
         </div>
 
         {c.itens.map((it, i) => (
-          <div key={i} style={{ borderBottom: "1px solid var(--borda)", padding: "8px 0" }}>
+          <div key={chaveItemChecklist(it, catalogo) || i} style={{ borderBottom: "1px solid var(--borda)", padding: "8px 0" }}>
             <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: podeEditar ? "pointer" : "default" }}>
               <input type="checkbox" checked={it.conferido} disabled={!podeEditar} style={{ marginTop: 3, width: 18, height: 18 }}
                 onChange={() => alternar(c, i)} />
@@ -186,7 +222,7 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
       <div style={{ display: "flex", justifyContent: embutido ? "flex-end" : "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {!embutido && <h3 style={{ margin: 0 }}>Checklist de equipamentos</h3>}
         {podeEditar && (
-          <button className="btn-azul" onClick={() => { setCompondo(true); setSelecionados(atual?.itens.map((i) => i.slug || "").filter(Boolean) || []); }}>
+          <button className="btn-azul" onClick={abrirMontagem}>
             {atual ? "Refazer lista" : "Montar lista"}
           </button>
         )}
@@ -207,11 +243,17 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
         <Modal titulo={`Montar checklist — ${etapa}`} onFechar={() => setCompondo(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div>
-              <label style={{ fontWeight: 600, fontSize: 12.5, display: "block", marginBottom: 4 }}>Procedimento</label>
-              <select style={campo} value={procEscolhido} onChange={(e) => escolherProcedimento(e.target.value)}>
-                <option value="">— escolher (marca os equipamentos previstos) —</option>
-                {procedimentos.map((p) => <option key={p.id} value={p.codigo}>{p.codigo} — {p.nome}</option>)}
-              </select>
+              <span style={{ fontWeight: 600, fontSize: 12.5, display: "block", marginBottom: 4 }}>Procedimento da OS</span>
+              <span className="detalhe" style={{ margin: 0 }}>
+                {procedimento ? `${procedimento}${procOS ? ` — ${procOS.nome}` : ""}` : "não definido — escolha no topo da página"}
+                {" "}(muda no topo da página; o checklist acompanha)
+              </span>
+              {procOS && (procOS.equipamentos || []).length > 0 && (
+                <button type="button" className="secao-link" style={{ display: "block", marginTop: 4 }}
+                  onClick={() => setSelecionados((p) => Array.from(new Set([...p, ...(procOS.equipamentos || [])])))}>
+                  Marcar os equipamentos previstos no procedimento
+                </button>
+              )}
             </div>
             <div>
               <label style={{ fontWeight: 600, fontSize: 12.5, display: "block", marginBottom: 4 }}>Equipamentos do catálogo</label>
@@ -234,14 +276,20 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, nomeUsuario, 
               <textarea style={{ ...campo, minHeight: 70 }} value={extra} onChange={(e) => setExtra(e.target.value)}
                 placeholder={"Ex.: Cabo reserva 50 m\nGerador portátil"} />
             </div>
+            <MensagensCampo r={resultadoLista} campo="itens" />
             {atual && (
-              <p className="detalhe" style={{ margin: 0, color: "#c2410c" }}>
-                ⚠ Refazer a lista substitui o checklist atual desta etapa e perde as conferências já feitas.
+              <p className="detalhe" style={{ margin: 0 }}>
+                Os itens que continuam na lista mantêm a conferência e a observação.
+                {saemConferidos.length > 0 && (
+                  <span className="val-aviso"> ⚠️ Saem da lista já conferidos: {saemConferidos.map((i) => i.nome).join(", ")}.</span>
+                )}
               </p>
             )}
+            <ResumoValidacao r={resultadoLista} rotulos={ROTULOS_CHECKLIST} />
+            {erroLista && <p className="val-msg val-erro">⛔ {erroLista}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button className="btn-azul btn-sec" onClick={() => setCompondo(false)}>Cancelar</button>
-              <button className="btn-azul" disabled={salvando} onClick={criarChecklist}>
+              <button className="btn-azul" disabled={salvando || temErros(resultadoLista) || itensMontados.length === 0} onClick={criarChecklist}>
                 {salvando ? "Salvando…" : "Salvar lista"}
               </button>
             </div>
