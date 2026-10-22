@@ -7,7 +7,13 @@
  *
  * Fase 3 (coleta): toda medição passa por uma confirmação (data da coleta,
  * responsável, regras de lib/validacao/coleta.ts + medicao.ts) antes de
- * gravar; a API repete as mesmas regras. */
+ * gravar; a API repete as mesmas regras.
+ *
+ * Fase 4 (relatório): o tipo segue a fase (inspeção até a 5, execução da 6
+ * em diante); o envio de arquivo de fora é conferido (PDF/DOCX de verdade,
+ * 30 MB, arquivo repetido) e confirmado mostrando a versão que será criada e
+ * a que será substituída; aprovar/reprovar age sobre o relatório mostrado.
+ * Regras em lib/validacao/relatorio.ts; a API repete as que bloqueiam. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -17,7 +23,9 @@ import { acoesDisponiveis, definicaoFase, descreverAcaoFase, perfilAtuaNaFase, t
 import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
 import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
-import { podeAprovarColeta } from "@/lib/asp/permissoes";
+import { podeAprovarColeta, podeEditarRevisao } from "@/lib/asp/permissoes";
+import { camposDaMedicao } from "@/lib/asp/relatorio";
+import { sha256Hex } from "@/lib/sha256";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx, paraNumero } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
@@ -35,6 +43,9 @@ import {
   dataIsoValida, diferencasTanque, hojeBrasil, medicaoPreenchida, mesclar, motivoNaoAprovavel, nomeDoCatalogo,
   normalizarEquipamento, normalizarNome, novoResultado, OSRef, ResultadoValidacao, ROTULOS_AGENDAMENTO, ROTULOS_COLETA,
   sugestaoCatalogo, tanqueComMedidas, temErros, validarAgendamento, validarColeta, validarOS, validarPdf,
+  arquivoRelatorioRepetido, codigoRelatorio, descreverRelatorio, emAprovacaoDoTipo, examinarArquivoRelatorio, faixaVolume,
+  planejarEnvio, rascunhoDoTipo, RELATORIO_MAX_BYTES, RelatorioRef, revisaoDoTipo, ROTULO_STATUS_RELATORIO, ROTULO_TIPO,
+  tipoDaFase, type FormatoRelatorio, type TipoRelatorio,
 } from "@/lib/validacao";
 
 interface Projeto {
@@ -82,7 +93,11 @@ interface ConfirmacaoMedicao {
   editId: string | null;
   idNovo: string;
 }
-interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any }
+interface Relatorio {
+  id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any;
+  /** Fase 4: SHA-256 do arquivo; substituída por outra versão enviada depois. */
+  arquivo_hash?: string | null; substituido_por?: string | null; substituido_em?: string | null;
+}
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
   id: string; tipo: string; data_visita: string | null; data_execucao: string | null; hora: string | null;
@@ -216,9 +231,12 @@ export default function InspecaoDetalhePage() {
   const [tanqueForm, setTanqueForm] = useState<TanqueForm>({ ...TANQUE_FORM_VAZIO });
   const [salvandoTanque, setSalvandoTanque] = useState(false);
   const [erroTanque, setErroTanque] = useState<string | null>(null);
-  /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
-   *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
-  const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
+  /** Relatório de fora (PDF/DOCX) escolhido, aguardando a confirmação que
+   *  mostra a versão que será criada. O tipo é sempre o da fase da OS. */
+  const [envioExterno, setEnvioExterno] = useState<{
+    arquivo: File; formato: FormatoRelatorio | null; erro: string | null; chave: string;
+  } | null>(null);
+  const [verificandoArquivo, setVerificandoArquivo] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
   // Agendamento
   const [modalAgenda, setModalAgenda] = useState(false);
@@ -357,63 +375,71 @@ export default function InspecaoDetalhePage() {
   const agAtivos = useMemo(() => agendamentos.filter((a) => !a.substituido_em), [agendamentos]);
   const agRemarcados = useMemo(() => agendamentos.filter((a) => a.substituido_em), [agendamentos]);
 
+  /** O tipo do relatório é o da fase: inspeção até a 5, execução da 6 em
+   *  diante (a API recusa o outro). */
+  const bloco: TipoRelatorio = tipoDaFase(insp?.fase ?? 2);
+  const refsRelatorio = useMemo<RelatorioRef[]>(
+    () => relatorios.map((r) => ({ id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash || null })),
+    [relatorios]
+  );
+  /** Agendamento ativo do MESMO tipo do relatório (data e equipe). */
+  const agDoBloco = useMemo(() => agAtivos.find((a) => a.tipo === bloco) || null, [agAtivos, bloco]);
+  // Revisão: reprovações ("Ajustar") do MESMO tipo — a de inspeção não
+  // conta no relatório de execução.
+  const revisaoRelatorio = revisaoDoTipo(refsRelatorio, bloco);
+  const codigoProjetoOS = insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || "";
+  const rascunhoBloco = rascunhoDoTipo(refsRelatorio, bloco);
+  /** Fases 5/9: o relatório que a Gerência está avaliando (o mostrado). */
+  const relEmAvaliacao = insp && (insp.fase === 5 || insp.fase === 9)
+    ? emAprovacaoDoTipo(refsRelatorio, tipoDaFase(insp.fase))[0] || null : null;
+
   /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
-   *  cliente, última medição salva (volume, altura, diâmetro) e a equipe do
-   *  agendamento. O usuário revisa tudo no formulário antes de gerar. */
+   *  cliente, medição (aprovada, senão a mais recente) e cadastro do tanque.
+   *  Cliente, TAG, endereço e procedimento ficam só leitura no formulário.
+   *  Datas em ISO (o documento as escreve dd/mm/aaaa); medidas em metros. */
   const dadosIniciaisRelatorio = useMemo(() => {
     const proj = insp?.projeto;
     // Material, capacidade e medidas de projeto vêm do cadastro do tanque.
     const doTanque = dadosRelatorioDoTanque(insp?.tanque);
-    // Prioriza a medição APROVADA; se nenhuma foi validada, usa a mais recente.
     const comDados = coletas.filter((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados));
-    const medicao = (comDados.find((c) => c.aprovada_em) || comDados[0])?.dados as any;
-    const res = medicao?.resultado;
-    const un = medicao?.unit === "cm" ? "cm" : "m";
-    const num = (v: any, casas = 2) =>
-      v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
-    // A data de execução vem do agendamento do MESMO tipo do relatório:
-    // até a fase 5 o relatório é de inspeção; a partir daí, de execução.
-    const tipoRelatorio: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
-    const ag = agAtivos.find((a) => a.tipo === tipoRelatorio) || agAtivos[0];
-    const dataServico = tipoRelatorio === "execucao"
+    const auto = camposDaMedicao((comDados.find((c) => c.aprovada_em) || comDados[0])?.dados);
+    // A data de execução vem do agendamento do MESMO tipo — sem cair no do
+    // outro tipo (seria a data de outro serviço).
+    const ag = agDoBloco;
+    const dataServico = bloco === "execucao"
       ? (ag?.data_execucao || ag?.data_visita)
       : (ag?.data_visita || ag?.data_execucao);
-    const hoje = new Date().toLocaleDateString("pt-BR");
-    // Revisão: começa em 0 e incrementa a cada reprovação ("Ajustar") já
-    // registrada nos relatórios desta inspeção.
-    const reprovacoes = relatorios.filter((r) => r.status === "ajustar").length;
+    const hoje = hojeBrasil();
+    const nomeProc = procedimentos.find((p) => p.codigo === insp?.procedimento)?.nome;
+    const volume = auto.volumeSedimento || "";
     return {
-      titulo: insp ? `Batimetria — ${insp.identificacao}` : "",
+      // O título nasce do procedimento da OS (não é sempre "Batimetria").
+      titulo: insp ? `${nomeProc || "Relatório técnico"} — ${insp.identificacao}` : "",
       cliente: proj?.cliente?.razao_social || "",
       endereco: proj?.endereco || "",
-      revisao: String(reprovacoes),
+      revisao: String(revisaoRelatorio),
       dataRevisao: hoje,
       // Campo "Relatório" da capa segue o padrão do modelo: "37/MG/26 Rev1".
-      codigoProjeto: proj?.codigo_projeto || proj?.pedido_compra || "",
-      relatorioCodigo: (proj?.codigo_projeto || proj?.pedido_compra)
-        ? `${proj?.codigo_projeto || proj?.pedido_compra} Rev${reprovacoes}`
-        : "",
-      dataExecucao: formatarData(dataServico) || "",
+      codigoProjeto: codigoProjetoOS,
+      relatorioCodigo: codigoRelatorio(codigoProjetoOS, revisaoRelatorio),
+      dataExecucao: dataServico && /^\d{4}-\d{2}-\d{2}/.test(dataServico) ? dataServico.slice(0, 10) : "",
       contato: contatoCliente,
       procedimento: insp?.procedimento || "",
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
-      ...doTanque,
-      // A medição em campo tem a última palavra sobre altura e diâmetro; sem
-      // medição, valem as medidas do cadastro.
-      alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : doTanque.alturaTanque,
-      diametro: medicao?.dimValue ? `${num(medicao.dimValue)} ${un}` : doTanque.diametro,
-      // Capacidade nominal é dado de placa (manual). Aqui vai o volume
-      // calculado do tanque, que alimenta o quadro do tópico 6.
-      capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
-      volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
-      // Faixa de ±5% sobre o volume medido (texto do tópico 7).
-      volumeMin: res?.volSedM3 != null ? num(res.volSedM3 * 0.95, 2) : "",
-      volumeMax: res?.volSedM3 != null ? num(res.volSedM3 * 1.05, 2) : "",
-      equipe: (ag?.equipe || []).map((m) => m.nome).join(", "),
+      material: doTanque.material,
+      // A medição em campo tem a última palavra sobre as medidas; sem
+      // medição, vale o cadastro do tanque. Capacidade é um campo só.
+      alturaTanque: auto.alturaTanque || doTanque.alturaTanque,
+      diametro: auto.diametro || doTanque.diametro,
+      comprimento: auto.comprimento || doTanque.comprimento,
+      largura: auto.largura || doTanque.largura,
+      capacidadeTanque: auto.capacidadeTanque || doTanque.capacidadeNominal,
+      volumeSedimento: volume,
+      // Faixa de ±5% sobre o volume medido (texto do tópico 7) — derivada.
+      ...faixaVolume(volume),
     };
-  }, [insp, coletas, agAtivos, relatorios, contatoCliente]);
-  const bloco: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
+  }, [insp, coletas, agDoBloco, bloco, revisaoRelatorio, codigoProjetoOS, contatoCliente, procedimentos]);
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "");
@@ -443,7 +469,9 @@ export default function InspecaoDetalhePage() {
     setErro(null);
     setProcessando(true);
     try {
-      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST", { acao, motivo: motivoTexto }, "Ação de fase");
+      // Aprovar/reprovar age sobre o relatório MOSTRADO (não "todos em aprovação").
+      const relatorioId = acao === "aprovar" || acao === "reprovar" ? relEmAvaliacao?.id : undefined;
+      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST", { acao, motivo: motivoTexto, relatorioId }, "Ação de fase");
       if (res.queued) { setReprovar(null); setMotivo(""); alert("Sem conexão — ação salva offline e aplicada ao reconectar."); return; }
       if (!res.ok) { setErro(res.data?.erro || "Não foi possível aplicar a ação."); return; }
       setReprovar(null);
@@ -483,6 +511,22 @@ export default function InspecaoDetalhePage() {
           "As fotos que faltam não entram no Relatório de Execução.");
       }
       if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta OS.");
+    }
+    //  · Relatório → Aprovação (4 → 5, 8 → 9) sem relatório em aprovação: a
+    //    Gerência não teria o que aprovar.
+    if ((insp?.fase === 4 || insp?.fase === 8) && opcao.acao === "avancar") {
+      const tipo = tipoDaFase(insp.fase);
+      if (emAprovacaoDoTipo(refsRelatorio, tipo).length === 0) {
+        titulo = insp.fase === 4 ? "Pendências do Relatório de Inspeção" : "Pendências do Relatório de Execução";
+        const rasc = rascunhoDoTipo(refsRelatorio, tipo);
+        blocos.push(rasc
+          ? `O relatório de ${ROTULO_TIPO[tipo]} está só em rascunho (v${rasc.versao}) — não foi enviado para aprovação. A Gerência não terá o que aprovar.`
+          : `Nenhum relatório de ${ROTULO_TIPO[tipo]} foi enviado para aprovação nesta OS. A Gerência não terá o que aprovar.`);
+      }
+    }
+    if ((insp?.fase === 5 || insp?.fase === 9) && opcao.acao === "aprovar" && !relEmAvaliacao) {
+      titulo = "Aprovação sem relatório";
+      blocos.push(`Nenhum relatório de ${ROTULO_TIPO[tipoDaFase(insp.fase)]} está em aprovação nesta OS.`);
     }
     if (blocos.length > 0 && !confirm(`${titulo}:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
     aplicar(opcao.acao);
@@ -935,12 +979,17 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  /** Submete um rascunho já anexado à aprovação da Gerência. */
-  async function enviarParaAprovacao(relatorioId: string) {
+  /** Submete um rascunho já anexado à aprovação da Gerência. Confirma a
+   *  versão que ele terá e a versão em aprovação que será substituída. */
+  async function enviarParaAprovacao(rel: Relatorio) {
+    const plano = planejarEnvio(refsRelatorio, rel.tipo, rel.id);
+    const linhas = [`Enviar o rascunho do relatório de ${ROTULO_TIPO[rel.tipo as TipoRelatorio] || rel.tipo} para aprovação como v${plano.versao}?`];
+    plano.substitui.forEach((x) => linhas.push(`⚠️ A versão v${x.versao} em aprovação será substituída (sai da fila da Gerência).`));
+    if (!confirm(linhas.join("\n\n"))) return;
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
-      const res = await fetch(`/api/relatorios/${relatorioId}`, {
+      const res = await fetch(`/api/relatorios/${rel.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enviar: true }),
       });
@@ -954,44 +1003,70 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  async function enviarRelatorio(arquivo: File, rascunho = false, dadosForm?: any, substituirId?: string) {
+  /** Sobe o arquivo direto ao storage (URL assinada) e registra. A versão é
+   *  decidida pela API; o tipo é o da fase. Devolve o erro em vez de só
+   *  mostrar — o formulário de geração e o diálogo de envio o exibem. */
+  async function enviarRelatorio(arquivo: File, opcoes: {
+    rascunho?: boolean; dados?: any; formato?: FormatoRelatorio | null; chave?: string;
+  } = {}): Promise<{ ok: boolean; erro?: string }> {
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
-      const tipo = tipoRelatorio || bloco;
-      const ext = arquivo.name.toLowerCase().endsWith(".pdf") ? "pdf"
-        : arquivo.name.toLowerCase().endsWith(".docx") ? "docx" : "";
-      if (!ext) { setErroRelatorio("Envie o relatório em PDF ou DOCX."); return; }
-
+      const ext = opcoes.formato || (arquivo.name.toLowerCase().endsWith(".pdf") ? "pdf" : "docx");
       // Arquivos grandes não cabem no corpo da função serverless (~4,5 MB na
       // Vercel). Enviamos direto ao storage com URL assinada e depois só
-      // registramos o caminho — sem limite prático de tamanho.
+      // registramos o caminho — a API confere o arquivo lá.
       const rUrl = await fetch("/api/relatorios/upload-url", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inspecaoId: id, tipo, ext }),
+        body: JSON.stringify({ inspecaoId: id, tipo: bloco, ext }),
       });
       const dUrl = await rUrl.json().catch(() => ({}));
-      if (!rUrl.ok) { setErroRelatorio(dUrl?.erro || "Falha ao preparar o envio."); return; }
+      if (!rUrl.ok) return { ok: false, erro: dUrl?.erro || "Falha ao preparar o envio." };
 
       const supabase = getSupabaseBrowserClient();
-      const up = await supabase.storage.from("gp-arquivos")
-        .uploadToSignedUrl(dUrl.caminho, dUrl.token, arquivo);
-      if (up.error) { setErroRelatorio(`Falha ao enviar o arquivo: ${up.error.message}`); return; }
+      const up = await supabase.storage.from("gp-arquivos").uploadToSignedUrl(dUrl.caminho, dUrl.token, arquivo);
+      if (up.error) return { ok: false, erro: `Falha ao enviar o arquivo: ${up.error.message}` };
 
-      const res = await enviarArquivo(
-        "/api/relatorios",
-        { inspecaoId: id, tipo, arquivoPath: dUrl.caminho, nomeArquivo: arquivo.name,
-          ...(rascunho ? { rascunho: "1" } : {}),
-          ...(dadosForm ? { dados: JSON.stringify(dadosForm) } : {}),
-          ...(substituirId ? { substituirId } : {}) },
-        new File([""], arquivo.name), "Relatório");
-      if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
-      if (!res.ok) { setErroRelatorio(res.data?.erro || "Falha ao enviar o relatório."); return; }
+      const res = await enviarJson("/api/relatorios", "POST",
+        { inspecaoId: id, tipo: bloco, arquivoPath: dUrl.caminho, rascunho: !!opcoes.rascunho, dados: opcoes.dados || null },
+        "Relatório", opcoes.chave || novoId());
+      if (res.queued) { alert("Sem conexão — relatório salvo offline e registrado ao reconectar."); return { ok: true }; }
+      if (!res.ok) return { ok: false, erro: res.data?.erro || "Falha ao enviar o relatório." };
       carregar();
+      return { ok: true };
+    } catch {
+      return { ok: false, erro: "Sem conexão — tente novamente quando estiver online." };
     } finally {
       setEnviandoRelatorio(false);
+    }
+  }
+
+  /** "Enviar relatório" (arquivo de fora): confere pelos bytes (PDF/DOCX de
+   *  verdade, até 30 MB) e se o mesmo arquivo já está na OS, e abre a
+   *  confirmação com a versão que será criada. */
+  async function escolherRelatorioExterno(f: File) {
+    setErroRelatorio(null);
+    setVerificandoArquivo(true);
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const ex = await examinarArquivoRelatorio(bytes, { tamanho: f.size, max: RELATORIO_MAX_BYTES });
+      let erroArq = ex.erro;
+      if (!erroArq) {
+        const igual = arquivoRelatorioRepetido(await sha256Hex(bytes), refsRelatorio);
+        if (igual) erroArq = `Este mesmo arquivo já foi enviado nesta OS (${descreverRelatorio(igual)}).`;
+      }
+      setEnvioExterno({ arquivo: f, formato: ex.formato, erro: erroArq, chave: novoId() });
+    } finally {
+      setVerificandoArquivo(false);
       if (relatorioInputRef.current) relatorioInputRef.current.value = "";
     }
+  }
+
+  async function confirmarEnvioExterno() {
+    if (!envioExterno || envioExterno.erro) return;
+    const r = await enviarRelatorio(envioExterno.arquivo, { formato: envioExterno.formato, chave: envioExterno.chave });
+    if (r.ok) setEnvioExterno(null);
+    else setEnvioExterno((e) => (e ? { ...e, erro: r.erro || "Falha ao enviar." } : e));
   }
 
   /** Zera o que é comum ao abrir o modal (novo ou edição). */
@@ -1397,6 +1472,16 @@ export default function InspecaoDetalhePage() {
               : "Nenhuma ação disponível para o seu perfil nesta fase."}
           </p>
         ) : (
+          <>
+          {(insp.fase === 5 || insp.fase === 9) && (
+            <p className="detalhe" style={{ margin: "0 0 10px" }}>
+              {relEmAvaliacao ? (
+                <>Relatório em avaliação: <strong>{ROTULO_TIPO[relEmAvaliacao.tipo as TipoRelatorio]} v{relEmAvaliacao.versao}</strong>{" "}
+                  — <a href={`/api/relatorios/${relEmAvaliacao.id}/download`} target="_blank" rel="noopener noreferrer">baixar</a>.
+                  Aprovar/reprovar vale só para esta versão.</>
+              ) : `Nenhum relatório de ${ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação.`}
+            </p>
+          )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {acoes.map((o) => (
               <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)} disabled={processando}>
@@ -1404,6 +1489,7 @@ export default function InspecaoDetalhePage() {
               </button>
             ))}
           </div>
+          </>
         )}
         {erro && <p className="erro-texto" style={{ marginBottom: 0 }}>{erro}</p>}
       </div>
@@ -1610,26 +1696,31 @@ export default function InspecaoDetalhePage() {
         resumo={resumoRelatorios}
         acoesCabecalho={podeRelatorio && (
             <>
-              <select value={tipoRelatorio || bloco}
-                onChange={(e) => setTipoRelatorio(e.target.value as "inspecao" | "execucao")}
-                title="Tipo do relatório a enviar"
-                style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid var(--borda)",
-                  background: "var(--bg-card)", color: "var(--texto)", fontSize: 13 }}>
-                <option value="inspecao">Inspeção</option>
-                <option value="execucao">Execução</option>
-              </select>
-              <button className="btn-azul btn-sec" onClick={() => setModalRelatorio(true)}>📄 Gerar relatório</button>
-              <button className="btn-azul" onClick={() => relatorioInputRef.current?.click()} disabled={enviandoRelatorio}>
-                {enviandoRelatorio ? "Enviando…" : "Enviar relatório"}
+              <span className="detalhe" style={{ margin: 0, alignSelf: "center" }}
+                title="O tipo segue a fase da OS: inspeção até a fase 5, execução da 6 em diante.">
+                Relatório de {ROTULO_TIPO[bloco]}
+              </span>
+              <button className="btn-azul btn-sec" onClick={() => {
+                // Um rascunho por tipo: "gerar" abre o rascunho que já existe.
+                const rasc = rascunhoBloco ? relatorios.find((x) => x.id === rascunhoBloco.id) : null;
+                setRascunhoEmEdicao(rasc ? { id: rasc.id, dados: rasc.dados || null } : null);
+                setModalRelatorio(true);
+              }}>{rascunhoBloco ? `📄 Editar rascunho v${rascunhoBloco.versao}` : "📄 Gerar relatório"}</button>
+              <button className="btn-azul" onClick={() => relatorioInputRef.current?.click()} disabled={enviandoRelatorio || verificandoArquivo}>
+                {verificandoArquivo ? "Conferindo…" : enviandoRelatorio ? "Enviando…" : "Enviar relatório"}
               </button>
-              <input ref={relatorioInputRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) enviarRelatorio(f); }} />
+              <input ref={relatorioInputRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) escolherRelatorioExterno(f); }} />
             </>
         )}>
         {erroRelatorio && (
           <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erroRelatorio}</p>
         )}
-        <p className="detalhe" style={{ marginTop: 0 }}>Cada envio gera uma nova versão. Envio manual (PDF/DOCX); a Gerência aprova ou marca “Ajustar”.</p>
+        <p className="detalhe" style={{ marginTop: 0 }}>
+          Cada envio para aprovação é uma nova versão (a que estava em aprovação é substituída). Um rascunho por tipo:
+          gerar de novo atualiza o mesmo. Envio de fora: PDF ou DOCX, até 30 MB. A Gerência aprova ou marca “Ajustar”.
+        </p>
         {relatorios.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum relatório enviado.</p>
         ) : (
@@ -1639,9 +1730,15 @@ export default function InspecaoDetalhePage() {
                 style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12, marginTop: 0 }}>
                 <div className="linha-texto">
                   <div style={{ color: "var(--texto)" }}>
-                    <strong style={{ textTransform: "capitalize" }}>{r.tipo}</strong> v{r.versao} —{" "}
+                    <strong style={{ textTransform: "capitalize" }}>{ROTULO_TIPO[r.tipo as TipoRelatorio] || r.tipo}</strong> v{r.versao} —{" "}
                     <span style={{ color: corStatus(r.status) }}>{rotuloStatus(r.status)}</span>
                   </div>
+                  {r.status === "substituido" && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      Substituído{(() => { const n = relatorios.find((x) => x.id === r.substituido_por); return n ? ` pela v${n.versao}` : ""; })()}
+                      {r.substituido_em ? ` em ${formatar(r.substituido_em)}` : ""} — saiu da fila da Gerência.
+                    </div>
+                  )}
                   {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {r.motivo_ajuste}</div>}
                   {r.enviado_em && <div className="detalhe" style={{ margin: 0 }}>Enviado em {formatar(r.enviado_em)}</div>}
                 </div>
@@ -1650,7 +1747,7 @@ export default function InspecaoDetalhePage() {
                     <>
                       <button className="btn-dl" disabled={enviandoRelatorio}
                         title="Submeter este rascunho à Gerência"
-                        onClick={() => enviarParaAprovacao(r.id)}>
+                        onClick={() => enviarParaAprovacao(r)}>
                         {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
                       </button>
                       <button className="btn-dl btn-sec"
@@ -1845,15 +1942,58 @@ export default function InspecaoDetalhePage() {
           usuarios={usuarios}
           coletas={coletas.filter((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados))}
           // Relatório de Execução: as fotos da coleta entram já posicionadas.
-          coletaFotos={(tipoRelatorio || bloco) === "execucao" ? fotosExec : undefined}
+          coletaFotos={bloco === "execucao" ? fotosExec : undefined}
+          inspecaoId={id}
+          revisaoEsperada={revisaoRelatorio}
+          codigoEsperado={codigoRelatorio(codigoProjetoOS, revisaoRelatorio)}
+          podeEditarRevisao={podeEditarRevisao({ perfil, funcao })}
+          equipeAgendada={(agDoBloco?.equipe || []).map((m) => m.id).filter(Boolean)}
           onSalvar={async (blob, snapshot) => {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "OS"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             });
-            await enviarRelatorio(arquivo, true, snapshot, rascunhoEmEdicao?.id);   // true = rascunho
+            // Rascunho: a API atualiza o rascunho do tipo (um só) ou cria.
+            const r = await enviarRelatorio(arquivo, { rascunho: true, dados: snapshot, formato: "docx" });
+            if (!r.ok) throw new Error(r.erro || "Falha ao salvar o rascunho.");
           }}
         />
       )}
+
+      {/* Confirmação do envio de relatório de fora (PDF/DOCX) */}
+      {envioExterno && (() => {
+        const plano = planejarEnvio(refsRelatorio, bloco);
+        const tam = (envioExterno.arquivo.size / 1048576).toFixed(1).replace(".", ",");
+        return (
+          <Modal titulo="Enviar relatório para aprovação" onFechar={() => setEnvioExterno(null)}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <p style={{ margin: 0, overflowWrap: "anywhere" }}>
+                Arquivo: <strong>{envioExterno.arquivo.name}</strong> ({tam} MB{envioExterno.formato ? ` · ${envioExterno.formato.toUpperCase()}` : ""})
+              </p>
+              {!envioExterno.erro && (
+                <p style={{ margin: 0 }}>
+                  Será criada a <strong>versão v{plano.versao}</strong> do relatório de {ROTULO_TIPO[bloco]}, já{" "}
+                  <strong>em aprovação</strong> pela Gerência.
+                </p>
+              )}
+              {!envioExterno.erro && plano.substitui.map((x) => (
+                <p key={x.id} className="val-msg val-aviso" style={{ margin: 0 }}>
+                  ⚠️ A versão v{x.versao} em aprovação será substituída (sai da fila da Gerência).
+                </p>
+              ))}
+              {!envioExterno.erro && rascunhoBloco && (
+                <p className="detalhe" style={{ margin: 0 }}>O rascunho v{rascunhoBloco.versao} continua como rascunho.</p>
+              )}
+              {envioExterno.erro && <p className="val-msg val-erro" style={{ margin: 0 }}>⛔ {envioExterno.erro}</p>}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <button className="btn-azul btn-sec" onClick={() => setEnvioExterno(null)} disabled={enviandoRelatorio}>Cancelar</button>
+                <button className="btn-azul" onClick={confirmarEnvioExterno} disabled={!!envioExterno.erro || enviandoRelatorio}>
+                  {enviandoRelatorio ? "Enviando…" : `Enviar como v${plano.versao}`}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Modal: medidor de sedimento (ferramenta de campo embutida por iframe) */}
       {modalMedidor && (
@@ -2180,18 +2320,6 @@ export default function InspecaoDetalhePage() {
   );
 }
 
-/** SHA-256 (hex) no navegador; null se a API de cripto não estiver disponível
- *  (página fora de HTTPS) — aí a checagem de arquivo repetido fica com a API. */
-async function sha256Hex(bytes: Uint8Array): Promise<string | null> {
-  try {
-    if (typeof crypto === "undefined" || !crypto.subtle) return null;
-    const buf = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
-    return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
-  } catch {
-    return null;
-  }
-}
-
 function formatar(iso?: string | null) {
   if (!iso) return "";
   return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
@@ -2201,10 +2329,10 @@ function formatarData(iso?: string | null) {
   return new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso).toLocaleDateString("pt-BR");
 }
 function rotuloStatus(s: string) {
-  return { rascunho: "Rascunho", em_aprovacao: "Em aprovação", aprovado: "Aprovado", ajustar: "Ajustar", assinado: "Assinado" }[s] || s;
+  return ROTULO_STATUS_RELATORIO[s] || s;
 }
 function corStatus(s: string) {
-  return { em_aprovacao: "#c2410c", aprovado: "#16a34a", ajustar: "#dc2626", assinado: "#7c3aed" }[s] || "var(--texto-suave)";
+  return ({ em_aprovacao: "#c2410c", aprovado: "#16a34a", ajustar: "#dc2626", assinado: "#7c3aed" } as Record<string, string>)[s] || "var(--texto-suave)";
 }
 /** Etapa do agendamento por extenso ("inspecao" → "inspeção"). */
 function rotuloEtapa(t: string) {

@@ -7,12 +7,19 @@ export const runtime = "nodejs";
 interface AcaoBody {
   acao: AcaoFase;
   motivo?: string;
+  /** Aprovar/reprovar: o relatório em aprovação mostrado na tela. */
+  relatorioId?: string;
 }
 
 /**
  * Movimenta a fase da inspeção. Registra data de autenticação + autor no
  * histórico. Reprovação (fases 5/9) volta uma fase, exige motivo e marca o
- * relatório mais recente do bloco como "ajustar". Aprovação avança.
+ * relatório como "ajustar". Aprovação avança.
+ *
+ * Aprovar/reprovar age sobre UM relatório: o `relatorioId` que a tela mostra
+ * (tem de estar em aprovação, ser desta OS e do tipo da fase). Sem ele, vale
+ * o único em aprovação do tipo; havendo mais de um, 409 — não se aprova às
+ * cegas. Sem nenhum em aprovação, só a fase anda (como antes).
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
@@ -44,21 +51,40 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const novaFase = Math.min(Math.max(opcao.destino, 2), ULTIMA_FASE);
 
-  // Atualiza status do relatório do bloco quando aprovar/reprovar.
+  // Atualiza o status do relatório escolhido quando aprovar/reprovar.
   if (body.acao === "aprovar" || body.acao === "reprovar") {
     const tipo = faseAtual <= 5 ? "inspecao" : "execucao";
+    const { data: emAprovacao } = await supabase
+      .from("gp_relatorios").select("id, versao")
+      .eq("inspecao_id", params.id).eq("tipo", tipo).eq("status", "em_aprovacao").is("excluido_em", null);
+    const fila = (emAprovacao || []) as { id: string; versao: number }[];
+    let alvo: { id: string; versao: number } | null = null;
+    if (body.relatorioId) {
+      alvo = fila.find((r) => r.id === body.relatorioId) || null;
+      if (!alvo) {
+        return NextResponse.json({ erro: "Este relatório não está mais em aprovação (foi substituído ou já avaliado). Recarregue a página." }, { status: 409 });
+      }
+    } else if (fila.length > 1) {
+      return NextResponse.json({
+        erro: `Há ${fila.length} versões em aprovação (${fila.map((r) => `v${r.versao}`).join(", ")}). Recarregue a página e avalie a versão mostrada.`,
+      }, { status: 409 });
+    } else {
+      alvo = fila[0] || null;
+    }
+
     const novoStatus = body.acao === "aprovar" ? "aprovado" : "ajustar";
-    await supabase
-      .from("gp_relatorios")
-      .update({
-        status: novoStatus,
-        motivo_ajuste: body.acao === "reprovar" ? body.motivo?.trim() : null,
-        aprovado_por: body.acao === "aprovar" ? profile.id : null,
-        atualizado_em: new Date().toISOString(),
-      })
-      .eq("inspecao_id", params.id)
-      .eq("tipo", tipo)
-      .in("status", ["em_aprovacao"]);
+    if (alvo) {
+      await supabase
+        .from("gp_relatorios")
+        .update({
+          status: novoStatus,
+          motivo_ajuste: body.acao === "reprovar" ? body.motivo?.trim() : null,
+          aprovado_por: body.acao === "aprovar" ? profile.id : null,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq("id", alvo.id)
+        .eq("status", "em_aprovacao");
+    }
 
     const colStatus = tipo === "inspecao" ? "status_relatorio_inspecao" : "status_relatorio_execucao";
     await supabase.from("gp_inspecoes").update({ [colStatus]: novoStatus }).eq("id", params.id);
