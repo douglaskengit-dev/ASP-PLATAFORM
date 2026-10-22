@@ -326,13 +326,13 @@ alter table public.gp_agendamentos add column if not exists substituido_por uuid
   references public.gp_agendamentos (id) on delete set null;
 
 -- "A definir" nunca tem data.
-do $
+do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'ck_gp_agendamentos_a_definir') then
     alter table public.gp_agendamentos
       add constraint ck_gp_agendamentos_a_definir check (not a_definir or data_visita is null);
   end if;
-end $;
+end $$;
 
 -- Conflitos do dia (equipe/equipamento) e avisos do Dashboard leem só os ativos.
 create index if not exists idx_gp_agendamentos_data_ativos
@@ -341,7 +341,7 @@ create index if not exists idx_gp_agendamentos_a_definir
   on public.gp_agendamentos (lembrar_em) where a_definir and substituido_em is null;
 
 -- 3) Identificação da OS única no projeto
-do $
+do $$
 declare
   repetidas text;
 begin
@@ -372,8 +372,351 @@ begin
         'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC'), '[[:space:]._-]+', '', 'g')))
       where excluido_em is null;
   end if;
-end $;
+end $$;
 
+
+-- ============================================================================
+-- ASP — Fase 3: coleta de dados da OS sem ambiguidade nem duplicata.
+--
+-- 1) gp_coletas ganha:
+--    data_coleta     dia da coleta (fuso de Brasília), obrigatório. As
+--                    linhas antigas recebem o dia do criado_em.
+--    responsavel_id  quem mediu (usuário cadastrado) — medição do medidor.
+--    descricao       descrição do anexo (PDF avulso), obrigatória no anexo.
+--    dados_hash      SHA-256 da medição normalizada (lib/validacao/medicao.ts
+--                    → chaveMedicao); a mesma medição não entra 2x na OS.
+--    arquivo_hash    SHA-256 dos bytes do PDF; o mesmo PDF não entra 2x.
+--    aprovacao_retirada_em/_por  editar a medição aprovada retira a
+--                    aprovação; fica registrado quando e por quem.
+-- 2) Dados: coleta 'sedimento' sem medição (dados = {}) e com PDF vira
+--    'anexo' com descrição "Anexo (migrado)". Anexo e coleta na lixeira
+--    perdem a aprovação (só medição ativa vale para o relatório).
+-- 3) Índices únicos (entre as coletas NÃO excluídas):
+--    · uma medição aprovada por OS;
+--    · mesma medição (dados_hash) / mesmo PDF (arquivo_hash) por OS.
+--    Se o banco JÁ tiver duas aprovadas na mesma OS, o índice não é criado:
+--    sai um NOTICE com a lista e a migração segue. Corrija (desaprove uma)
+--    e rode de novo — é idempotente. Os de hash nascem vazios (colunas
+--    novas), mas seguem o mesmo padrão.
+-- ============================================================================
+
+-- 1) Colunas
+alter table public.gp_coletas add column if not exists data_coleta date;
+update public.gp_coletas
+  set data_coleta = (criado_em at time zone 'America/Sao_Paulo')::date
+  where data_coleta is null;
+alter table public.gp_coletas
+  alter column data_coleta set default ((now() at time zone 'America/Sao_Paulo')::date);
+alter table public.gp_coletas alter column data_coleta set not null;
+
+alter table public.gp_coletas add column if not exists responsavel_id uuid
+  references public.gp_profiles (id) on delete set null;
+alter table public.gp_coletas add column if not exists descricao text;
+alter table public.gp_coletas add column if not exists dados_hash text;
+alter table public.gp_coletas add column if not exists arquivo_hash text;
+alter table public.gp_coletas add column if not exists aprovacao_retirada_em timestamptz;
+alter table public.gp_coletas add column if not exists aprovacao_retirada_por uuid
+  references public.gp_profiles (id) on delete set null;
+
+-- 2) Dados
+update public.gp_coletas
+  set tipo = 'anexo',
+      descricao = coalesce(nullif(btrim(descricao), ''), 'Anexo (migrado)')
+  where tipo = 'sedimento'
+    and (dados is null or dados = '{}'::jsonb)
+    and pdf_path is not null;
+update public.gp_coletas
+  set descricao = 'Anexo (migrado)'
+  where tipo = 'anexo' and coalesce(btrim(descricao), '') = '';
+update public.gp_coletas
+  set aprovada_em = null, aprovada_por = null
+  where aprovada_em is not null and (tipo = 'anexo' or excluido_em is not null);
+
+-- Anexo sempre com descrição.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_coletas_anexo_descricao') then
+    alter table public.gp_coletas
+      add constraint ck_gp_coletas_anexo_descricao check (tipo <> 'anexo' or coalesce(btrim(descricao), '') <> '');
+  end if;
+end $$;
+
+create index if not exists idx_gp_coletas_inspecao_ativas
+  on public.gp_coletas (inspecao_id) where excluido_em is null;
+
+-- 3) Índices únicos
+do $$
+declare
+  repetidas text;
+begin
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_coletas_aprovada_por_os') then
+    select string_agg(format('OS %s (%s aprovadas)', inspecao_id, qtd), ', ')
+      into repetidas
+    from (
+      select inspecao_id, count(*) as qtd
+      from public.gp_coletas
+      where aprovada_em is not null and excluido_em is null
+      group by 1 having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "uma medição aprovada por OS" NÃO criado — OSs com mais de uma aprovada: %', repetidas;
+    else
+      create unique index uq_gp_coletas_aprovada_por_os
+        on public.gp_coletas (inspecao_id) where aprovada_em is not null and excluido_em is null;
+    end if;
+  end if;
+
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_coletas_dados_hash') then
+    select string_agg(format('OS %s', inspecao_id), ', ') into repetidas
+    from (
+      select inspecao_id from public.gp_coletas
+      where dados_hash is not null and excluido_em is null
+      group by inspecao_id, dados_hash having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "medição única por OS" NÃO criado — medições repetidas em: %', repetidas;
+    else
+      create unique index uq_gp_coletas_dados_hash
+        on public.gp_coletas (inspecao_id, dados_hash) where dados_hash is not null and excluido_em is null;
+    end if;
+  end if;
+
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_coletas_arquivo_hash') then
+    select string_agg(format('OS %s', inspecao_id), ', ') into repetidas
+    from (
+      select inspecao_id from public.gp_coletas
+      where arquivo_hash is not null and excluido_em is null
+      group by inspecao_id, arquivo_hash having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "PDF único por OS" NÃO criado — PDFs repetidos em: %', repetidas;
+    else
+      create unique index uq_gp_coletas_arquivo_hash
+        on public.gp_coletas (inspecao_id, arquivo_hash) where arquivo_hash is not null and excluido_em is null;
+    end if;
+  end if;
+end $$;
+
+-- ============================================================================
+-- ASP — Fase 4: relatório de inspeção/execução sem ambiguidade nem duplicata.
+--
+-- 1) gp_relatorios ganha:
+--    arquivo_hash    SHA-256 dos bytes do arquivo (PDF/DOCX). O mesmo arquivo
+--                    não entra 2x na mesma OS. Linhas antigas ficam null.
+--    substituido_em/_por  uma versão nova enviada enquanto outra estava em
+--                    aprovação SUBSTITUI a anterior: ela vira 'substituido'
+--                    (sai da fila da Gerência) e aponta para a nova.
+-- 2) status aceita 'substituido'.
+-- 3) Índices únicos (entre os relatórios NÃO excluídos):
+--    · (OS, tipo, versão)           — a versão é calculada uma vez, no insert;
+--    · um rascunho por (OS, tipo)   — gerar de novo atualiza o mesmo;
+--    · um em aprovação por (OS, tipo);
+--    · mesmo arquivo (hash) por OS.
+--    Se o banco JÁ tiver dados que violam um índice, ele NÃO é criado: sai um
+--    NOTICE com a lista e a migração segue. Corrija (exclua o rascunho a mais,
+--    reprove/aprove a versão antiga…) e rode de novo — é idempotente.
+--    Nenhum dado existente é alterado por esta migração.
+-- ============================================================================
+
+-- 1) Colunas
+alter table public.gp_relatorios add column if not exists arquivo_hash text;
+alter table public.gp_relatorios add column if not exists substituido_em timestamptz;
+alter table public.gp_relatorios add column if not exists substituido_por uuid
+  references public.gp_relatorios (id) on delete set null;
+
+-- 2) Status 'substituido' (o check original não tem nome próprio: troca
+--    qualquer check de status da tabela pelo nomeado abaixo).
+do $$
+declare
+  c record;
+begin
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_status') then
+    for c in
+      select conname from pg_constraint
+      where conrelid = 'public.gp_relatorios'::regclass and contype = 'c'
+        and pg_get_constraintdef(oid) ilike '%status%'
+    loop
+      execute format('alter table public.gp_relatorios drop constraint %I', c.conname);
+    end loop;
+    alter table public.gp_relatorios add constraint ck_gp_relatorios_status
+      check (status in ('rascunho', 'em_aprovacao', 'aprovado', 'ajustar', 'assinado', 'substituido'));
+  end if;
+end $$;
+
+create index if not exists idx_gp_relatorios_inspecao_ativos
+  on public.gp_relatorios (inspecao_id, tipo) where excluido_em is null;
+
+-- 3) Índices únicos
+do $$
+declare
+  repetidas text;
+begin
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_versao') then
+    select string_agg(format('OS %s %s v%s (%s linhas)', inspecao_id, tipo, versao, qtd), ', ') into repetidas
+    from (
+      select inspecao_id, tipo, versao, count(*) as qtd from public.gp_relatorios
+      where excluido_em is null group by 1, 2, 3 having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "versão única por OS/tipo" NÃO criado — versões repetidas: %', repetidas;
+    else
+      create unique index uq_gp_relatorios_versao
+        on public.gp_relatorios (inspecao_id, tipo, versao) where excluido_em is null;
+    end if;
+  end if;
+
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_rascunho') then
+    select string_agg(format('OS %s %s (%s rascunhos)', inspecao_id, tipo, qtd), ', ') into repetidas
+    from (
+      select inspecao_id, tipo, count(*) as qtd from public.gp_relatorios
+      where excluido_em is null and status = 'rascunho' group by 1, 2 having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "um rascunho por OS/tipo" NÃO criado — mais de um rascunho em: %', repetidas;
+    else
+      create unique index uq_gp_relatorios_rascunho
+        on public.gp_relatorios (inspecao_id, tipo) where excluido_em is null and status = 'rascunho';
+    end if;
+  end if;
+
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_em_aprovacao') then
+    select string_agg(format('OS %s %s (%s em aprovação)', inspecao_id, tipo, qtd), ', ') into repetidas
+    from (
+      select inspecao_id, tipo, count(*) as qtd from public.gp_relatorios
+      where excluido_em is null and status = 'em_aprovacao' group by 1, 2 having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "um relatório em aprovação por OS/tipo" NÃO criado — mais de um em aprovação em: %', repetidas;
+    else
+      create unique index uq_gp_relatorios_em_aprovacao
+        on public.gp_relatorios (inspecao_id, tipo) where excluido_em is null and status = 'em_aprovacao';
+    end if;
+  end if;
+
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_arquivo_hash') then
+    select string_agg(format('OS %s', inspecao_id), ', ') into repetidas
+    from (
+      select inspecao_id from public.gp_relatorios
+      where arquivo_hash is not null and excluido_em is null
+      group by inspecao_id, arquivo_hash having count(*) > 1
+    ) d;
+    if repetidas is not null then
+      raise notice 'Índice "arquivo único por OS" NÃO criado — arquivos repetidos em: %', repetidas;
+    else
+      create unique index uq_gp_relatorios_arquivo_hash
+        on public.gp_relatorios (inspecao_id, arquivo_hash) where arquivo_hash is not null and excluido_em is null;
+    end if;
+  end if;
+end $$;
+
+-- ============================================================================
+-- ASP — Fases 5/9: aprovação do relatório sem ambiguidade nem duplicata, e a
+-- versão ASSINADA do relatório.
+--
+-- 1) gp_relatorios ganha:
+--    motivo_categoria   categoria da reprovação (Dados incorretos, Fotos,
+--                       Texto/redação, Medição, Formatação, Outro).
+--    avaliado_por/_em   quem aprovou OU reprovou, e quando (aprovado_por
+--                       continua só para a aprovação).
+--    assinado_path/_hash/_por/_em  a versão assinada (PDF) do relatório
+--                       aprovado — o documento final. status → 'assinado'.
+-- 2) gp_fase_historico ganha:
+--    motivo_categoria   mesma categoria, no histórico da reprovação.
+--    relatorio_id       relatório avaliado/assinado naquela movimentação.
+--    chave_idempotencia Idempotency-Key do envio (fila offline / duplo
+--                       clique): única — a mesma ação não entra 2x.
+-- 3) gp_inspecoes.cadastro_atualizado_em: quando TAG, procedimento ou tanque
+--    mudaram (aviso "a OS mudou depois do envio do relatório").
+-- 4) gp_relatorio_visualizacoes(relatorio_id, usuario_id, em): quem já
+--    baixou cada versão (aviso "aprovar sem ter aberto o arquivo"). Gravada
+--    pela rota de download (chave de serviço).
+-- 5) Checks: categoria na lista; status 'assinado' só com o arquivo
+--    assinado; a mesma versão assinada (hash) uma vez por OS.
+--    Se o banco JÁ tiver dados que violam um check/índice, ele NÃO é criado:
+--    sai um NOTICE e a migração segue. Corrija e rode de novo (idempotente).
+--    Nenhum dado existente é alterado por esta migração.
+-- ============================================================================
+
+-- 1) gp_relatorios
+alter table public.gp_relatorios add column if not exists motivo_categoria text;
+alter table public.gp_relatorios add column if not exists avaliado_por uuid references public.gp_profiles (id);
+alter table public.gp_relatorios add column if not exists avaliado_em timestamptz;
+alter table public.gp_relatorios add column if not exists assinado_path text;
+alter table public.gp_relatorios add column if not exists assinado_hash text;
+alter table public.gp_relatorios add column if not exists assinado_por uuid references public.gp_profiles (id);
+alter table public.gp_relatorios add column if not exists assinado_em timestamptz;
+
+-- 2) gp_fase_historico
+alter table public.gp_fase_historico add column if not exists motivo_categoria text;
+alter table public.gp_fase_historico add column if not exists relatorio_id uuid
+  references public.gp_relatorios (id) on delete set null;
+alter table public.gp_fase_historico add column if not exists chave_idempotencia uuid;
+create unique index if not exists uq_gp_fase_historico_chave
+  on public.gp_fase_historico (chave_idempotencia) where chave_idempotencia is not null;
+
+-- 3) gp_inspecoes
+alter table public.gp_inspecoes add column if not exists cadastro_atualizado_em timestamptz;
+
+-- 4) Visualizações (downloads) por usuário e versão
+create table if not exists public.gp_relatorio_visualizacoes (
+  id uuid primary key default gen_random_uuid(),
+  relatorio_id uuid not null references public.gp_relatorios (id) on delete cascade,
+  usuario_id uuid not null references public.gp_profiles (id) on delete cascade,
+  em timestamptz not null default now(),
+  unique (relatorio_id, usuario_id)
+);
+alter table public.gp_relatorio_visualizacoes enable row level security;
+drop policy if exists gp_relatorio_visualizacoes_select on public.gp_relatorio_visualizacoes;
+create policy gp_relatorio_visualizacoes_select on public.gp_relatorio_visualizacoes for select to authenticated
+  using (public.gp_perfil_atual_asp() is not null);
+drop policy if exists gp_relatorio_visualizacoes_insert on public.gp_relatorio_visualizacoes;
+create policy gp_relatorio_visualizacoes_insert on public.gp_relatorio_visualizacoes for insert to authenticated
+  with check (usuario_id = auth.uid() and public.gp_perfil_atual_asp() is not null);
+drop policy if exists gp_relatorio_visualizacoes_update on public.gp_relatorio_visualizacoes;
+create policy gp_relatorio_visualizacoes_update on public.gp_relatorio_visualizacoes for update to authenticated
+  using (usuario_id = auth.uid());
+
+-- 5) Checks e índice
+do $$
+declare
+  qtd int;
+  lista text;
+begin
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_motivo_categoria') then
+    alter table public.gp_relatorios add constraint ck_gp_relatorios_motivo_categoria
+      check (motivo_categoria is null or motivo_categoria in ('dados_incorretos', 'fotos', 'texto', 'medicao', 'formatacao', 'outro'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_fase_historico_motivo_categoria') then
+    alter table public.gp_fase_historico add constraint ck_gp_fase_historico_motivo_categoria
+      check (motivo_categoria is null or motivo_categoria in ('dados_incorretos', 'fotos', 'texto', 'medicao', 'formatacao', 'outro'));
+  end if;
+
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_assinado_arquivo') then
+    select count(*), string_agg(format('OS %s %s v%s', inspecao_id, tipo, versao), ', ') into qtd, lista
+    from public.gp_relatorios where status = 'assinado' and assinado_path is null;
+    if qtd > 0 then
+      raise notice 'Check "assinado só com arquivo assinado" NÃO criado — % relatório(s) com status assinado sem o arquivo: %. Envie a versão assinada (ou volte o status para aprovado) e rode de novo.', qtd, lista;
+    else
+      alter table public.gp_relatorios add constraint ck_gp_relatorios_assinado_arquivo
+        check (status <> 'assinado' or assinado_path is not null);
+    end if;
+  end if;
+
+  if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_assinado_hash') then
+    select string_agg(format('OS %s', inspecao_id), ', ') into lista
+    from (
+      select inspecao_id from public.gp_relatorios
+      where assinado_hash is not null and excluido_em is null
+      group by inspecao_id, assinado_hash having count(*) > 1
+    ) d;
+    if lista is not null then
+      raise notice 'Índice "versão assinada única por OS" NÃO criado — arquivos assinados repetidos em: %', lista;
+    else
+      create unique index uq_gp_relatorios_assinado_hash
+        on public.gp_relatorios (inspecao_id, assinado_hash) where assinado_hash is not null and excluido_em is null;
+    end if;
+  end if;
+end $$;
 
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
@@ -397,7 +740,17 @@ with esperado(tabela, coluna) as (values
   ('gp_rdos','dados'), ('gp_rdos','inspecoes'), ('gp_rdos','arquivo_em'),
   ('gp_push_subscriptions','endpoint'),
   ('gp_agendamentos','a_definir'), ('gp_agendamentos','lembrar_em'),
-  ('gp_agendamentos','substituido_em'), ('gp_agendamentos','substituido_por')
+  ('gp_agendamentos','substituido_em'), ('gp_agendamentos','substituido_por'),
+  ('gp_coletas','data_coleta'), ('gp_coletas','responsavel_id'), ('gp_coletas','descricao'),
+  ('gp_coletas','dados_hash'), ('gp_coletas','arquivo_hash'), ('gp_coletas','aprovacao_retirada_em'),
+  ('gp_coletas','aprovacao_retirada_por'),
+  ('gp_relatorios','arquivo_hash'), ('gp_relatorios','substituido_em'), ('gp_relatorios','substituido_por'),
+  ('gp_relatorios','motivo_categoria'), ('gp_relatorios','avaliado_por'), ('gp_relatorios','avaliado_em'),
+  ('gp_relatorios','assinado_path'), ('gp_relatorios','assinado_hash'), ('gp_relatorios','assinado_por'),
+  ('gp_relatorios','assinado_em'),
+  ('gp_fase_historico','motivo_categoria'), ('gp_fase_historico','relatorio_id'), ('gp_fase_historico','chave_idempotencia'),
+  ('gp_inspecoes','cadastro_atualizado_em'),
+  ('gp_relatorio_visualizacoes','relatorio_id'), ('gp_relatorio_visualizacoes','usuario_id'), ('gp_relatorio_visualizacoes','em')
 )
 select * from (
   select e.tabela, e.coluna,
@@ -418,6 +771,74 @@ select * from (
   union all
   select 'gp_agendamentos', 'check a_definir sem data',
     case when exists (select 1 from pg_constraint where conname = 'ck_gp_agendamentos_a_definir')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  -- Fase 3: anexo com descrição; uma aprovada por OS; medição/PDF únicos por OS.
+  select 'gp_coletas', 'check anexo com descrição',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_coletas_anexo_descricao')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_coletas', 'índice uma medição aprovada por OS',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_coletas_aprovada_por_os')
+      then 'OK' else 'PENDENTE — OS com mais de uma medição aprovada' end
+  union all
+  select 'gp_coletas', 'índice medição única por OS',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_coletas_dados_hash')
+      then 'OK' else 'PENDENTE — medições repetidas' end
+  union all
+  select 'gp_coletas', 'índice PDF único por OS',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_coletas_arquivo_hash')
+      then 'OK' else 'PENDENTE — PDFs repetidos' end
+  union all
+  select 'gp_coletas', 'data_coleta obrigatória',
+    case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'gp_coletas'
+      and column_name = 'data_coleta' and is_nullable = 'NO') then 'OK' else '*** FALTANDO ***' end
+  union all
+  -- Fase 4: status 'substituido'; versão/rascunho/em aprovação/arquivo únicos.
+  select 'gp_relatorios', 'check status com substituido',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_status')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_relatorios', 'índice versão única por OS/tipo',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_versao')
+      then 'OK' else 'PENDENTE — versões repetidas' end
+  union all
+  select 'gp_relatorios', 'índice um rascunho por OS/tipo',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_rascunho')
+      then 'OK' else 'PENDENTE — mais de um rascunho' end
+  union all
+  select 'gp_relatorios', 'índice um em aprovação por OS/tipo',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_em_aprovacao')
+      then 'OK' else 'PENDENTE — mais de um em aprovação' end
+  union all
+  select 'gp_relatorios', 'índice arquivo único por OS',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_arquivo_hash')
+      then 'OK' else 'PENDENTE — arquivos repetidos' end
+  union all
+  -- Fases 5/9: categoria da reprovação; assinado com arquivo; assinada única;
+  -- ação de fase sem duplicata (Idempotency-Key); visualizações com RLS.
+  select 'gp_relatorios', 'check categoria da reprovação',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_motivo_categoria')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_fase_historico', 'check categoria da reprovação',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_fase_historico_motivo_categoria')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_relatorios', 'check assinado com arquivo',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_assinado_arquivo')
+      then 'OK' else 'PENDENTE — assinado sem arquivo' end
+  union all
+  select 'gp_relatorios', 'índice versão assinada única por OS',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_relatorios_assinado_hash')
+      then 'OK' else 'PENDENTE — assinadas repetidas' end
+  union all
+  select 'gp_fase_historico', 'índice chave de idempotência',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_fase_historico_chave')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_relatorio_visualizacoes', 'RLS ativo',
+    case when exists (select 1 from pg_class where oid = to_regclass('public.gp_relatorio_visualizacoes') and relrowsecurity)
       then 'OK' else '*** FALTANDO ***' end
 ) r
 order by status desc, tabela, coluna;

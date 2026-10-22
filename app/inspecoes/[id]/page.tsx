@@ -3,7 +3,25 @@
 /** ASP — Detalhe da Inspeção: barra de progresso das fases (2..10), ações
  * conforme o perfil (avançar / aprovar / reprovar-"Ajustar"), coleta (medidor
  * de sedimento), agendamento (checklist jsonb), relatórios versionados e
- * histórico de autenticação. As fases correm por inspeção. Ver COWORK-ASP §2. */
+ * histórico de autenticação. As fases correm por inspeção. Ver COWORK-ASP §2.
+ *
+ * Fase 3 (coleta): toda medição passa por uma confirmação (data da coleta,
+ * responsável, regras de lib/validacao/coleta.ts + medicao.ts) antes de
+ * gravar; a API repete as mesmas regras.
+ *
+ * Fase 4 (relatório): o tipo segue a fase (inspeção até a 5, execução da 6
+ * em diante); o envio de arquivo de fora é conferido (PDF/DOCX de verdade,
+ * 30 MB, arquivo repetido) e confirmado mostrando a versão que será criada e
+ * a que será substituída; aprovar/reprovar age sobre o relatório mostrado.
+ * Regras em lib/validacao/relatorio.ts; a API repete as que bloqueiam.
+ *
+ * Fases 5/9 (aprovação): aprovar/reprovar exige o relatório em aprovação;
+ * reprovar exige categoria + descrição com sentido; a transição é atômica
+ * (dois cliques → um vale, o outro recebe "Já avaliado por…"). Avisos ao
+ * aprovar: mesma pessoa que preparou/enviou, arquivo não baixado, OS mudou
+ * depois do envio, inspeção sem medição aprovada. Aprovado, o Comercial/
+ * Gerência envia a versão ASSINADA (PDF), que vira o documento final.
+ * Regras em lib/validacao/aprovacao.ts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -12,9 +30,11 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, perfilAtuaNaFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
-import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
-import { podeAprovarColeta } from "@/lib/asp/permissoes";
-import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
+import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
+import { podeAprovarColeta, podeEditarRevisao } from "@/lib/asp/permissoes";
+import { camposDaMedicao } from "@/lib/asp/relatorio";
+import { sha256Hex } from "@/lib/sha256";
+import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx, paraNumero } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
@@ -27,8 +47,15 @@ import Rdos from "@/app/components/Rdos";
 import { dataBr, numeroRdo, resumoRdos, type RegistroRdo } from "@/lib/asp/rdo";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import {
-  agendamentosSubstituidos, ContextoAgendamento, dataCurta, hojeBrasil, mesclar, nomeDoCatalogo, normalizarEquipamento,
-  novoResultado, OSRef, ResultadoValidacao, ROTULOS_AGENDAMENTO, sugestaoCatalogo, temErros, validarAgendamento, validarOS,
+  agendamentosSubstituidos, chaveMedicao, ColetaRef, ContextoAgendamento, ContextoColeta, dataColetaSugerida, dataCurta,
+  dataIsoValida, diferencasTanque, hojeBrasil, medicaoPreenchida, mesclar, motivoNaoAprovavel, nomeDoCatalogo,
+  normalizarEquipamento, normalizarNome, novoResultado, OSRef, ResultadoValidacao, ROTULOS_AGENDAMENTO, ROTULOS_COLETA,
+  sugestaoCatalogo, tanqueComMedidas, temErros, validarAgendamento, validarColeta, validarOS, validarPdf,
+  arquivoRelatorioRepetido, codigoRelatorio, descreverRelatorio, emAprovacaoDoTipo, examinarArquivoRelatorio, faixaVolume,
+  planejarEnvio, rascunhoDoTipo, RELATORIO_MAX_BYTES, RelatorioRef, revisaoDoTipo, ROTULO_STATUS_RELATORIO, ROTULO_TIPO,
+  tipoDaFase, type FormatoRelatorio, type TipoRelatorio,
+  avisosAprovacao, avisosAssinatura, CATEGORIAS_REPROVACAO, formatarMotivo, mudancasDesdeEnvio, PERFIS_ASSINADO,
+  PERFIS_TROCAR_ASSINADO, resumoValidacao, ROTULOS_REPROVACAO, validarReprovacao,
 } from "@/lib/validacao";
 
 interface Projeto {
@@ -37,7 +64,8 @@ interface Projeto {
   pedido_compra: string | null;
   endereco: string | null;
   data_abertura?: string | null;
-  cliente: { id?: string; razao_social: string } | null;
+  atualizado_em?: string | null;
+  cliente: { id?: string; razao_social: string; updated_at?: string | null } | null;
 }
 interface Inspecao {
   id: string;
@@ -50,6 +78,8 @@ interface Inspecao {
   ferramenta_coleta: string;
   status_relatorio_inspecao: string;
   status_relatorio_execucao: string;
+  /** Quando TAG/procedimento/tanque mudaram (aviso da aprovação). */
+  cadastro_atualizado_em?: string | null;
   projeto: Projeto | null;
 }
 interface Historico {
@@ -58,12 +88,35 @@ interface Historico {
   fase_para: number;
   acao: string;
   motivo: string | null;
+  motivo_categoria?: string | null;
+  relatorio_id?: string | null;
   data_autenticacao: string | null;
   criado_em: string;
   autor_perfil: { nome_completo: string | null; email: string | null } | null;
 }
-interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null }
-interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any }
+interface Coleta {
+  id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null;
+  /** Fase 3: dia da coleta (AAAA-MM-DD), quem mediu, descrição do anexo. */
+  data_coleta?: string | null; responsavel_id?: string | null; descricao?: string | null;
+  arquivo_hash?: string | null; aprovacao_retirada_em?: string | null; atualizado_em?: string | null;
+}
+/** Salvar medição (Medidor) aguardando confirmar data/responsável. */
+interface ConfirmacaoMedicao {
+  modo: "salvar" | "pdf";
+  dados: any;
+  /** Coleta aberta (edição) — null = medição nova, que nasce com `idNovo`. */
+  editId: string | null;
+  idNovo: string;
+}
+interface Relatorio {
+  id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any;
+  /** Fase 4: SHA-256 do arquivo; substituída por outra versão enviada depois. */
+  arquivo_hash?: string | null; substituido_por?: string | null; substituido_em?: string | null;
+  /** Fases 5/9: quem enviou/avaliou, categoria da reprovação e a versão assinada. */
+  enviado_por?: string | null; aprovado_por?: string | null; avaliado_por?: string | null; avaliado_em?: string | null;
+  motivo_categoria?: string | null; atualizado_em?: string | null;
+  assinado_path?: string | null; assinado_hash?: string | null; assinado_por?: string | null; assinado_em?: string | null;
+}
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
   id: string; tipo: string; data_visita: string | null; data_execucao: string | null; hora: string | null;
@@ -110,7 +163,6 @@ export default function InspecaoDetalhePage() {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [funcao, setFuncao] = useState<string | null>(null);
-  const [nomeUsuarioAtual, setNomeUsuarioAtual] = useState("");
   const [aprovandoColeta, setAprovandoColeta] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
@@ -118,11 +170,24 @@ export default function InspecaoDetalhePage() {
   const [erro, setErro] = useState<string | null>(null);
   const [reprovar, setReprovar] = useState<OpcaoAcao | null>(null);
   const [motivo, setMotivo] = useState("");
+  const [categoria, setCategoria] = useState("");
+  const [tentouReprovar, setTentouReprovar] = useState(false);
+  /** Trava síncrona contra duplo clique (o estado só muda no próximo render). */
+  const processandoRef = useRef(false);
+  /** Fases 5/9: nomes (id → nome), quem sou eu, versões que já baixei. */
+  const [nomes, setNomes] = useState<Record<string, string>>({});
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [visualizados, setVisualizados] = useState<string[]>([]);
+  const [fotosExecucaoEm, setFotosExecucaoEm] = useState<string | null>(null);
+  /** Versão assinada: relatório escolhido + troca (Gerência/Admin). */
+  const [assinando, setAssinando] = useState<{ id: string; substituir: boolean } | null>(null);
+  const [enviandoAssinado, setEnviandoAssinado] = useState<string | null>(null);
+  const [erroAssinado, setErroAssinado] = useState<string | null>(null);
+  const assinadoInputRef = useRef<HTMLInputElement>(null);
 
   // Coleta
   const [modalMedidor, setModalMedidor] = useState(false);
   const [enviandoColeta, setEnviandoColeta] = useState(false);
-  const coletaInputRef = useRef<HTMLInputElement>(null);
   // Medidor: salvar/editar medição (registro editável = Relatório Técnico interno)
   const medidorRef = useRef<HTMLIFrameElement>(null);
   const [coletaEditando, setColetaEditando] = useState<string | null>(null);
@@ -132,6 +197,27 @@ export default function InspecaoDetalhePage() {
   const [gerandoPdfMedicao, setGerandoPdfMedicao] = useState(false);
   /** Quando true, o próximo asp:save vira PDF anexado em vez de só salvar. */
   const querPdfRef = useRef(false);
+  // Fase 3: antes de gravar, a medição passa por uma confirmação com data da
+  // coleta, responsável e as regras (lib/validacao/coleta.ts + medicao.ts).
+  const [confirmacao, setConfirmacao] = useState<ConfirmacaoMedicao | null>(null);
+  const [cfData, setCfData] = useState("");
+  const [cfResp, setCfResp] = useState("");
+  const [cfServidor, setCfServidor] = useState<ResultadoValidacao>(novoResultado());
+  const [cfErro, setCfErro] = useState<string | null>(null);
+  const [atualizandoTanque, setAtualizandoTanque] = useState(false);
+  /** Mensagem curta na barra do medidor (ex.: "PDF anexado"). */
+  const [msgMedidor, setMsgMedidor] = useState<string | null>(null);
+  // Anexo (PDF avulso): descrição obrigatória, data e o arquivo.
+  const [modalAnexo, setModalAnexo] = useState(false);
+  const [anxDescricao, setAnxDescricao] = useState("");
+  const [anxData, setAnxData] = useState("");
+  const [anxArquivo, setAnxArquivo] = useState<File | null>(null);
+  const [anxErroArquivo, setAnxErroArquivo] = useState<string | null>(null);
+  const [anxHash, setAnxHash] = useState<string | null>(null);
+  const [anxId, setAnxId] = useState("");
+  const [anxTentou, setAnxTentou] = useState(false);
+  const [anxServidor, setAnxServidor] = useState<ResultadoValidacao>(novoResultado());
+  const [anxErro, setAnxErro] = useState<string | null>(null);
   // Importação de batimetria (CSV/XLSX no layout da planilha)
   const [modalImport, setModalImport] = useState(false);
   const [impDiametro, setImpDiametro] = useState("");
@@ -178,9 +264,12 @@ export default function InspecaoDetalhePage() {
   const [tanqueForm, setTanqueForm] = useState<TanqueForm>({ ...TANQUE_FORM_VAZIO });
   const [salvandoTanque, setSalvandoTanque] = useState(false);
   const [erroTanque, setErroTanque] = useState<string | null>(null);
-  /** Tipo do relatório a enviar. Sugere pela fase, mas o usuário decide —
-   *  há casos de enviar o de inspeção já na etapa de execução, e vice-versa. */
-  const [tipoRelatorio, setTipoRelatorio] = useState<"inspecao" | "execucao" | null>(null);
+  /** Relatório de fora (PDF/DOCX) escolhido, aguardando a confirmação que
+   *  mostra a versão que será criada. O tipo é sempre o da fase da OS. */
+  const [envioExterno, setEnvioExterno] = useState<{
+    arquivo: File; formato: FormatoRelatorio | null; erro: string | null; chave: string;
+  } | null>(null);
+  const [verificandoArquivo, setVerificandoArquivo] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
   // Agendamento
   const [modalAgenda, setModalAgenda] = useState(false);
@@ -251,6 +340,10 @@ export default function InspecaoDetalhePage() {
         setColetas(d.coletas || []);
         setRelatorios(d.relatorios || []);
         setAgendamentos(d.agendamentos || []);
+        setNomes(d.nomes || {});
+        if (d.usuarioId) setUsuarioId(d.usuarioId);
+        setVisualizados(d.visualizados || []);
+        setFotosExecucaoEm(d.fotosExecucaoEm || null);
       })
       .finally(() => setCarregando(false));
   }, [id]);
@@ -260,10 +353,10 @@ export default function InspecaoDetalhePage() {
     const supabase = getSupabaseBrowserClient();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
+      setUsuarioId(data.user.id);
       const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao, nome_completo").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
       setFuncao((p as any)?.funcao ?? null);
-      setNomeUsuarioAtual((p as any)?.nome_completo || data.user.email || "");
     });
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
@@ -303,6 +396,11 @@ export default function InspecaoDetalhePage() {
           lista.push({ grupo: r.tipo === "execucao" ? "execucao" : "inspecao", inspecao: i.identificacao,
             rotulo: `Relatório v${r.versao} — ${r.status}`, data: r.enviado_em,
             href: `/api/relatorios/${r.id}/download` });
+          if (r.assinado_path) {
+            lista.push({ grupo: r.tipo === "execucao" ? "execucao" : "inspecao", inspecao: i.identificacao,
+              rotulo: `Relatório v${r.versao} — versão assinada`, data: r.enviado_em,
+              href: `/api/relatorios/${r.id}/download?arquivo=assinado` });
+          }
         }
       }
       // RDOs são do projeto (um por dia, podem cobrir várias inspeções).
@@ -320,63 +418,116 @@ export default function InspecaoDetalhePage() {
   const agAtivos = useMemo(() => agendamentos.filter((a) => !a.substituido_em), [agendamentos]);
   const agRemarcados = useMemo(() => agendamentos.filter((a) => a.substituido_em), [agendamentos]);
 
+  /** O tipo do relatório é o da fase: inspeção até a 5, execução da 6 em
+   *  diante (a API recusa o outro). */
+  const bloco: TipoRelatorio = tipoDaFase(insp?.fase ?? 2);
+  const refsRelatorio = useMemo<RelatorioRef[]>(
+    () => relatorios.map((r) => ({ id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash || null, assinadoHash: r.assinado_hash || null })),
+    [relatorios]
+  );
+  /** Agendamento ativo do MESMO tipo do relatório (data e equipe). */
+  const agDoBloco = useMemo(() => agAtivos.find((a) => a.tipo === bloco) || null, [agAtivos, bloco]);
+  // Revisão: reprovações ("Ajustar") do MESMO tipo — a de inspeção não
+  // conta no relatório de execução.
+  const revisaoRelatorio = revisaoDoTipo(refsRelatorio, bloco);
+  const codigoProjetoOS = insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || "";
+  const rascunhoBloco = rascunhoDoTipo(refsRelatorio, bloco);
+  /** Fases 5/9: o relatório que a Gerência está avaliando (o mostrado). */
+  const relEmAvaliacao = insp && (insp.fase === 5 || insp.fase === 9)
+    ? emAprovacaoDoTipo(refsRelatorio, tipoDaFase(insp.fase))[0] || null : null;
+  const relAval = relEmAvaliacao ? relatorios.find((r) => r.id === relEmAvaliacao.id) || null : null;
+  /** Nome de um usuário (id) — para "Aprovado por…", "Enviado por…". */
+  const nomeDe = (uid?: string | null) => (uid ? nomes[uid] || usuarios.find((u) => u.id === uid)?.nome || "usuário" : "");
+
+  /** O que mudou na OS depois do envio da versão em avaliação (melhor esforço). */
+  const mudancasAval = useMemo(() => {
+    if (!relAval || !insp) return [];
+    const proj = insp.projeto;
+    return mudancasDesdeEnvio({
+      enviadoEm: relAval.enviado_em, tipo: relAval.tipo, dados: relAval.dados,
+      cadastroAtual: {
+        cliente: proj?.cliente?.razao_social || "", endereco: proj?.endereco || "", tag: insp.identificacao || "",
+        procedimento: insp.procedimento || "", codigoProjeto: proj?.codigo_projeto || proj?.pedido_compra || "",
+      },
+      cadastroOSEm: insp.cadastro_atualizado_em, projetoEm: proj?.atualizado_em, clienteEm: proj?.cliente?.updated_at,
+      coletas: coletas.map((c) => ({
+        id: c.id, tipo: c.tipo, criado_em: c.criado_em, atualizado_em: c.atualizado_em, aprovada_em: c.aprovada_em,
+        aprovacao_retirada_em: c.aprovacao_retirada_em,
+        rotulo: `${c.tipo === "anexo" ? "Anexo" : "Medição"}${c.data_coleta ? ` de ${formatarData(c.data_coleta)}` : ""}`,
+      })),
+      fotosExecucaoEm,
+    });
+  }, [relAval, insp, coletas, fotosExecucaoEm]);
+  /** ⚠️ ao aprovar a versão mostrada (nenhum bloqueia). */
+  const avisosAprov = useMemo(() => relAval ? avisosAprovacao({
+    usuarioId, relatorio: relAval, baixou: visualizados.includes(relAval.id),
+    temMedicaoAprovada: coletas.some((c) => c.aprovada_em), mudancas: mudancasAval,
+  }) : novoResultado(), [relAval, usuarioId, visualizados, coletas, mudancasAval]);
+
+  /** Reprovação: categoria + descrição; aviso se repetir a anterior do tipo. */
+  const reprovacaoAnterior = useMemo(() => {
+    if (!relAval) return null;
+    const ant = relatorios
+      .filter((r) => r.tipo === relAval.tipo && r.status === "ajustar" && r.motivo_ajuste)
+      .sort((a, b) => (b.avaliado_em || "").localeCompare(a.avaliado_em || "") || b.versao - a.versao)[0];
+    return ant ? { descricao: ant.motivo_ajuste, versao: ant.versao } : null;
+  }, [relAval, relatorios]);
+  const valReprovacao = useMemo(
+    () => validarReprovacao({ categoria, descricao: motivo, anterior: reprovacaoAnterior }),
+    [categoria, motivo, reprovacaoAnterior]
+  );
+  const podeAssinar = PERFIS_ASSINADO.includes(perfil || "");
+  const podeTrocarAssinado = PERFIS_TROCAR_ASSINADO.includes(perfil || "");
+  /** Marca na hora (o servidor grava no download) — o aviso some sem recarregar. */
+  const marcarBaixado = (relId: string) => setVisualizados((v) => (v.includes(relId) ? v : [...v, relId]));
+
   /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
-   *  cliente, última medição salva (volume, altura, diâmetro) e a equipe do
-   *  agendamento. O usuário revisa tudo no formulário antes de gerar. */
+   *  cliente, medição (aprovada, senão a mais recente) e cadastro do tanque.
+   *  Cliente, TAG, endereço e procedimento ficam só leitura no formulário.
+   *  Datas em ISO (o documento as escreve dd/mm/aaaa); medidas em metros. */
   const dadosIniciaisRelatorio = useMemo(() => {
     const proj = insp?.projeto;
     // Material, capacidade e medidas de projeto vêm do cadastro do tanque.
     const doTanque = dadosRelatorioDoTanque(insp?.tanque);
-    // Prioriza a medição APROVADA; se nenhuma foi validada, usa a mais recente.
-    const comDados = coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0);
-    const medicao = (comDados.find((c) => c.aprovada_em) || comDados[0])?.dados as any;
-    const res = medicao?.resultado;
-    const un = medicao?.unit === "cm" ? "cm" : "m";
-    const num = (v: any, casas = 2) =>
-      v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
-    // A data de execução vem do agendamento do MESMO tipo do relatório:
-    // até a fase 5 o relatório é de inspeção; a partir daí, de execução.
-    const tipoRelatorio: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
-    const ag = agAtivos.find((a) => a.tipo === tipoRelatorio) || agAtivos[0];
-    const dataServico = tipoRelatorio === "execucao"
+    const comDados = coletas.filter((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados));
+    const auto = camposDaMedicao((comDados.find((c) => c.aprovada_em) || comDados[0])?.dados);
+    // A data de execução vem do agendamento do MESMO tipo — sem cair no do
+    // outro tipo (seria a data de outro serviço).
+    const ag = agDoBloco;
+    const dataServico = bloco === "execucao"
       ? (ag?.data_execucao || ag?.data_visita)
       : (ag?.data_visita || ag?.data_execucao);
-    const hoje = new Date().toLocaleDateString("pt-BR");
-    // Revisão: começa em 0 e incrementa a cada reprovação ("Ajustar") já
-    // registrada nos relatórios desta inspeção.
-    const reprovacoes = relatorios.filter((r) => r.status === "ajustar").length;
+    const hoje = hojeBrasil();
+    const nomeProc = procedimentos.find((p) => p.codigo === insp?.procedimento)?.nome;
+    const volume = auto.volumeSedimento || "";
     return {
-      titulo: insp ? `Batimetria — ${insp.identificacao}` : "",
+      // O título nasce do procedimento da OS (não é sempre "Batimetria").
+      titulo: insp ? `${nomeProc || "Relatório técnico"} — ${insp.identificacao}` : "",
       cliente: proj?.cliente?.razao_social || "",
       endereco: proj?.endereco || "",
-      revisao: String(reprovacoes),
+      revisao: String(revisaoRelatorio),
       dataRevisao: hoje,
       // Campo "Relatório" da capa segue o padrão do modelo: "37/MG/26 Rev1".
-      codigoProjeto: proj?.codigo_projeto || proj?.pedido_compra || "",
-      relatorioCodigo: (proj?.codigo_projeto || proj?.pedido_compra)
-        ? `${proj?.codigo_projeto || proj?.pedido_compra} Rev${reprovacoes}`
-        : "",
-      dataExecucao: formatarData(dataServico) || "",
+      codigoProjeto: codigoProjetoOS,
+      relatorioCodigo: codigoRelatorio(codigoProjetoOS, revisaoRelatorio),
+      dataExecucao: dataServico && /^\d{4}-\d{2}-\d{2}/.test(dataServico) ? dataServico.slice(0, 10) : "",
       contato: contatoCliente,
       procedimento: insp?.procedimento || "",
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
-      ...doTanque,
-      // A medição em campo tem a última palavra sobre altura e diâmetro; sem
-      // medição, valem as medidas do cadastro.
-      alturaTanque: medicao?.height ? `${num(medicao.height)} ${un}` : doTanque.alturaTanque,
-      diametro: medicao?.dimValue ? `${num(medicao.dimValue)} ${un}` : doTanque.diametro,
-      // Capacidade nominal é dado de placa (manual). Aqui vai o volume
-      // calculado do tanque, que alimenta o quadro do tópico 6.
-      capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
-      volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
-      // Faixa de ±5% sobre o volume medido (texto do tópico 7).
-      volumeMin: res?.volSedM3 != null ? num(res.volSedM3 * 0.95, 2) : "",
-      volumeMax: res?.volSedM3 != null ? num(res.volSedM3 * 1.05, 2) : "",
-      equipe: (ag?.equipe || []).map((m) => m.nome).join(", "),
+      material: doTanque.material,
+      // A medição em campo tem a última palavra sobre as medidas; sem
+      // medição, vale o cadastro do tanque. Capacidade é um campo só.
+      alturaTanque: auto.alturaTanque || doTanque.alturaTanque,
+      diametro: auto.diametro || doTanque.diametro,
+      comprimento: auto.comprimento || doTanque.comprimento,
+      largura: auto.largura || doTanque.largura,
+      capacidadeTanque: auto.capacidadeTanque || doTanque.capacidadeNominal,
+      volumeSedimento: volume,
+      // Faixa de ±5% sobre o volume medido (texto do tópico 7) — derivada.
+      ...faixaVolume(volume),
     };
-  }, [insp, coletas, agAtivos, relatorios, contatoCliente]);
-  const bloco: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
+  }, [insp, coletas, agDoBloco, bloco, revisaoRelatorio, codigoProjetoOS, contatoCliente, procedimentos]);
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "");
@@ -402,61 +553,140 @@ export default function InspecaoDetalhePage() {
     },
   });
 
-  async function aplicar(acao: string, motivoTexto?: string) {
+  async function aplicar(acao: string, motivoTexto?: string, categoriaMotivo?: string) {
+    if (processandoRef.current) return;   // duplo clique: o 2º nem sai
+    processandoRef.current = true;
     setErro(null);
     setProcessando(true);
     try {
-      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST", { acao, motivo: motivoTexto }, "Ação de fase");
-      if (res.queued) { setReprovar(null); setMotivo(""); alert("Sem conexão — ação salva offline e aplicada ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Não foi possível aplicar a ação."); return; }
+      // Aprovar/reprovar age sobre o relatório MOSTRADO (não "todos em aprovação").
+      const relatorioId = acao === "aprovar" || acao === "reprovar" ? relEmAvaliacao?.id : undefined;
+      // faseDe: a API recusa (409) se a OS já saiu desta fase — não anda 2x.
+      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST",
+        { acao, motivo: motivoTexto, categoria: categoriaMotivo, relatorioId, faseDe: insp?.fase }, "Ação de fase");
+      if (res.queued) { setReprovar(null); setMotivo(""); setCategoria(""); alert("Sem conexão — ação salva offline e aplicada ao reconectar."); return; }
+      if (!res.ok) {
+        setErro(res.data?.erro || "Não foi possível aplicar a ação.");
+        if (res.status === 409) { setReprovar(null); carregar(); }
+        return;
+      }
       setReprovar(null);
       setMotivo("");
+      setCategoria("");
       carregar();
       // A fase mudou: as seções abaixo se rearrumam para o novo padrão. O
       // foco volta ao card de ações, que mostra o que fazer agora.
       cardAcoesRef.current?.focus({ preventScroll: true });
       cardAcoesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } finally {
+      processandoRef.current = false;
       setProcessando(false);
     }
   }
 
   function clicarAcao(opcao: OpcaoAcao) {
-    if (opcao.exigeMotivo) { setMotivo(""); setReprovar(opcao); return; }
-    // Execução → Relatório de Execução: coleta de fotos incompleta e falta de
-    // RDO só AVISAM, num confirm só. Quem está em campo decide se segue assim
-    // mesmo (ex.: vaga sem acesso, RDO feito no papel).
+    // ⛔ Aprovar/reprovar sem relatório em aprovação (a API recusa também).
+    if ((insp?.fase === 5 || insp?.fase === 9) && (opcao.acao === "aprovar" || opcao.acao === "reprovar") && !relEmAvaliacao) {
+      setErro(`Nenhum relatório de ${ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação — não há o que ${opcao.acao === "aprovar" ? "aprovar" : "reprovar"}.`);
+      return;
+    }
+    if (opcao.exigeMotivo) { setMotivo(""); setCategoria(""); setTentouReprovar(false); setErro(null); setReprovar(opcao); return; }
+    // Pendências que só AVISAM, num confirm só — quem está em campo decide se
+    // segue assim mesmo:
+    //  · Inspeção → Relatório (3 → 4) sem medição aprovada (muitas OSs não
+    //    têm procedimento de inspeção/medição).
+    //  · Execução → Relatório de Execução (7 → 8): coleta de fotos incompleta
+    //    e falta de RDO (ex.: vaga sem acesso, RDO feito no papel).
+    const blocos: string[] = [];
+    let titulo = "Pendências";
+    if (insp?.fase === 3 && opcao.acao === "avancar" && !coletas.some((c) => c.aprovada_em)) {
+      titulo = "Pendências da Inspeção";
+      blocos.push(coletas.some((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados))
+        ? "Nenhuma medição aprovada nesta OS — o relatório usará a medição mais recente, sem validação de Gerência/Coordenação."
+        : "Nenhuma medição registrada nesta OS. Se o procedimento não tem medição, pode seguir.");
+    }
     if (insp?.fase === 7 && opcao.acao === "avancar") {
+      titulo = "Pendências da Execução";
       const pend = fotosExec ? pendenciasColeta(fotosExec) : [];
       const semRdo = rdosInsp !== null && rdosInsp.length === 0;
-      const blocos: string[] = [];
       if (pend.length > 0) {
         blocos.push(`Coleta de fotos da execução incompleta (${pend.length} pendência(s)):\n• ${pend.join("\n• ")}\n` +
           "As fotos que faltam não entram no Relatório de Execução.");
       }
       if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta OS.");
-      if (blocos.length > 0 && !confirm(`Pendências da Execução:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
     }
+    //  · Relatório → Aprovação (4 → 5, 8 → 9) sem relatório em aprovação: a
+    //    Gerência não teria o que aprovar.
+    if ((insp?.fase === 4 || insp?.fase === 8) && opcao.acao === "avancar") {
+      const tipo = tipoDaFase(insp.fase);
+      if (emAprovacaoDoTipo(refsRelatorio, tipo).length === 0) {
+        titulo = insp.fase === 4 ? "Pendências do Relatório de Inspeção" : "Pendências do Relatório de Execução";
+        const rasc = rascunhoDoTipo(refsRelatorio, tipo);
+        blocos.push(rasc
+          ? `O relatório de ${ROTULO_TIPO[tipo]} está só em rascunho (v${rasc.versao}) — não foi enviado para aprovação. A Gerência não terá o que aprovar.`
+          : `Nenhum relatório de ${ROTULO_TIPO[tipo]} foi enviado para aprovação nesta OS. A Gerência não terá o que aprovar.`);
+      }
+    }
+    //  · Aprovação (5/9): mesma pessoa, arquivo não baixado, OS mudou depois
+    //    do envio, inspeção sem medição aprovada.
+    if ((insp?.fase === 5 || insp?.fase === 9) && opcao.acao === "aprovar") {
+      const av = resumoValidacao(avisosAprov).avisos;
+      if (av.length) { titulo = `Antes de aprovar a v${relEmAvaliacao?.versao}`; blocos.push(...av.map((a) => `• ${a}`)); }
+    }
+    //  · Versão assinada: seguir da fase 6 sem a de inspeção; encerrar sem a
+    //    de execução.
+    const semAssinatura = insp ? avisosAssinatura(insp.fase, opcao.acao, refsRelatorio) : [];
+    if (semAssinatura.length) { if (!blocos.length) titulo = "Versão assinada"; blocos.push(...semAssinatura.map((a) => `• ${a}`)); }
+    const verbo = opcao.acao === "aprovar" ? "Aprovar" : "Avançar";
+    if (blocos.length > 0 && !confirm(`${titulo}:\n\n${blocos.join("\n\n")}\n\n${verbo} mesmo assim?`)) return;
     aplicar(opcao.acao);
   }
 
-  async function anexarColeta(arquivo: File) {
+  /** Abre o "Anexar PDF": anexo é um PDF avulso, com descrição obrigatória. */
+  function abrirAnexo() {
+    setAnxDescricao(""); setAnxData(dataSugerida); setAnxArquivo(null); setAnxErroArquivo(null); setAnxHash(null);
+    setAnxId(novoId()); setAnxTentou(false); setAnxServidor(novoResultado()); setAnxErro(null);
+    setModalAnexo(true);
+  }
+
+  /** Confere o PDF já na escolha: é PDF de verdade, tamanho e SHA-256 (para
+   *  avisar se o mesmo arquivo já está anexado). A API repete tudo. */
+  async function escolherArquivoAnexo(f: File | null) {
+    setAnxArquivo(f); setAnxErroArquivo(null); setAnxHash(null); setAnxServidor(novoResultado()); setAnxErro(null);
+    if (!f) return;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const problema = validarPdf(bytes, f.size);
+    if (problema) { setAnxErroArquivo(problema); return; }
+    setAnxHash(await sha256Hex(bytes));
+  }
+
+  async function salvarAnexo() {
+    setAnxTentou(true);
+    setAnxErro(null);
+    if (temErros(resultadoAnexo) || !anxArquivo) return;
     setEnviandoColeta(true);
-    setErro(null);
     try {
-      const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento" }, arquivo, "Coleta (PDF)");
-      if (res.queued) { alert("Sem conexão — PDF salvo offline e enviado ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Falha ao anexar a coleta."); return; }
+      const res = await enviarArquivo("/api/coletas",
+        { id: anxId, inspecaoId: id, tipo: "anexo", descricao: anxDescricao.replace(/\s+/g, " ").trim(), dataColeta: anxData },
+        anxArquivo, "Anexo (PDF)", { chave: anxId });
+      if (res.queued) { setModalAnexo(false); alert("Sem conexão — PDF salvo offline e enviado ao reconectar."); return; }
+      if (!res.ok) {
+        if (res.data?.erros) setAnxServidor({ erros: res.data.erros, avisos: res.data.avisos || {} });
+        setAnxErro(res.data?.erro || "Falha ao anexar o PDF.");
+        return;
+      }
+      setModalAnexo(false);
       carregar();
     } finally {
       setEnviandoColeta(false);
-      if (coletaInputRef.current) coletaInputRef.current.value = "";
     }
   }
 
   /** Marca qual medição vale para o relatório (uma por inspeção). */
   async function aprovarColeta(c: Coleta) {
     const jaAprovada = !!c.aprovada_em;
+    const motivo = jaAprovada ? null : motivoNaoAprovavel(c);
+    if (motivo) { setErro(motivo); return; }
     const outraAprovada = coletas.find((x) => x.aprovada_em && x.id !== c.id);
     if (!jaAprovada && outraAprovada &&
         !confirm("Outra medição já está aprovada. Ao aprovar esta, a anterior deixa de valer para o relatório. Continuar?")) return;
@@ -570,9 +800,12 @@ export default function InspecaoDetalhePage() {
 
   /** Exclui a medição — vai para a lixeira, recuperável por 30 dias. */
   async function excluirColeta(c: Coleta) {
-    const temMedicao = c.dados && Object.keys(c.dados).length > 0;
-    const rotulo = temMedicao ? "esta medição (Relatório Técnico interno)" : `este anexo (${c.tipo})`;
-    if (!confirm(`Excluir ${rotulo}?\n\nEla sai da lista, mas fica recuperável por 30 dias antes de ser apagada definitivamente.`)) return;
+    const temMedicao = c.tipo !== "anexo" && medicaoPreenchida(c.dados);
+    const rotulo = temMedicao ? "esta medição (Relatório Técnico interno)" : `este anexo (${c.descricao || c.tipo})`;
+    const aprovada = c.aprovada_em
+      ? "\n\nEla está APROVADA para o relatório: ao excluir, a aprovação é retirada e não volta se ela for restaurada."
+      : "";
+    if (!confirm(`Excluir ${rotulo}?\n\nEla sai da lista, mas fica recuperável por 30 dias antes de ser apagada definitivamente.${aprovada}`)) return;
     setExcluindoColeta(c.id);
     setErro(null);
     try {
@@ -587,106 +820,190 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  // Salva/atualiza a medição (registro editável = Relatório Técnico interno).
-  const salvarMedicao = useCallback(async (dados: any) => {
+  /** O medidor mandou o estado (asp:save): abre a confirmação com a data da
+   *  coleta e o responsável. Nada é gravado sem passar pelas regras. */
+  const abrirConfirmacao = useCallback((dados: any, modo: "salvar" | "pdf") => {
+    const editId = editandoRef.current;
+    const col = editId ? coletasRef.current.find((c) => c.id === editId) : null;
+    // A data que o medidor mandou (cabeçalho do relatório) vale como sugestão.
+    const dataMedidor = typeof dados?.reportDate === "string" && dataIsoValida(dados.reportDate) ? dados.reportDate : null;
+    setCfData(dataMedidor || col?.data_coleta || dataSugeridaRef.current);
+    let resp = col?.responsavel_id || "";
+    if (!resp && typeof dados?.reportResponsavel === "string" && dados.reportResponsavel.trim()) {
+      const alvo = normalizarNome(dados.reportResponsavel);
+      resp = usuariosRef.current.find((u) => normalizarNome(u.nome) === alvo)?.id || "";
+    }
+    setCfResp(resp);
+    setCfServidor(novoResultado());
+    setCfErro(null);
+    setConfirmacao((prev) => ({ modo, dados, editId, idNovo: prev && !prev.editId && !editId ? prev.idNovo : novoId() }));
+  }, []);
+
+  /** Grava a medição confirmada: salvar (POST nova / PATCH aberta) ou PDF —
+   *  que ATUALIZA a coleta aberta (anexa/substitui o PDF dela) e só cria uma
+   *  coleta se a medição ainda não foi salva. Nunca duas. */
+  async function confirmarMedicao() {
+    if (!confirmacao || temErros(resultadoConfirmacao)) return;
+    const { modo, editId, idNovo } = confirmacao;
+    const nome = usuarios.find((u) => u.id === cfResp)?.nome || "";
+    const dados = { ...confirmacao.dados, reportDate: cfData, reportResponsavel: nome };
+    const campos = { dataColeta: cfData, responsavelId: cfResp };
     setSalvandoMedicao(true);
-    setErro(null);
+    setCfErro(null);
     try {
-      const editId = editandoRef.current;
-      const res = await enviarJson(
-        editId ? `/api/coletas/${editId}` : "/api/coletas",
-        editId ? "PATCH" : "POST",
-        editId ? { dados } : { inspecaoId: id, tipo: "sedimento", dados },
-        "Coleta / medição"
-      );
-      if (!res.queued && !res.ok) { setErro(res.data?.erro || "Falha ao salvar a medição."); return; }
-      setModalMedidor(false);
-      setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
-      if (res.queued) alert("Sem conexão — medição salva offline e enviada ao reconectar.");
-      else carregar();
+      let res;
+      if (modo === "pdf") {
+        setGerandoPdfMedicao(true);
+        const { gerarPdfMedicao } = await import("@/lib/asp/relatorio-medicao");
+        const blob = await gerarPdfMedicao(dados, {
+          inspecao: insp?.identificacao || "OS",
+          projeto: insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || undefined,
+          cliente: insp?.projeto?.cliente?.razao_social || undefined,
+          dataColeta: cfData,
+          responsavel: nome,
+        });
+        const arquivo = new File([blob], `Medicao-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}.pdf`, { type: "application/pdf" });
+        res = editId
+          ? await enviarArquivo(`/api/coletas/${editId}`, { ...campos, dados: JSON.stringify(dados) }, arquivo, "Relatório da medição", { method: "PATCH" })
+          : await enviarArquivo("/api/coletas", { id: idNovo, inspecaoId: id, tipo: "sedimento", ...campos, dados: JSON.stringify(dados) },
+            arquivo, "Relatório da medição", { chave: idNovo });
+      } else {
+        res = await enviarJson(
+          editId ? `/api/coletas/${editId}` : "/api/coletas",
+          editId ? "PATCH" : "POST",
+          editId ? { ...campos, dados } : { id: idNovo, inspecaoId: id, tipo: "sedimento", ...campos, dados },
+          "Coleta / medição",
+          editId ? undefined : idNovo
+        );
+      }
+      if (!res.queued && !res.ok) {
+        if (res.data?.erros) setCfServidor({ erros: res.data.erros, avisos: res.data.avisos || {} });
+        setCfErro(res.data?.erro || (modo === "pdf" ? "Falha ao anexar o relatório da medição." : "Falha ao salvar a medição."));
+        return;
+      }
+      setConfirmacao(null);
+      if (modo === "pdf") {
+        // O medidor segue aberto, agora editando a coleta (a mesma, nunca outra).
+        if (!editId) { editandoRef.current = idNovo; setColetaEditando(idNovo); }
+        medidorRef.current?.contentWindow?.postMessage({ type: "asp:setHeader", reportDate: cfData, reportResponsavel: nome }, window.location.origin);
+        setMsgMedidor(res.queued ? "Sem conexão — o PDF será enviado ao reconectar." : "PDF do relatório anexado à medição.");
+      } else {
+        setModalMedidor(false);
+        setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
+        if (res.queued) alert("Sem conexão — medição salva offline e enviada ao reconectar.");
+      }
+      if (!res.queued) carregar();
+    } catch (e) {
+      setCfErro(e instanceof Error ? e.message : "Falha ao salvar a medição.");
     } finally {
       setSalvandoMedicao(false);
+      setGerandoPdfMedicao(false);
     }
-  }, [id, carregar]);
+  }
+
+  /** Atualiza o cadastro do tanque com as medidas da medição (mesma regra da
+   *  edição do tanque: erroDoTanque, aqui e na API). */
+  async function atualizarTanqueComMedicao() {
+    if (!insp?.tanque || !confirmacao) return;
+    const novo = tanqueComMedidas(insp.tanque, confirmacao.dados);
+    const problema = erroDoTanque(novo);
+    if (problema) { setCfErro(problema); return; }
+    setAtualizandoTanque(true);
+    try {
+      const res = await fetch(`/api/inspecoes/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tanque: novo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setCfErro(data?.erro || "Falha ao atualizar o cadastro do tanque."); return; }
+      setInsp((p) => (p ? { ...p, tanque: data.inspecao?.tanque || novo } : p));
+    } catch {
+      setCfErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setAtualizandoTanque(false);
+    }
+  }
 
   // Ponte com o iframe do medidor: recebe o snapshot ao salvar e envia os
-  // dados salvos ao abrir (asp:ready) para editar.
+  // dados salvos ao abrir (asp:ready) para editar. Só aceita mensagens do
+  // próprio iframe, na mesma origem.
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
+      if (ev.origin !== window.location.origin || ev.source !== medidorRef.current?.contentWindow) return;
       const msg = (ev.data || {}) as { type?: string; dados?: any };
       if (msg.type === "asp:ready") {
         if (dadosCarregarRef.current && medidorRef.current?.contentWindow) {
-          medidorRef.current.contentWindow.postMessage({ type: "asp:load", dados: dadosCarregarRef.current }, "*");
+          medidorRef.current.contentWindow.postMessage({ type: "asp:load", dados: dadosCarregarRef.current }, window.location.origin);
         }
       } else if (msg.type === "asp:save") {
-        if (querPdfRef.current) {
-          querPdfRef.current = false;
-          anexarPdfMedicao(msg.dados);
-        } else {
-          salvarMedicao(msg.dados);
-        }
+        const modo = querPdfRef.current ? "pdf" : "salvar";
+        querPdfRef.current = false;
+        abrirConfirmacao(msg.dados, modo);
       }
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [salvarMedicao]);
+  }, [abrirConfirmacao]);
+
+  /** Medição nova já sai com o tanque do cadastro (formato, medidas, altura,
+   *  em metros) e a data sugerida da coleta no cabeçalho. */
+  function estadoInicialMedidor(): Record<string, unknown> {
+    const t = insp?.tanque;
+    const base: Record<string, unknown> = { reportDate: dataSugerida };
+    if (!t) return base;
+    const ret = t.formato === "retangular";
+    return {
+      ...base, unit: "m", inputMode: "diameter",
+      formato: ret ? "retangulo" : "circulo",
+      dimValue: ret ? t.comprimento : t.diametro,
+      largura: ret ? t.largura : null,
+      height: t.altura,
+    };
+  }
 
   function abrirMedidorNovo() {
-    setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
-    setErro(null); setModalMedidor(true);
+    setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = estadoInicialMedidor();
+    setErro(null); setMsgMedidor(null); setModalMedidor(true);
   }
   function abrirMedidorEdicao(c: Coleta) {
     setColetaEditando(c.id); editandoRef.current = c.id; dadosCarregarRef.current = c.dados || null;
-    setErro(null); setModalMedidor(true);
-  }
-  /** Gera o PDF do relatório da medição e anexa à inspeção como coleta.
-   *  O "Exportar em PDF" da ferramenta usa a impressão do navegador, cujo
-   *  arquivo o site não enxerga — por isso montamos o PDF por código. */
-  async function anexarPdfMedicao(estado: any) {
-    setGerandoPdfMedicao(true);
-    setErro(null);
-    try {
-      const { gerarPdfMedicao } = await import("@/lib/asp/relatorio-medicao");
-      const blob = await gerarPdfMedicao(estado, {
-        inspecao: insp?.identificacao || "OS",
-        projeto: insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || undefined,
-        cliente: insp?.projeto?.cliente?.razao_social || undefined,
-      });
-      const nome = `Medicao-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}.pdf`;
-      const arquivo = new File([blob], nome, { type: "application/pdf" });
-      const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento", dados: JSON.stringify(estado) }, arquivo, "Relatório da medição");
-      if (res.queued) { alert("Sem conexão — o relatório será enviado ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Falha ao anexar o relatório da medição."); return; }
-      carregar();
-      alert("Relatório da medição anexado às Coletas.");
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Falha ao gerar o PDF da medição.");
-    } finally {
-      setGerandoPdfMedicao(false);
-    }
+    setErro(null); setMsgMedidor(null); setModalMedidor(true);
   }
 
   /** Pede o estado ao medidor para virar PDF anexado. */
   function pedirPdfMedicao() {
     querPdfRef.current = true;
-    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
+    setMsgMedidor(null);
+    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, window.location.origin);
   }
 
   function pedirSalvarMedicao() {
-    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
+    querPdfRef.current = false;
+    setMsgMedidor(null);
+    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, window.location.origin);
   }
 
   function carregarNoMedidor(estado: Record<string, unknown>) {
+    // Mantém a data sugerida da coleta no cabeçalho do medidor.
+    const comData = { reportDate: dataSugerida, ...estado };
     if (modalMedidor) {
-      medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: estado }, "*");
+      medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: comData }, window.location.origin);
     } else {
-      dadosCarregarRef.current = estado;
+      dadosCarregarRef.current = comData;
       setColetaEditando(null); editandoRef.current = null;
       setModalMedidor(true);
     }
   }
+  /** Importar: formato, medidas e altura já vêm do cadastro do tanque (m). */
   function abrirImport() {
-    setImpDiametro(""); setImpAltura(""); setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
+    const t = insp?.tanque;
+    const txt = (v?: number | null) => (v == null ? "" : String(v).replace(".", ","));
+    const ret = t?.formato === "retangular";
+    setImpFormato(ret ? "retangulo" : "circulo");
+    setImpDiametro(txt(ret ? t?.comprimento : t?.diametro));
+    setImpLargura(txt(ret ? t?.largura : null));
+    setImpAltura(txt(t?.altura));
+    setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
     setModalImport(true);
   }
   async function baixarModelo() {
@@ -709,14 +1026,14 @@ export default function InspecaoDetalhePage() {
   async function importarBatimetria() {
     setImpErro(null);
     if (!impArquivo) { setImpErro("Selecione o arquivo (CSV ou XLSX)."); return; }
-    const diam = parseFloat((impDiametro || "").replace(",", "."));
+    const diam = paraNumero(impDiametro) ?? 0;
     const ehRetangular = impFormato === "quadrado" || impFormato === "retangulo";
     if (!diam || diam <= 0) {
-      setImpErro(ehRetangular ? "Informe o comprimento do tanque (m)." : "Informe o diâmetro do tanque (m).");
+      setImpErro(ehRetangular ? `Informe o comprimento do tanque (${impUnidade}).` : `Informe o diâmetro do tanque (${impUnidade}).`);
       return;
     }
-    const larg = parseFloat((impLargura || "").replace(",", "."));
-    if (impFormato === "retangulo" && (!larg || larg <= 0)) { setImpErro("Informe a largura do tanque (m)."); return; }
+    const larg = paraNumero(impLargura) ?? 0;
+    if (impFormato === "retangulo" && (!larg || larg <= 0)) { setImpErro(`Informe a largura do tanque (${impUnidade}).`); return; }
     if (impFormato === "custom" && !(impVertices || "").trim()) { setImpErro("Informe os vértices do tanque (x,y; x,y; …)."); return; }
     setImportando(true);
     try {
@@ -727,15 +1044,16 @@ export default function InspecaoDetalhePage() {
         alertas.push(`${dados.invalidos} de ${dados.totalValidacao} leituras estão INCORRETO na validação (régua × sonar).`);
       }
       if (dados.negativos > 0) {
-        alertas.push(`${dados.negativos} leitura(s) com espessura negativa (sonar corrigido maior que a régua corrigida) — essas ficarão FORA do cálculo.`);
+        alertas.push(`${dados.negativos} leitura(s) com espessura negativa (sonar corrigido maior que a régua corrigida) — a medição só poderá ser salva depois de corrigi-las no medidor.`);
       }
       if (alertas.length > 0) {
         const ok = confirm(`Atenção:\n\n• ${alertas.join("\n• ")}\n\nImportar mesmo assim?`);
         if (!ok) { setImportando(false); return; }
       }
       const maxVal = Math.max(0, ...dados.valores.flat().map((v) => (typeof v === "number" ? v : 0)));
-      const alturaInput = parseFloat((impAltura || "").replace(",", "."));
-      const altura = alturaInput > 0 ? alturaInput : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + 0.5);
+      const alturaInput = paraNumero(impAltura) ?? 0;
+      const altura = alturaInput > 0 ? alturaInput
+        : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + (impUnidade === "cm" ? 50 : 0.5));
       const estado = montarEstadoMedidor(dados, {
         diametro: diam, altura, unidade: impUnidade,
         tanque: {
@@ -771,12 +1089,17 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  /** Submete um rascunho já anexado à aprovação da Gerência. */
-  async function enviarParaAprovacao(relatorioId: string) {
+  /** Submete um rascunho já anexado à aprovação da Gerência. Confirma a
+   *  versão que ele terá e a versão em aprovação que será substituída. */
+  async function enviarParaAprovacao(rel: Relatorio) {
+    const plano = planejarEnvio(refsRelatorio, rel.tipo, rel.id);
+    const linhas = [`Enviar o rascunho do relatório de ${ROTULO_TIPO[rel.tipo as TipoRelatorio] || rel.tipo} para aprovação como v${plano.versao}?`];
+    plano.substitui.forEach((x) => linhas.push(`⚠️ A versão v${x.versao} em aprovação será substituída (sai da fila da Gerência).`));
+    if (!confirm(linhas.join("\n\n"))) return;
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
-      const res = await fetch(`/api/relatorios/${relatorioId}`, {
+      const res = await fetch(`/api/relatorios/${rel.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enviar: true }),
       });
@@ -790,43 +1113,126 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  async function enviarRelatorio(arquivo: File, rascunho = false, dadosForm?: any, substituirId?: string) {
+  /** Sobe o arquivo direto ao storage (URL assinada) e registra. A versão é
+   *  decidida pela API; o tipo é o da fase. Devolve o erro em vez de só
+   *  mostrar — o formulário de geração e o diálogo de envio o exibem. */
+  async function enviarRelatorio(arquivo: File, opcoes: {
+    rascunho?: boolean; dados?: any; formato?: FormatoRelatorio | null; chave?: string;
+  } = {}): Promise<{ ok: boolean; erro?: string }> {
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
     try {
-      const tipo = tipoRelatorio || bloco;
-      const ext = arquivo.name.toLowerCase().endsWith(".pdf") ? "pdf"
-        : arquivo.name.toLowerCase().endsWith(".docx") ? "docx" : "";
-      if (!ext) { setErroRelatorio("Envie o relatório em PDF ou DOCX."); return; }
-
+      const ext = opcoes.formato || (arquivo.name.toLowerCase().endsWith(".pdf") ? "pdf" : "docx");
       // Arquivos grandes não cabem no corpo da função serverless (~4,5 MB na
       // Vercel). Enviamos direto ao storage com URL assinada e depois só
-      // registramos o caminho — sem limite prático de tamanho.
+      // registramos o caminho — a API confere o arquivo lá.
       const rUrl = await fetch("/api/relatorios/upload-url", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inspecaoId: id, tipo, ext }),
+        body: JSON.stringify({ inspecaoId: id, tipo: bloco, ext }),
       });
       const dUrl = await rUrl.json().catch(() => ({}));
-      if (!rUrl.ok) { setErroRelatorio(dUrl?.erro || "Falha ao preparar o envio."); return; }
+      if (!rUrl.ok) return { ok: false, erro: dUrl?.erro || "Falha ao preparar o envio." };
 
       const supabase = getSupabaseBrowserClient();
-      const up = await supabase.storage.from("gp-arquivos")
-        .uploadToSignedUrl(dUrl.caminho, dUrl.token, arquivo);
-      if (up.error) { setErroRelatorio(`Falha ao enviar o arquivo: ${up.error.message}`); return; }
+      const up = await supabase.storage.from("gp-arquivos").uploadToSignedUrl(dUrl.caminho, dUrl.token, arquivo);
+      if (up.error) return { ok: false, erro: `Falha ao enviar o arquivo: ${up.error.message}` };
 
-      const res = await enviarArquivo(
-        "/api/relatorios",
-        { inspecaoId: id, tipo, arquivoPath: dUrl.caminho, nomeArquivo: arquivo.name,
-          ...(rascunho ? { rascunho: "1" } : {}),
-          ...(dadosForm ? { dados: JSON.stringify(dadosForm) } : {}),
-          ...(substituirId ? { substituirId } : {}) },
-        new File([""], arquivo.name), "Relatório");
-      if (res.queued) { alert("Sem conexão — relatório salvo offline e enviado ao reconectar."); return; }
-      if (!res.ok) { setErroRelatorio(res.data?.erro || "Falha ao enviar o relatório."); return; }
+      const res = await enviarJson("/api/relatorios", "POST",
+        { inspecaoId: id, tipo: bloco, arquivoPath: dUrl.caminho, rascunho: !!opcoes.rascunho, dados: opcoes.dados || null },
+        "Relatório", opcoes.chave || novoId());
+      if (res.queued) { alert("Sem conexão — relatório salvo offline e registrado ao reconectar."); return { ok: true }; }
+      if (!res.ok) return { ok: false, erro: res.data?.erro || "Falha ao enviar o relatório." };
       carregar();
+      return { ok: true };
+    } catch {
+      return { ok: false, erro: "Sem conexão — tente novamente quando estiver online." };
     } finally {
       setEnviandoRelatorio(false);
+    }
+  }
+
+  /** "Enviar relatório" (arquivo de fora): confere pelos bytes (PDF/DOCX de
+   *  verdade, até 30 MB) e se o mesmo arquivo já está na OS, e abre a
+   *  confirmação com a versão que será criada. */
+  async function escolherRelatorioExterno(f: File) {
+    setErroRelatorio(null);
+    setVerificandoArquivo(true);
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const ex = await examinarArquivoRelatorio(bytes, { tamanho: f.size, max: RELATORIO_MAX_BYTES });
+      let erroArq = ex.erro;
+      if (!erroArq) {
+        const igual = arquivoRelatorioRepetido(await sha256Hex(bytes), refsRelatorio);
+        if (igual) erroArq = `Este mesmo arquivo já foi enviado nesta OS (${descreverRelatorio(igual)}).`;
+      }
+      setEnvioExterno({ arquivo: f, formato: ex.formato, erro: erroArq, chave: novoId() });
+    } finally {
+      setVerificandoArquivo(false);
       if (relatorioInputRef.current) relatorioInputRef.current.value = "";
+    }
+  }
+
+  async function confirmarEnvioExterno() {
+    if (!envioExterno || envioExterno.erro) return;
+    const r = await enviarRelatorio(envioExterno.arquivo, { formato: envioExterno.formato, chave: envioExterno.chave });
+    if (r.ok) setEnvioExterno(null);
+    else setEnvioExterno((e) => (e ? { ...e, erro: r.erro || "Falha ao enviar." } : e));
+  }
+
+  /** "Enviar versão assinada" (relatório aprovado): confere o PDF pelos
+   *  bytes (PDF de verdade, até 30 MB, não repetido na OS), confirma, sobe
+   *  direto ao storage e registra — a API confere tudo de novo. */
+  function pedirAssinado(rel: Relatorio, substituir: boolean) {
+    setErroAssinado(null);
+    setAssinando({ id: rel.id, substituir });
+    assinadoInputRef.current?.click();
+  }
+
+  async function escolherAssinado(f: File) {
+    const alvo = assinando;
+    if (assinadoInputRef.current) assinadoInputRef.current.value = "";
+    const rel = alvo ? relatorios.find((r) => r.id === alvo.id) : null;
+    if (!alvo || !rel) return;
+    const rotulo = `relatório de ${ROTULO_TIPO[rel.tipo as TipoRelatorio] || rel.tipo} v${rel.versao}`;
+    setEnviandoAssinado(rel.id);
+    setErroAssinado(null);
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const ex = await examinarArquivoRelatorio(bytes, { tamanho: f.size, max: RELATORIO_MAX_BYTES });
+      if (ex.erro) { setErroAssinado(ex.erro); return; }
+      if (ex.formato !== "pdf") { setErroAssinado("A versão assinada tem de ser PDF (este arquivo é DOCX). Exporte/imprima em PDF depois de assinar."); return; }
+      const hash = await sha256Hex(bytes);
+      if (rel.arquivo_hash === hash) { setErroAssinado("É o mesmo arquivo da versão enviada para aprovação, sem assinatura. Envie o documento assinado."); return; }
+      const igual = arquivoRelatorioRepetido(hash, refsRelatorio);
+      if (igual) {
+        setErroAssinado(igual.id === rel.id ? "Esta mesma versão assinada já foi enviada." : `Este mesmo arquivo já está nesta OS (${descreverRelatorio(igual)}).`);
+        return;
+      }
+      const msg = alvo.substituir
+        ? `Trocar a versão assinada do ${rotulo} por “${f.name}”?\n\nA versão assinada atual (enviada por ${nomeDe(rel.assinado_por)} em ${formatar(rel.assinado_em)}) será APAGADA — fica só a nova. A troca entra no histórico.`
+        : `Enviar “${f.name}” como a versão ASSINADA do ${rotulo}?\n\nEla passa a ser o documento final do relatório (o original continua disponível).`;
+      if (!confirm(msg)) return;
+      const rUrl = await fetch("/api/relatorios/upload-url", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assinado: rel.id, substituir: alvo.substituir }),
+      });
+      const dUrl = await rUrl.json().catch(() => ({}));
+      if (!rUrl.ok) { setErroAssinado(dUrl?.erro || "Falha ao preparar o envio."); return; }
+      const supabase = getSupabaseBrowserClient();
+      const up = await supabase.storage.from("gp-arquivos").uploadToSignedUrl(dUrl.caminho, dUrl.token, f, { contentType: "application/pdf" });
+      if (up.error) { setErroAssinado(`Falha ao enviar o arquivo: ${up.error.message}`); return; }
+      const res = await fetch(`/api/relatorios/${rel.id}/assinado`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": novoId() },
+        body: JSON.stringify({ caminho: dUrl.caminho, substituir: alvo.substituir }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErroAssinado(data?.erro || "Falha ao registrar a versão assinada."); return; }
+      carregar();
+    } catch {
+      setErroAssinado("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setEnviandoAssinado(null);
+      setAssinando(null);
     }
   }
 
@@ -916,6 +1322,49 @@ export default function InspecaoDetalhePage() {
     setAgServidor(novoResultado());
     setErroAgenda(null);
   }
+
+  // ── Coleta (Fase 3) ──────────────────────────────────────────────────────
+  /** Agendamento ativo de inspeção (o mais recente com data): sugere a data
+   *  da coleta e põe a equipe no topo da lista de responsáveis. */
+  const agInspecao = agAtivos.find((a) => a.tipo === "inspecao" && a.data_visita) || null;
+  const dataSugerida = dataColetaSugerida(agInspecao?.data_visita, hojeBrasil());
+  const equipeAgendada = new Set((agInspecao?.equipe || []).map((m) => m.id));
+  const responsaveisEquipe = usuarios.filter((u) => equipeAgendada.has(u.id));
+  const responsaveisOutros = usuarios.filter((u) => !equipeAgendada.has(u.id));
+  // Refs para o callback do iframe (registrado uma vez) ler o estado atual.
+  const coletasRef = useRef<Coleta[]>([]);
+  coletasRef.current = coletas;
+  const usuariosRef = useRef<UsuarioOpcao[]>([]);
+  usuariosRef.current = usuarios;
+  const dataSugeridaRef = useRef("");
+  dataSugeridaRef.current = dataSugerida;
+
+  const coletaRefs: ColetaRef[] = useMemo(() => coletas.map((c) => ({
+    id: c.id, tipo: c.tipo, chave: c.tipo === "anexo" ? null : chaveMedicao(c.dados), arquivoHash: c.arquivo_hash || null,
+    dataColeta: c.data_coleta || null, descricao: c.descricao || null, criadoEm: c.criado_em,
+  })), [coletas]);
+  const ctxColeta: ContextoColeta = {
+    hoje: hojeBrasil(),
+    dataAgendamento: agInspecao?.data_visita || null,
+    usuariosAtivos: usuarios.length ? usuarios.map((u) => u.id) : undefined,
+    coletas: coletaRefs,
+    tanque: insp?.tanque || null,
+  };
+  const coletaAberta = confirmacao?.editId ? coletas.find((c) => c.id === confirmacao.editId) || null : null;
+  const resultadoConfirmacao = confirmacao
+    ? mesclar(validarColeta({
+      id: confirmacao.editId, tipo: "sedimento", dataColeta: cfData, responsavelId: cfResp, dados: confirmacao.dados,
+    }, ctxColeta), cfServidor)
+    : novoResultado();
+  /** Editar a medição de uma coleta aprovada retira a aprovação. */
+  const retiraAprovacao = !!coletaAberta?.aprovada_em && !!confirmacao
+    && chaveMedicao(confirmacao.dados) !== chaveMedicao(coletaAberta.dados);
+  const difTanque = confirmacao ? diferencasTanque(confirmacao.dados, insp?.tanque) : [];
+  const resultadoAnexo = mesclar(validarColeta({
+    tipo: "anexo", dataColeta: anxData, descricao: anxDescricao, exigirArquivo: true, erroArquivo: anxErroArquivo,
+    // Sem SHA-256 no navegador (http), a duplicidade fica para a API.
+    arquivoHash: anxHash || (anxArquivo && !anxErroArquivo ? `local:${anxArquivo.name}:${anxArquivo.size}` : null),
+  }, ctxColeta), anxServidor);
 
   async function salvarAgenda() {
     setErroAgenda(null);
@@ -1180,7 +1629,13 @@ export default function InspecaoDetalhePage() {
         <h3 style={{ marginTop: 0 }}>Ações desta fase</h3>
         {reprovacao && (
           <p className="erro-texto" style={{ margin: "0 0 10px" }}>
-            Reprovado{reprovacao.motivo ? `: ${reprovacao.motivo}` : ""} — ajuste o relatório.
+            Reprovado{reprovacao.motivo ? `: ${formatarMotivo(reprovacao.motivo_categoria, reprovacao.motivo)}` : ""}
+            {reprovacao.autor_perfil ? ` (por ${reprovacao.autor_perfil.nome_completo || reprovacao.autor_perfil.email}, ${formatar(reprovacao.data_autenticacao || reprovacao.criado_em)})` : ""} — ajuste o relatório.
+          </p>
+        )}
+        {insp.fase >= ULTIMA_FASE && !relatorios.some((r) => r.tipo === "execucao" && r.status === "assinado") && (
+          <p className="val-msg val-aviso" style={{ margin: "0 0 10px" }}>
+            ⚠️ OS encerrada sem a versão assinada do relatório de execução — envie-a em Relatórios (“Enviar versão assinada”).
           </p>
         )}
         {acoes.length === 0 ? (
@@ -1190,13 +1645,32 @@ export default function InspecaoDetalhePage() {
               : "Nenhuma ação disponível para o seu perfil nesta fase."}
           </p>
         ) : (
+          <>
+          {(insp.fase === 5 || insp.fase === 9) && (
+            <p className="detalhe" style={{ margin: "0 0 10px" }}>
+              {relEmAvaliacao ? (
+                <>Relatório em avaliação: <strong>{ROTULO_TIPO[relEmAvaliacao.tipo as TipoRelatorio]} v{relEmAvaliacao.versao}</strong>{" "}
+                  {relAval?.enviado_em ? `(enviado${relAval.enviado_por ? ` por ${nomeDe(relAval.enviado_por)}` : ""} em ${formatar(relAval.enviado_em)}) ` : ""}
+                  — <a href={`/api/relatorios/${relEmAvaliacao.id}/download`} target="_blank" rel="noopener noreferrer"
+                    onClick={() => marcarBaixado(relEmAvaliacao.id)}>baixar</a>.
+                  Aprovar/reprovar vale só para esta versão.</>
+              ) : (
+                <span className="val-msg val-erro" style={{ display: "inline" }}>
+                  ⛔ Nenhum relatório de {ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação — não há o que aprovar nem reprovar. Operações precisa enviar o relatório.
+                </span>
+              )}
+            </p>
+          )}
+          {relAval && <ResumoValidacao r={avisosAprov} />}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {acoes.map((o) => (
-              <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)} disabled={processando}>
-                {o.rotulo}
+              <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)}
+                disabled={processando || ((insp.fase === 5 || insp.fase === 9) && (o.acao === "aprovar" || o.acao === "reprovar") && !relEmAvaliacao)}>
+                {processando ? "Enviando…" : o.rotulo}
               </button>
             ))}
           </div>
+          </>
         )}
         {erro && <p className="erro-texto" style={{ marginBottom: 0 }}>{erro}</p>}
       </div>
@@ -1222,11 +1696,9 @@ export default function InspecaoDetalhePage() {
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={abrirImport}>⬆ Importar batimetria</button>
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalModelo(true)}>⬇ Modelo vazio</button>
-                <button className="btn-azul btn-sec" style={btnColeta} onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
-                  {enviandoColeta ? "Enviando…" : "Anexar PDF"}
+                <button className="btn-azul btn-sec" style={btnColeta} onClick={abrirAnexo} disabled={enviandoColeta}>
+                  📎 Anexar PDF
                 </button>
-                <input ref={coletaInputRef} type="file" accept="application/pdf" style={{ display: "none" }}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) anexarColeta(f); }} />
               </>
           )}>
           <p className="detalhe" style={{ marginTop: 0 }}>Medidor de sedimento: a medição vira um Relatório Técnico interno editável.</p>
@@ -1239,15 +1711,24 @@ export default function InspecaoDetalhePage() {
             <p className="vazio" style={{ margin: 0 }}>Nenhuma coleta registrada.</p>
           ) : (
             coletas.map((c) => {
-              const temMedicao = c.dados && Object.keys(c.dados).length > 0;
+              const temMedicao = c.tipo !== "anexo" && medicaoPreenchida(c.dados);
+              const naoAprovavel = c.aprovada_em ? null : motivoNaoAprovavel(c);
+              const resp = temMedicao && typeof c.dados?.reportResponsavel === "string" ? c.dados.reportResponsavel : "";
               return (
                 <div key={c.id} className="linha-item">
                   <span className="detalhe linha-texto" style={{ margin: 0 }}>
-                    {temMedicao ? "📋 Relatório Técnico interno" : `📎 ${c.tipo}`} · {formatar(c.criado_em)}
+                    {temMedicao ? "📋 Relatório Técnico interno" : `📎 Anexo — ${c.descricao || c.tipo}`}
+                    {" · "}{c.data_coleta ? formatarData(c.data_coleta) : formatar(c.criado_em)}
+                    {resp ? ` · ${resp}` : ""}
                     {c.aprovada_em && (
                       <strong style={{ display: "block", color: "#16a34a" }}>
                         ✓ Em uso no relatório — aprovada em {formatar(c.aprovada_em)}
                       </strong>
+                    )}
+                    {!c.aprovada_em && c.aprovacao_retirada_em && (
+                      <span className="alerta" style={{ display: "block" }}>
+                        Aprovação retirada por edição em {formatar(c.aprovacao_retirada_em)} — aprove de novo se ela vale para o relatório.
+                      </span>
                     )}
                   </span>
                   <span className="linha-acoes">
@@ -1262,14 +1743,14 @@ export default function InspecaoDetalhePage() {
                         style={c.aprovada_em
                           ? { color: "#16a34a", borderColor: "#16a34a" }
                           : undefined}
-                        title={c.aprovada_em ? "Desmarcar esta medição" : "Marcar como a medição válida para o relatório"}
-                        disabled={aprovandoColeta === c.id} onClick={() => aprovarColeta(c)}>
+                        title={c.aprovada_em ? "Desmarcar esta medição" : naoAprovavel || "Marcar como a medição válida para o relatório"}
+                        disabled={aprovandoColeta === c.id || !!naoAprovavel} onClick={() => aprovarColeta(c)}>
                         {aprovandoColeta === c.id ? "…" : c.aprovada_em ? "✓ Aprovada" : "Aprovar"}
                       </button>
                     )}
                     {podeColeta && (
                       <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-                        title="Excluir medição (lixeira de 30 dias)"
+                        title={c.aprovada_em ? "Excluir (lixeira de 30 dias) — a aprovação é retirada" : "Excluir (lixeira de 30 dias)"}
                         disabled={excluindoColeta === c.id} onClick={() => excluirColeta(c)}>
                         {excluindoColeta === c.id ? "Excluindo…" : "Excluir"}
                       </button>
@@ -1353,7 +1834,7 @@ export default function InspecaoDetalhePage() {
         <ChecklistEquipamentos
           inspecaoId={id}
           etapa={bloco}
-          nomeUsuario={nomeUsuarioAtual}
+          procedimento={insp.procedimento}
           clienteId={insp.projeto?.cliente?.id}
           embutido
           onResumo={setResumoChecklist}
@@ -1396,26 +1877,36 @@ export default function InspecaoDetalhePage() {
         resumo={resumoRelatorios}
         acoesCabecalho={podeRelatorio && (
             <>
-              <select value={tipoRelatorio || bloco}
-                onChange={(e) => setTipoRelatorio(e.target.value as "inspecao" | "execucao")}
-                title="Tipo do relatório a enviar"
-                style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid var(--borda)",
-                  background: "var(--bg-card)", color: "var(--texto)", fontSize: 13 }}>
-                <option value="inspecao">Inspeção</option>
-                <option value="execucao">Execução</option>
-              </select>
-              <button className="btn-azul btn-sec" onClick={() => setModalRelatorio(true)}>📄 Gerar relatório</button>
-              <button className="btn-azul" onClick={() => relatorioInputRef.current?.click()} disabled={enviandoRelatorio}>
-                {enviandoRelatorio ? "Enviando…" : "Enviar relatório"}
+              <span className="detalhe" style={{ margin: 0, alignSelf: "center" }}
+                title="O tipo segue a fase da OS: inspeção até a fase 5, execução da 6 em diante.">
+                Relatório de {ROTULO_TIPO[bloco]}
+              </span>
+              <button className="btn-azul btn-sec" onClick={() => {
+                // Um rascunho por tipo: "gerar" abre o rascunho que já existe.
+                const rasc = rascunhoBloco ? relatorios.find((x) => x.id === rascunhoBloco.id) : null;
+                setRascunhoEmEdicao(rasc ? { id: rasc.id, dados: rasc.dados || null } : null);
+                setModalRelatorio(true);
+              }}>{rascunhoBloco ? `📄 Editar rascunho v${rascunhoBloco.versao}` : "📄 Gerar relatório"}</button>
+              <button className="btn-azul" onClick={() => relatorioInputRef.current?.click()} disabled={enviandoRelatorio || verificandoArquivo}>
+                {verificandoArquivo ? "Conferindo…" : enviandoRelatorio ? "Enviando…" : "Enviar relatório"}
               </button>
-              <input ref={relatorioInputRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) enviarRelatorio(f); }} />
+              <input ref={relatorioInputRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) escolherRelatorioExterno(f); }} />
             </>
         )}>
         {erroRelatorio && (
           <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erroRelatorio}</p>
         )}
-        <p className="detalhe" style={{ marginTop: 0 }}>Cada envio gera uma nova versão. Envio manual (PDF/DOCX); a Gerência aprova ou marca “Ajustar”.</p>
+        {erroAssinado && (
+          <p className="erro-texto" style={{ margin: "0 0 8px" }}>⛔ Versão assinada: {erroAssinado}</p>
+        )}
+        <input ref={assinadoInputRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) escolherAssinado(f); else setAssinando(null); }} />
+        <p className="detalhe" style={{ marginTop: 0 }}>
+          Cada envio para aprovação é uma nova versão (a que estava em aprovação é substituída). Um rascunho por tipo:
+          gerar de novo atualiza o mesmo. Envio de fora: PDF ou DOCX, até 30 MB. A Gerência aprova ou marca “Ajustar”.
+        </p>
         {relatorios.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum relatório enviado.</p>
         ) : (
@@ -1425,18 +1916,39 @@ export default function InspecaoDetalhePage() {
                 style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12, marginTop: 0 }}>
                 <div className="linha-texto">
                   <div style={{ color: "var(--texto)" }}>
-                    <strong style={{ textTransform: "capitalize" }}>{r.tipo}</strong> v{r.versao} —{" "}
+                    <strong style={{ textTransform: "capitalize" }}>{ROTULO_TIPO[r.tipo as TipoRelatorio] || r.tipo}</strong> v{r.versao} —{" "}
                     <span style={{ color: corStatus(r.status) }}>{rotuloStatus(r.status)}</span>
                   </div>
-                  {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {r.motivo_ajuste}</div>}
-                  {r.enviado_em && <div className="detalhe" style={{ margin: 0 }}>Enviado em {formatar(r.enviado_em)}</div>}
+                  {r.status === "substituido" && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      Substituído{(() => { const n = relatorios.find((x) => x.id === r.substituido_por); return n ? ` pela v${n.versao}` : ""; })()}
+                      {r.substituido_em ? ` em ${formatar(r.substituido_em)}` : ""} — saiu da fila da Gerência.
+                    </div>
+                  )}
+                  {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {formatarMotivo(r.motivo_categoria, r.motivo_ajuste)}</div>}
+                  {r.enviado_em && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      Enviado{r.enviado_por ? ` por ${nomeDe(r.enviado_por)}` : ""} em {formatar(r.enviado_em)}
+                    </div>
+                  )}
+                  {(r.status === "aprovado" || r.status === "assinado" || r.status === "ajustar") && (r.avaliado_por || r.aprovado_por) && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      {r.status === "ajustar" ? "Reprovado" : "Aprovado"} por {nomeDe(r.avaliado_por || r.aprovado_por)}
+                      {r.avaliado_em ? ` em ${formatar(r.avaliado_em)}` : ""}
+                    </div>
+                  )}
+                  {r.status === "assinado" && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      Versão assinada enviada{r.assinado_por ? ` por ${nomeDe(r.assinado_por)}` : ""}{r.assinado_em ? ` em ${formatar(r.assinado_em)}` : ""} — é o documento final.
+                    </div>
+                  )}
                 </div>
                 <span className="linha-acoes">
                   {podeRelatorio && r.status === "rascunho" && (
                     <>
                       <button className="btn-dl" disabled={enviandoRelatorio}
                         title="Submeter este rascunho à Gerência"
-                        onClick={() => enviarParaAprovacao(r.id)}>
+                        onClick={() => enviarParaAprovacao(r)}>
                         {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
                       </button>
                       <button className="btn-dl btn-sec"
@@ -1448,7 +1960,26 @@ export default function InspecaoDetalhePage() {
                       </button>
                     </>
                   )}
-                  <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">Baixar</a>
+                  {podeAssinar && r.status === "aprovado" && (
+                    <button className="btn-dl" disabled={!!enviandoAssinado}
+                      title="Enviar o PDF assinado — passa a ser o documento final deste relatório"
+                      onClick={() => pedirAssinado(r, false)}>
+                      {enviandoAssinado === r.id ? "Enviando…" : "✍ Enviar versão assinada"}
+                    </button>
+                  )}
+                  {podeTrocarAssinado && r.status === "assinado" && (
+                    <button className="btn-dl btn-sec" disabled={!!enviandoAssinado}
+                      title="Trocar o PDF assinado (só Gerência/Admin) — o atual é apagado"
+                      onClick={() => pedirAssinado(r, true)}>
+                      {enviandoAssinado === r.id ? "Enviando…" : "Trocar assinada"}
+                    </button>
+                  )}
+                  {r.status === "assinado" && r.assinado_path && (
+                    <a className="btn-dl" href={`/api/relatorios/${r.id}/download?arquivo=assinado`} target="_blank" rel="noopener noreferrer"
+                      onClick={() => marcarBaixado(r.id)}>Baixar assinado</a>
+                  )}
+                  <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer"
+                    onClick={() => marcarBaixado(r.id)}>{r.status === "assinado" ? "Baixar original" : "Baixar"}</a>
                 </span>
               </div>
             ))}
@@ -1503,7 +2034,11 @@ export default function InspecaoDetalhePage() {
                 <div style={{ fontSize: 14, color: "var(--texto)", fontWeight: 600 }}>
                   {descreverAcaoFase(h.acao, h.fase_de, h.fase_para)}
                 </div>
-                {h.motivo && <div className="detalhe" style={{ margin: 0 }}>Motivo: {h.motivo}</div>}
+                {h.motivo && (
+                  <div className="detalhe" style={{ margin: 0 }}>
+                    {h.acao === "assinar" ? h.motivo : `Motivo: ${formatarMotivo(h.motivo_categoria, h.motivo)}`}
+                  </div>
+                )}
                 <div className="detalhe" style={{ margin: 0 }}>
                   Por {h.autor_perfil?.nome_completo || h.autor_perfil?.email || "usuário"} · {formatar(h.data_autenticacao || h.criado_em)}
                 </div>
@@ -1545,6 +2080,7 @@ export default function InspecaoDetalhePage() {
       {/* Modal: digitar batimetria (mesma matemática da importação) */}
       {modalEntrada && (
         <EntradaBatimetria
+          tanque={insp.tanque}
           onFechar={() => setModalEntrada(false)}
           onGerar={(estado) => { setModalEntrada(false); carregarNoMedidor(estado); }}
         />
@@ -1557,6 +2093,7 @@ export default function InspecaoDetalhePage() {
             <p className="detalhe" style={{ margin: 0 }}>
               Envie a planilha no layout atual (blocos v1..vN com Esquerda/Centro/Direita e a linha “Altura sedimento”).
               Cada lateral vira um vetor paralelo atravessando o tanque — todas as leituras entram no cálculo.
+              {insp.tanque ? " Formato e medidas vieram do cadastro do tanque da OS." : ""}
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
@@ -1571,7 +2108,7 @@ export default function InspecaoDetalhePage() {
               </div>
               {impFormato === "retangulo" && (
                 <div>
-                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Largura *</label>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Largura ({impUnidade}) *</label>
                   <input style={inputStyle} value={impLargura} onChange={(e) => setImpLargura(e.target.value)} placeholder="ex.: 4" inputMode="decimal" />
                 </div>
               )}
@@ -1591,12 +2128,12 @@ export default function InspecaoDetalhePage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>
-                  {impFormato === "quadrado" || impFormato === "retangulo" ? "Comprimento (m) *" : "Diâmetro (m) *"}
+                  {impFormato === "quadrado" || impFormato === "retangulo" ? `Comprimento (${impUnidade}) *` : `Diâmetro (${impUnidade}) *`}
                 </label>
                 <input style={inputStyle} value={impDiametro} onChange={(e) => setImpDiametro(e.target.value)} placeholder="ex.: 12" inputMode="decimal" />
               </div>
               <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Altura do tanque</label>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Altura do tanque ({impUnidade})</label>
                 <input style={inputStyle} value={impAltura} onChange={(e) => setImpAltura(e.target.value)} placeholder="auto (planilha)" inputMode="decimal" />
               </div>
               <div>
@@ -1627,17 +2164,60 @@ export default function InspecaoDetalhePage() {
           nomeArquivo={`Relatorio-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
-          coletas={coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0)}
+          coletas={coletas.filter((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados))}
           // Relatório de Execução: as fotos da coleta entram já posicionadas.
-          coletaFotos={(tipoRelatorio || bloco) === "execucao" ? fotosExec : undefined}
+          coletaFotos={bloco === "execucao" ? fotosExec : undefined}
+          inspecaoId={id}
+          revisaoEsperada={revisaoRelatorio}
+          codigoEsperado={codigoRelatorio(codigoProjetoOS, revisaoRelatorio)}
+          podeEditarRevisao={podeEditarRevisao({ perfil, funcao })}
+          equipeAgendada={(agDoBloco?.equipe || []).map((m) => m.id).filter(Boolean)}
           onSalvar={async (blob, snapshot) => {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "OS"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             });
-            await enviarRelatorio(arquivo, true, snapshot, rascunhoEmEdicao?.id);   // true = rascunho
+            // Rascunho: a API atualiza o rascunho do tipo (um só) ou cria.
+            const r = await enviarRelatorio(arquivo, { rascunho: true, dados: snapshot, formato: "docx" });
+            if (!r.ok) throw new Error(r.erro || "Falha ao salvar o rascunho.");
           }}
         />
       )}
+
+      {/* Confirmação do envio de relatório de fora (PDF/DOCX) */}
+      {envioExterno && (() => {
+        const plano = planejarEnvio(refsRelatorio, bloco);
+        const tam = (envioExterno.arquivo.size / 1048576).toFixed(1).replace(".", ",");
+        return (
+          <Modal titulo="Enviar relatório para aprovação" onFechar={() => setEnvioExterno(null)}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <p style={{ margin: 0, overflowWrap: "anywhere" }}>
+                Arquivo: <strong>{envioExterno.arquivo.name}</strong> ({tam} MB{envioExterno.formato ? ` · ${envioExterno.formato.toUpperCase()}` : ""})
+              </p>
+              {!envioExterno.erro && (
+                <p style={{ margin: 0 }}>
+                  Será criada a <strong>versão v{plano.versao}</strong> do relatório de {ROTULO_TIPO[bloco]}, já{" "}
+                  <strong>em aprovação</strong> pela Gerência.
+                </p>
+              )}
+              {!envioExterno.erro && plano.substitui.map((x) => (
+                <p key={x.id} className="val-msg val-aviso" style={{ margin: 0 }}>
+                  ⚠️ A versão v{x.versao} em aprovação será substituída (sai da fila da Gerência).
+                </p>
+              ))}
+              {!envioExterno.erro && rascunhoBloco && (
+                <p className="detalhe" style={{ margin: 0 }}>O rascunho v{rascunhoBloco.versao} continua como rascunho.</p>
+              )}
+              {envioExterno.erro && <p className="val-msg val-erro" style={{ margin: 0 }}>⛔ {envioExterno.erro}</p>}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <button className="btn-azul btn-sec" onClick={() => setEnvioExterno(null)} disabled={enviandoRelatorio}>Cancelar</button>
+                <button className="btn-azul" onClick={confirmarEnvioExterno} disabled={!!envioExterno.erro || enviandoRelatorio}>
+                  {enviandoRelatorio ? "Enviando…" : `Enviar como v${plano.versao}`}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Modal: medidor de sedimento (ferramenta de campo embutida por iframe) */}
       {modalMedidor && (
@@ -1647,22 +2227,130 @@ export default function InspecaoDetalhePage() {
           <div className="medidor-shell">
             <div className="medidor-barra" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--borda)", background: "var(--bg-suave)", flexShrink: 0 }}>
               <span className="detalhe" style={{ margin: 0 }}>
-                {coletaEditando ? "Editando o registro salvo." : "A medição é salva como Relatório Técnico interno (editável). Use “Exportar em PDF” dentro da ferramenta para o PDF."}
+                {msgMedidor ? <strong style={{ color: "#16a34a" }}>✓ {msgMedidor}</strong>
+                  : coletaEditando ? "Editando o registro salvo — salvar atualiza esta medição (e o PDF dela)."
+                  : "A medição é salva como Relatório Técnico interno (editável). “Salvar relatório (PDF)” salva a medição com o PDF anexado."}
               </span>
-              <span style={{ display: "flex", gap: 8 }}>
+              <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar</button>
                 <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar</button>
-                <button className="btn-azul btn-sec" onClick={pedirPdfMedicao} disabled={gerandoPdfMedicao || salvandoMedicao}
-                  title="Gera o relatório da medição em PDF e anexa às Coletas">
+                <button className="btn-azul btn-sec" onClick={pedirPdfMedicao} disabled={gerandoPdfMedicao || salvandoMedicao || !!confirmacao}
+                  title={coletaEditando ? "Gera o PDF e anexa (ou substitui) na medição aberta" : "Salva a medição com o relatório em PDF anexado"}>
                   {gerandoPdfMedicao ? "Gerando…" : "📄 Salvar relatório (PDF)"}
                 </button>
-                <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
+                <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao || !!confirmacao}>
                   {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
                 </button>
               </span>
             </div>
             <iframe ref={medidorRef} src="/ferramentas/medidor-sedimento-asp.html" title="Medidor de Sedimento"
               style={{ flex: 1, width: "100%", border: "none", display: "block" }} />
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: confirmar a medição (Fase 3). Regras em lib/validacao/coleta.ts
+          e medicao.ts — a API repete: ⛔ bloqueia, ⚠️ só alerta. */}
+      {confirmacao && (
+        <Modal titulo={confirmacao.modo === "pdf" ? "📄 Salvar relatório (PDF) da medição" : "💾 Salvar medição"} zIndex={300}
+          onFechar={() => { if (!salvandoMedicao) setConfirmacao(null); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              {confirmacao.editId
+                ? confirmacao.modo === "pdf" ? "Atualiza a medição aberta e anexa (ou substitui) o PDF dela." : "Atualiza a medição aberta."
+                : confirmacao.modo === "pdf" ? "Salva a medição nesta OS com o relatório em PDF anexado." : "Salva a medição nesta OS."}
+            </p>
+            {retiraAprovacao && (
+              <p className="val-msg val-aviso">⚠️ Esta medição está aprovada; ao salvar, a aprovação será retirada (será preciso aprovar de novo).</p>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+              <div>
+                <label htmlFor="cf-data" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da coleta *</label>
+                <input id="cf-data" type="date" style={inputStyle} value={cfData} max={hojeBrasil()}
+                  className={resultadoConfirmacao.erros.dataColeta ? "val-invalido" : undefined}
+                  onChange={(e) => { setCfData(e.target.value); setCfServidor(novoResultado()); }} />
+                <MensagensCampo r={resultadoConfirmacao} campo="dataColeta" />
+              </div>
+              <div>
+                <label htmlFor="cf-resp" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Responsável pela medição *</label>
+                <select id="cf-resp" style={inputStyle} value={cfResp}
+                  className={resultadoConfirmacao.erros.responsavelId ? "val-invalido" : undefined}
+                  onChange={(e) => { setCfResp(e.target.value); setCfServidor(novoResultado()); }}>
+                  <option value="">— escolha —</option>
+                  {responsaveisEquipe.length > 0 && (
+                    <optgroup label="Equipe agendada">
+                      {responsaveisEquipe.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                    </optgroup>
+                  )}
+                  <optgroup label={responsaveisEquipe.length > 0 ? "Demais usuários" : "Usuários"}>
+                    {responsaveisOutros.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                  </optgroup>
+                </select>
+                <MensagensCampo r={resultadoConfirmacao} campo="responsavelId" />
+              </div>
+            </div>
+            <MensagensCampo r={resultadoConfirmacao} campo="medicao" />
+            <MensagensCampo r={resultadoConfirmacao} campo="valores" />
+            <MensagensCampo r={resultadoConfirmacao} campo="tanque">
+              {difTanque.length > 0 && insp.tanque && podeRenomear && (
+                <span style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                  <button type="button" className="btn-dl btn-sec" disabled={atualizandoTanque} onClick={atualizarTanqueComMedicao}>
+                    {atualizandoTanque ? "Atualizando…" : "Atualizar cadastro do tanque"}
+                  </button>
+                  <span className="detalhe" style={{ margin: 0, alignSelf: "center" }}>ou salve mantendo o cadastro como está.</span>
+                </span>
+              )}
+            </MensagensCampo>
+            <ResumoValidacao r={resultadoConfirmacao} rotulos={ROTULOS_COLETA} />
+            {cfErro && <p className="val-msg val-erro">⛔ {cfErro}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setConfirmacao(null)} disabled={salvandoMedicao}>Voltar ao medidor</button>
+              <button className="btn-azul" onClick={confirmarMedicao} disabled={salvandoMedicao || temErros(resultadoConfirmacao)}>
+                {salvandoMedicao ? (confirmacao.modo === "pdf" ? "Gerando e enviando…" : "Salvando…")
+                  : confirmacao.modo === "pdf" ? "Salvar com PDF" : "Salvar medição"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: anexar PDF avulso (tipo 'anexo', descrição obrigatória). */}
+      {modalAnexo && (
+        <Modal titulo="📎 Anexar PDF" onFechar={() => { if (!enviandoColeta) setModalAnexo(false); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Documento avulso da coleta (laudo, foto em PDF, relatório de terceiro). Medição do medidor
+              não entra aqui — use “Nova medição”.
+            </p>
+            <div>
+              <label htmlFor="anx-desc" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Descrição *</label>
+              <input id="anx-desc" style={inputStyle} value={anxDescricao} maxLength={200}
+                placeholder="ex.: Laudo de espessura do fundo"
+                className={anxTentou && resultadoAnexo.erros.descricao ? "val-invalido" : undefined}
+                onChange={(e) => { setAnxDescricao(e.target.value); setAnxServidor(novoResultado()); }} />
+              <MensagensCampo r={resultadoAnexo} campo="descricao" mostrarErros={anxTentou} />
+            </div>
+            <div>
+              <label htmlFor="anx-data" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da coleta *</label>
+              <input id="anx-data" type="date" style={inputStyle} value={anxData} max={hojeBrasil()}
+                className={resultadoAnexo.erros.dataColeta ? "val-invalido" : undefined}
+                onChange={(e) => { setAnxData(e.target.value); setAnxServidor(novoResultado()); }} />
+              <MensagensCampo r={resultadoAnexo} campo="dataColeta" />
+            </div>
+            <div>
+              <label htmlFor="anx-arq" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Arquivo PDF * (até 20 MB)</label>
+              <input id="anx-arq" type="file" accept="application/pdf,.pdf"
+                onChange={(e) => escolherArquivoAnexo(e.target.files?.[0] || null)} />
+              <MensagensCampo r={resultadoAnexo} campo="arquivo" mostrarErros={anxTentou || !!anxErroArquivo || !!anxHash} />
+            </div>
+            <ResumoValidacao r={resultadoAnexo} rotulos={ROTULOS_COLETA} mostrarErros={anxTentou} />
+            {anxErro && <p className="val-msg val-erro">⛔ {anxErro}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setModalAnexo(false)} disabled={enviandoColeta}>Cancelar</button>
+              <button className="btn-azul" onClick={salvarAnexo} disabled={enviandoColeta || (anxTentou && temErros(resultadoAnexo))}>
+                {enviandoColeta ? "Enviando…" : "Anexar"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
@@ -1837,15 +2525,35 @@ export default function InspecaoDetalhePage() {
         <Modal titulo={reprovar.rotulo} onFechar={() => setReprovar(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <p style={{ margin: 0, color: "var(--texto-suave)" }}>
+              {relEmAvaliacao ? <>Reprovando a <strong>v{relEmAvaliacao.versao}</strong>. </> : null}
               A OS volta para a fase {reprovar.destino} ({nomeFase(reprovar.destino)}) com a tag “Ajustar”. Informe o motivo:
             </p>
-            <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={4}
-              placeholder="O que precisa ser ajustado no relatório?"
-              style={{ ...inputStyle, resize: "vertical" }} autoFocus />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Categoria *</span>
+              <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={inputStyle} aria-label="Categoria do ajuste">
+                <option value="">Escolha…</option>
+                {CATEGORIAS_REPROVACAO.map((c) => <option key={c.valor} value={c.valor}>{c.rotulo}</option>)}
+              </select>
+            </label>
+            <MensagensCampo r={valReprovacao} campo="categoria" mostrarErros={tentouReprovar} />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>O que ajustar *</span>
+              <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={4}
+                placeholder="Ex.: a foto 3 é de outro tanque; o volume do tópico 7 não bate com a medição."
+                style={{ ...inputStyle, resize: "vertical" }} autoFocus />
+            </label>
+            <MensagensCampo r={valReprovacao} campo="motivo" mostrarErros={tentouReprovar} />
+            <ResumoValidacao r={valReprovacao} rotulos={ROTULOS_REPROVACAO} mostrarErros={tentouReprovar} />
             {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button className="btn-azul btn-sec" onClick={() => setReprovar(null)} disabled={processando}>Cancelar</button>
-              <button className="btn-azul" onClick={() => { if (!motivo.trim()) { setErro("Informe o motivo do ajuste."); return; } aplicar(reprovar.acao, motivo); }} disabled={processando}>
+              <button className="btn-azul" onClick={() => {
+                setTentouReprovar(true);
+                if (temErros(valReprovacao)) return;
+                const av = resumoValidacao(valReprovacao, ROTULOS_REPROVACAO).avisos;
+                if (av.length && !confirm(`Atenção:\n\n• ${av.join("\n• ")}\n\nReprovar mesmo assim?`)) return;
+                aplicar(reprovar.acao, motivo, categoria);
+              }} disabled={processando}>
                 {processando ? "Enviando…" : "Confirmar ajuste"}
               </button>
             </div>
@@ -1865,10 +2573,10 @@ function formatarData(iso?: string | null) {
   return new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso).toLocaleDateString("pt-BR");
 }
 function rotuloStatus(s: string) {
-  return { rascunho: "Rascunho", em_aprovacao: "Em aprovação", aprovado: "Aprovado", ajustar: "Ajustar", assinado: "Assinado" }[s] || s;
+  return ROTULO_STATUS_RELATORIO[s] || s;
 }
 function corStatus(s: string) {
-  return { em_aprovacao: "#c2410c", aprovado: "#16a34a", ajustar: "#dc2626", assinado: "#7c3aed" }[s] || "var(--texto-suave)";
+  return ({ em_aprovacao: "#c2410c", aprovado: "#16a34a", ajustar: "#dc2626", assinado: "#7c3aed" } as Record<string, string>)[s] || "var(--texto-suave)";
 }
 /** Etapa do agendamento por extenso ("inspecao" → "inspeção"). */
 function rotuloEtapa(t: string) {

@@ -11,7 +11,7 @@ import { tituloFase } from "@/lib/asp/fases";
 import { dataBr, numeroRdo } from "@/lib/asp/rdo";
 
 interface Coleta { id: string; tipo: string; pdf_path: string | null; criado_em: string }
-interface Relatorio { id: string; tipo: string; versao: number; status: string; arquivo_path: string | null; enviado_em: string | null }
+interface Relatorio { id: string; tipo: string; versao: number; status: string; arquivo_path: string | null; assinado_path?: string | null; enviado_em: string | null }
 interface Inspecao { id: string; identificacao: string; fase: number; coletas: Coleta[]; relatorios: Relatorio[] }
 /** RDO com arquivo gerado; `inspecoes` já vem com os nomes. */
 interface Rdo { id: string; numero: number; data: string; arquivo_em: string | null; inspecoes: string[] }
@@ -31,7 +31,7 @@ function fmt(iso?: string | null) {
   return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 function rotuloStatus(s: string) {
-  return { rascunho: "Rascunho", em_aprovacao: "Em aprovação", aprovado: "Aprovado", ajustar: "Ajustar", assinado: "Assinado" }[s] || s;
+  return { rascunho: "Rascunho", em_aprovacao: "Em aprovação", aprovado: "Aprovado", ajustar: "Ajustar", assinado: "Assinado", substituido: "Substituído" }[s] || s;
 }
 
 const inp: React.CSSProperties = {
@@ -104,7 +104,7 @@ export default function ArquivosPage() {
     const insp = limpar(i.identificacao);
     let nome: string;
     if (kind === "coleta") nome = `Coleta-${limpar(item.tipo)}-${(item.criado_em || "").slice(0, 10)}.pdf`;
-    else { const ext = String(item.arquivo_path || "").endsWith(".docx") ? "docx" : "pdf"; nome = `Relatorio-${limpar(item.tipo)}-v${item.versao}.${ext}`; }
+    else { const ext = !item.assinado_path && String(item.arquivo_path || "").endsWith(".docx") ? "docx" : "pdf"; nome = `Relatorio-${limpar(item.tipo)}-v${item.versao}${item.assinado_path ? "-assinado" : ""}.${ext}`; }
     let base: string;
     if (estrutura === "proj/insp") base = `${proj}/${insp}`;
     else if (estrutura === "cli/proj/insp/tipo") base = `${cli}/${proj}/${insp}/${kind === "coleta" ? "Coletas" : "Relatorios"}`;
@@ -149,7 +149,7 @@ export default function ArquivosPage() {
             if (!r.arquivo_path) continue;
             const dt = r.enviado_em ? new Date(r.enviado_em).getTime() : 0;
             if (apenasNovos && dt <= corte) continue;
-            const resp = await fetch(`/api/relatorios/${r.id}/download`);
+            const resp = await fetch(`/api/relatorios/${r.id}/download${r.assinado_path ? "?arquivo=assinado&registrar=0" : "?registrar=0"}`);
             if (!resp.ok) continue;
             zip.file(caminhoArquivo(p, i, r, "relatorio"), await resp.blob());
             count++;
@@ -266,7 +266,12 @@ export default function ArquivosPage() {
                       <span className="detalhe" style={{ margin: 0 }}>
                         📄 Relatório de {r.tipo} v{r.versao} · {rotuloStatus(r.status)}{r.enviado_em ? ` · ${fmt(r.enviado_em)}` : ""}
                       </span>
-                      <a className="btn-dl" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">⬇ Baixar</a>
+                      <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {r.assinado_path && (
+                          <a className="btn-dl" href={`/api/relatorios/${r.id}/download?arquivo=assinado`} target="_blank" rel="noopener noreferrer">⬇ Assinado</a>
+                        )}
+                        <a className={`btn-dl${r.assinado_path ? " btn-sec" : ""}`} href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">⬇ {r.assinado_path ? "Original" : "Baixar"}</a>
+                      </span>
                     </div>
                   ))}
                 </div>

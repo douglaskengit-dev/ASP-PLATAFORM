@@ -3,15 +3,21 @@
 /** Digitação de batimetria no app (alternativa à importação da planilha).
  * Por vetor/ponto: água teórica, régua e sonar Esquerda/Central/Direita. Usa a
  * MESMA matemática e o mesmo montador da importação — garantindo resultado
- * idêntico. Gera o estado do medidor e devolve via onGerar. */
+ * idêntico. Gera o estado do medidor e devolve via onGerar.
+ *
+ * Formato, medidas e altura já vêm do cadastro do tanque da OS (em metros).
+ * ROV e peso da régua estão na unidade escolhida: trocar m ↔ cm converte. */
 import { useMemo, useState } from "react";
 import Modal from "./Modal";
-import { montarDadosManuais, montarEstadoMedidor, GridManual } from "@/lib/asp/batimetria";
+import { montarDadosManuais, montarEstadoMedidor, padroesRovPeso, paraNumero, GridManual } from "@/lib/asp/batimetria";
+import type { Tanque } from "@/lib/asp/tanque";
 
 function num(v: string | undefined): number | null {
-  if (!v || !v.trim()) return null;
-  const n = parseFloat(v.replace(",", "."));
-  return isNaN(n) ? null : n;
+  return v && v.trim() ? paraNumero(v) : null;
+}
+/** 0.26 → "0,26". */
+function texto(n: number | null | undefined): string {
+  return n == null ? "" : String(Number(n.toFixed(4))).replace(".", ",");
 }
 const cellStyle: React.CSSProperties = {
   width: 58, padding: "4px 5px", fontSize: 12, borderRadius: 6, border: "1px solid var(--borda)",
@@ -22,23 +28,38 @@ const paramStyle: React.CSSProperties = {
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
 };
 
-export default function EntradaBatimetria({ onFechar, onGerar }: {
+export default function EntradaBatimetria({ onFechar, onGerar, tanque }: {
   onFechar: () => void;
   onGerar: (estado: Record<string, unknown>) => void;
+  /** Cadastro do tanque da OS — pré-preenche formato e medidas. */
+  tanque?: Tanque | null;
 }) {
+  const retangular = tanque?.formato === "retangular";
   const [vetores, setVetores] = useState(5);
   const [pontos, setPontos] = useState(11);
-  const [diametro, setDiametro] = useState("");
+  const [diametro, setDiametro] = useState(texto(retangular ? tanque?.comprimento : tanque?.diametro));
+  const [largura, setLargura] = useState(texto(retangular ? tanque?.largura : null));
+  const [altura, setAltura] = useState(texto(tanque?.altura));
   const [unidade, setUnidade] = useState<"m" | "cm">("m");
-  const [rov, setRov] = useState("0,26");
-  const [peso, setPeso] = useState("0,15");
+  const [rov, setRov] = useState(texto(padroesRovPeso("m").rov));
+  const [peso, setPeso] = useState(texto(padroesRovPeso("m").peso));
   const [agua, setAgua] = useState<Record<number, string>>({});
   const [regua, setRegua] = useState<Record<string, string>>({}); // `${p}_${v}`
   const [sonar, setSonar] = useState<Record<string, string>>({}); // `${p}_${v}_${lat}`
   const [erro, setErro] = useState<string | null>(null);
 
-  const rovN = num(rov) ?? 0.26;
-  const pesoN = num(peso) ?? 0.15;
+  const rovN = num(rov) ?? padroesRovPeso(unidade).rov;
+  const pesoN = num(peso) ?? padroesRovPeso(unidade).peso;
+
+  /** Troca a unidade convertendo o que já foi digitado nos parâmetros. */
+  function trocarUnidade(u: "m" | "cm") {
+    if (u === unidade) return;
+    const f = u === "cm" ? 100 : 0.01;
+    const conv = (v: string) => { const n = num(v); return n == null ? v : texto(n * f); };
+    setRov(conv(rov)); setPeso(conv(peso));
+    setDiametro(conv(diametro)); setLargura(conv(largura)); setAltura(conv(altura));
+    setUnidade(u);
+  }
 
   function grid(): GridManual {
     const g: GridManual = {
@@ -61,10 +82,18 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
   function gerar() {
     setErro(null);
     const diam = num(diametro);
-    if (!diam || diam <= 0) { setErro("Informe o diâmetro do tanque."); return; }
+    if (!diam || diam <= 0) { setErro(`Informe o ${retangular ? "comprimento" : "diâmetro"} do tanque (${unidade}).`); return; }
+    const larg = num(largura);
+    if (retangular && (!larg || larg <= 0)) { setErro(`Informe a largura do tanque (${unidade}).`); return; }
     if (previa.invalidos > 0 && !confirm(`Atenção: ${previa.invalidos} de ${previa.totalValidacao} leituras estão INCORRETO na validação. Gerar mesmo assim?`)) return;
-    const altura = previa.alturaSugerida || Math.max(0.5, ...previa.valores.flat().map((x) => (x || 0) + 0.5));
-    const estado = montarEstadoMedidor(previa, { diametro: diam, altura, unidade });
+    const folga = unidade === "cm" ? 50 : 0.5;
+    const alt = num(altura);
+    const alturaFinal = alt && alt > 0 ? alt
+      : previa.alturaSugerida || Math.max(folga, ...previa.valores.flat().map((x) => (x || 0) + folga));
+    const estado = montarEstadoMedidor(previa, {
+      diametro: diam, altura: alturaFinal, unidade,
+      tanque: retangular ? { formato: "retangulo", largura: larg } : { formato: "circulo" },
+    });
     onGerar(estado);
   }
 
@@ -73,12 +102,16 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
     <Modal titulo="✍ Digitar batimetria" largo onFechar={onFechar}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Diâmetro *</label><input style={paramStyle} value={diametro} onChange={(e) => setDiametro(e.target.value)} inputMode="decimal" /></div>
+          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>{retangular ? "Comprimento" : "Diâmetro"} ({unidade}) *</label><input style={paramStyle} value={diametro} onChange={(e) => setDiametro(e.target.value)} inputMode="decimal" /></div>
+          {retangular && (
+            <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Largura ({unidade}) *</label><input style={paramStyle} value={largura} onChange={(e) => setLargura(e.target.value)} inputMode="decimal" /></div>
+          )}
+          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Altura ({unidade})</label><input style={paramStyle} value={altura} onChange={(e) => setAltura(e.target.value)} placeholder="auto (água)" inputMode="decimal" /></div>
           <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Unidade</label>
-            <select style={paramStyle} value={unidade} onChange={(e) => setUnidade(e.target.value as "m" | "cm")}><option value="m">m</option><option value="cm">cm</option></select>
+            <select style={paramStyle} value={unidade} onChange={(e) => trocarUnidade(e.target.value as "m" | "cm")}><option value="m">m</option><option value="cm">cm</option></select>
           </div>
-          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>ROV</label><input style={paramStyle} value={rov} onChange={(e) => setRov(e.target.value)} inputMode="decimal" /></div>
-          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Peso régua</label><input style={paramStyle} value={peso} onChange={(e) => setPeso(e.target.value)} inputMode="decimal" /></div>
+          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>ROV ({unidade})</label><input style={paramStyle} value={rov} onChange={(e) => setRov(e.target.value)} inputMode="decimal" /></div>
+          <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Peso régua ({unidade})</label><input style={paramStyle} value={peso} onChange={(e) => setPeso(e.target.value)} inputMode="decimal" /></div>
           <div><label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Vetores</label>
             <input type="number" min={1} max={24} style={paramStyle} value={vetores} onChange={(e) => setVetores(Math.max(1, Math.min(24, Number(e.target.value) || 1)))} />
           </div>
@@ -88,7 +121,8 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
         </div>
 
         <p className="detalhe" style={{ margin: 0 }}>
-          Espessura = (régua + peso) − (sonar + ROV). Cada vetor tem a própria régua em cada ponto.
+          Espessura = (régua + peso) − (sonar + ROV), tudo em {unidade === "cm" ? "centímetros" : "metros"}. Cada vetor tem a própria régua em cada ponto.
+          {tanque ? " Formato e medidas vieram do cadastro do tanque da OS." : ""}
           Célula vazia = ponto não medido. E/C/D = Esquerda/Central/Direita.
         </p>
 
@@ -136,7 +170,7 @@ export default function EntradaBatimetria({ onFechar, onGerar }: {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className="detalhe" style={{ margin: 0 }}>
             Validação: {previa.totalValidacao - previa.invalidos}/{previa.totalValidacao} corretas{previa.invalidos > 0 ? ` · ⚠️ ${previa.invalidos} incorretas` : ""}
-            {previa.negativos > 0 ? ` · ⚠️ ${previa.negativos} com espessura negativa (sonar maior que a régua) — ficarão FORA do cálculo` : ""}
+            {previa.negativos > 0 ? ` · ⛔ ${previa.negativos} com espessura negativa (sonar maior que a régua) — corrija antes de salvar a medição` : ""}
           </span>
           <div style={{ display: "flex", gap: 10 }}>
             {erro && <span className="erro-texto" style={{ margin: 0 }}>{erro}</span>}

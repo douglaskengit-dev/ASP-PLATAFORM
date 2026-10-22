@@ -39,6 +39,9 @@ export interface CabecalhoMedicao {
   inspecao: string;
   projeto?: string;
   cliente?: string;
+  /** Data da coleta (AAAA-MM-DD) e responsável pela medição — do registro. */
+  dataColeta?: string;
+  responsavel?: string;
 }
 
 /** Monta o PDF do relatório técnico da medição. */
@@ -59,6 +62,8 @@ export async function gerarPdfMedicao(estado: any, cab: CabecalhoMedicao): Promi
           {cab.inspecao}
           {cab.projeto ? ` · ${cab.projeto}` : ""}
           {cab.cliente ? ` · ${cab.cliente}` : ""}
+          {cab.dataColeta ? ` · coleta em ${cab.dataColeta.split("-").reverse().join("/")}` : ""}
+          {cab.responsavel ? ` · responsável: ${cab.responsavel}` : ""}
           {` · emitido em ${new Date().toLocaleString("pt-BR")}`}
         </Text>
 
