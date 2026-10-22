@@ -85,7 +85,7 @@ import {
 import { arquivosDaOS, enviarLaudoPdf, examinarLaudoLocal } from "@/lib/asp/laudo-pdf";
 import EncerramentoOS from "@/app/components/EncerramentoOS";
 import EntregasCliente from "@/app/components/EntregasCliente";
-import { textoEncerrada } from "@/lib/validacao";
+import { ativoNoCatalogo, textoEncerrada } from "@/lib/validacao";
 
 interface Projeto {
   id: string;
@@ -413,7 +413,9 @@ export default function InspecaoDetalhePage() {
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
       setProcedimentos(d.procedimentos || []);
-      setCatalogoEquip((d.equipamentos || []).map((e: any) => e.nome).filter(Boolean));
+      // Sugestões do agendamento: só equipamentos ativos. A lista completa
+      // (abaixo) resolve os slugs que o procedimento da OS já usa.
+      setCatalogoEquip((d.equipamentos || []).filter((e: any) => ativoNoCatalogo(e)).map((e: any) => e.nome).filter(Boolean));
       setCatalogoEquipCompleto(d.equipamentos || []);
     }).catch(() => {});
   }, [carregar]);
@@ -486,7 +488,7 @@ export default function InspecaoDetalhePage() {
   /** Nomes previstos no procedimento; undefined enquanto o Catálogo não chega. */
   const equipProcOS = useMemo(
     () => (procedimentos.length && catalogoEquipCompleto.length
-      ? nomesEquipamentosProcedimento(procOS?.equipamentos, catalogoEquipCompleto) : undefined),
+      ? nomesEquipamentosProcedimento(procOS?.equipamentos, catalogoEquipCompleto.filter((e: any) => ativoNoCatalogo(e))) : undefined),
     [procedimentos, catalogoEquipCompleto, procOS]
   );
   /** Função de cada usuário ativo (Coordenador/Engenheiro/Técnico). */
@@ -1750,9 +1752,12 @@ export default function InspecaoDetalhePage() {
                   {!insp.procedimento && <option value="" disabled>— não definido (escolha um) —</option>}
                   {/* Procedimento sem código não pode ser escolhido: o valor
                       vazio se confunde com "não definido" e nada seria salvo. */}
-                  {procedimentos.map((p) => (
+                  {/* Desativado no Catálogo: só aparece se for o desta OS
+                      (continua valendo, mas não pode ser escolhido de novo). */}
+                  {procedimentos.filter((p) => ativoNoCatalogo(p) || p.codigo === insp.procedimento).map((p) => (
                     <option key={p.id} value={p.codigo || ""} disabled={!p.codigo}>
                       {p.codigo ? `${p.codigo} — ${p.nome}` : `${p.nome} (sem código — corrija no Catálogo)`}
+                      {ativoNoCatalogo(p) ? "" : " (desativado no Catálogo)"}
                     </option>
                   ))}
                   {/* Valor salvo que não existe mais no Catálogo continua visível. */}

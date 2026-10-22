@@ -1005,19 +1005,20 @@ export function listaDeTopicosSalvos(
  * A resposta vem de `gp_procedimentos.limpeza_robotizada` — quem cadastra o
  * procedimento no Catálogo marca a caixinha, sem precisar mexer em código.
  *
- * `CODS_LIMPEZA` fica como rede de segurança: cobre o intervalo entre um
- * ambiente que ainda não rodou a migration da coluna e o deploy do código que
- * já a lê, e os dois procedimentos que já usavam este modelo antes de existir
- * a coluna. A comparação ignora espaços e caixa para tolerar variações de
- * digitação do código ("CVS 6" / "CVS6", "POP 001" / "pop001").
+ * A coluna MANDA: true ou false gravado é a resposta, mesmo que o código
+ * seja um dos antigos (desmarcar a caixinha precisa valer, e o código pode
+ * ser renomeado no Catálogo). `CODS_LIMPEZA` só entra quando a coluna NÃO
+ * veio (null/ausente — banco sem a migration 20260819160000, que já marcou
+ * TRUE esses dois procedimentos). Compara pela chave do código (sem caixa,
+ * espaço nem pontuação: "POP 001" = "pop001" = "POP-001").
  */
-const CODS_LIMPEZA = ["cvs6de12/01/2011", "pop001"];
+const CODS_LIMPEZA = ["cvs6de12012011", "pop001"];
 export function ehLimpezaRobotizada(
   proc: { codigo?: unknown; limpeza_robotizada?: unknown } | null | undefined,
 ): boolean {
-  if (proc?.limpeza_robotizada === true) return true;
+  if (typeof proc?.limpeza_robotizada === "boolean") return proc.limpeza_robotizada;
   const codigo = typeof proc?.codigo === "string" ? proc.codigo : "";
-  return CODS_LIMPEZA.includes(codigo.toLowerCase().replace(/\s+/g, ""));
+  return CODS_LIMPEZA.includes(codigo.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""));
 }
 
 /** Tópico de um procedimento, como o Catálogo edita e o relatório usa. */

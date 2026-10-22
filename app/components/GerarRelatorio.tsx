@@ -744,7 +744,9 @@ export default function GerarRelatorio({
   function aplicarSugestao() {
     if (!proc) return;
     setD((v) => ({ ...v, metodos: proc.metodos || "" }));
-    setEquipIds(proc.equipamentos);
+    // Só os previstos que continuam ativos no Catálogo.
+    setEquipIds((proc.equipamentos || []).filter((s: string) =>
+      EQUIPAMENTOS.some((e: any) => e.slug === s && e.ativo !== false)));
     // O procedimento define o FORMATO do relatório: quais tópicos entram.
     // Sem configuração, mantém o que estiver marcado hoje.
     const selecao = selecaoDoCatalogo();
@@ -1649,7 +1651,8 @@ export default function GerarRelatorio({
             Equipamentos {proc ? <span className="detalhe">— sugeridos por {proc.codigo}</span> : null}
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 6 }}>
-            {EQUIPAMENTOS.map((eq: any) => (
+            {/* Desativados no Catálogo só aparecem se já estão marcados. */}
+            {EQUIPAMENTOS.filter((eq: any) => eq.ativo !== false || equipIds.includes(eq.slug)).map((eq: any) => (
               <label key={eq.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, cursor: "pointer" }}>
                 <input type="checkbox" checked={equipIds.includes(eq.slug)} style={{ marginTop: 3 }}
                   onChange={(e) => alternarEquipamento(eq.slug, e.target.checked)} />

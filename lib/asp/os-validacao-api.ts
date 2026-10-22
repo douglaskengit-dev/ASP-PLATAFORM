@@ -17,24 +17,37 @@ export async function ordensDoProjeto(projetoId: string): Promise<OSRef[]> {
   return (data || []).map((o: any) => ({ id: o.id, identificacao: o.identificacao, tanque: o.tanque, excluido: !!o.excluido_em }));
 }
 
-/** Códigos de procedimento do Catálogo. */
+/** Códigos de procedimento do Catálogo (todos) e os desativados. */
+export async function codigosDoCatalogoComStatus(): Promise<{ todos: string[]; inativos: string[] }> {
+  const { data } = await getSupabaseAdmin().from("gp_procedimentos").select("*");
+  const linhas = (data || []).filter((p: any) => p.codigo);
+  return {
+    todos: linhas.map((p: any) => p.codigo),
+    inativos: linhas.filter((p: any) => p.ativo === false).map((p: any) => p.codigo),
+  };
+}
+
+/** Códigos de procedimento do Catálogo (ativos e desativados). */
 export async function codigosDoCatalogo(): Promise<string[]> {
-  const { data } = await getSupabaseAdmin().from("gp_procedimentos").select("codigo");
-  return (data || []).map((p: any) => p.codigo).filter(Boolean);
+  return (await codigosDoCatalogoComStatus()).todos;
 }
 
 /** Valida no servidor. Devolve o resultado e, se a identificação repetiu,
  *  a OS que já a usa (para a resposta 409 mostrar qual é). */
 export async function validarOSNoServidor(
   dados: DadosOS,
-  opts: { projetoId: string; excluirId?: string | null; exigirProcedimento?: boolean }
+  opts: { projetoId: string; excluirId?: string | null; exigirProcedimento?: boolean; procedimentoAtual?: string | null }
 ): Promise<{ resultado: ResultadoValidacao; conflito: OSRef | null }> {
   const precisaCatalogo = opts.exigirProcedimento !== false;
-  const [ordens, procedimentos] = await Promise.all([
+  const [ordens, catalogo] = await Promise.all([
     ordensDoProjeto(opts.projetoId),
-    precisaCatalogo ? codigosDoCatalogo() : Promise.resolve(undefined),
+    precisaCatalogo ? codigosDoCatalogoComStatus() : Promise.resolve(undefined),
   ]);
-  const ctx: ContextoOS = { ordens, procedimentos, excluirId: opts.excluirId || null, exigirProcedimento: opts.exigirProcedimento };
+  const ctx: ContextoOS = {
+    ordens, procedimentos: catalogo?.todos, procedimentosInativos: catalogo?.inativos,
+    procedimentoAtual: opts.procedimentoAtual ?? null,
+    excluirId: opts.excluirId || null, exigirProcedimento: opts.exigirProcedimento,
+  };
   return { resultado: validarOS(dados, ctx), conflito: identificacaoRepetida(dados.identificacao, ctx) };
 }
 

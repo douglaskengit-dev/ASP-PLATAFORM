@@ -19,7 +19,7 @@ import { resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import { periodoDe, textoPeriodoLongo } from "@/lib/validacao/periodo";
 import {
-  dataBrCompleta, identificacaoRepetida, mesclar, novoResultado, ResultadoValidacao, ROTULOS_OS, temErros, validarOS,
+  ativoNoCatalogo, dataBrCompleta, identificacaoRepetida, mesclar, novoResultado, ResultadoValidacao, ROTULOS_OS, temErros, validarOS,
 } from "@/lib/validacao";
 
 interface Cliente {
@@ -193,6 +193,7 @@ export default function ProjetoDetalhePage() {
         ...inspLixeira.map((i) => ({ id: i.id, identificacao: i.identificacao, tanque: i.tanque, excluido: true })),
       ],
       procedimentos: procedimentos.length ? procedimentos.map((p) => p.codigo).filter(Boolean) : undefined,
+      procedimentosInativos: procedimentos.filter((p) => !ativoNoCatalogo(p)).map((p) => p.codigo).filter(Boolean),
     });
     return mesclar(local, servidor);
   }, [identificacao, procedimento, tanque, inspecoes, inspLixeira, procedimentos, servidor]);
@@ -427,7 +428,8 @@ export default function ProjetoDetalhePage() {
               <select value={procedimento} onChange={(e) => { setProcedimento(e.target.value); mudarCampoOS("procedimento"); }}
                 className={mostrarOS("procedimento") && resultadoOS.erros.procedimento ? "val-invalido" : undefined}>
                 <option value="">— selecione —</option>
-                {procedimentos.map((p) => (
+                {/* Desativados no Catálogo não entram em OS nova. */}
+                {procedimentos.filter((p) => ativoNoCatalogo(p)).map((p) => (
                   <option key={p.id} value={p.codigo || ""} disabled={!p.codigo}>
                     {p.codigo ? `${p.codigo} — ${p.nome}` : `${p.nome} (sem código — corrija no Catálogo)`}
                   </option>
