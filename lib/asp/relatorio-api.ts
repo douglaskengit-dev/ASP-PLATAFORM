@@ -48,18 +48,19 @@ export async function infoOSRelatorio(inspecaoId: string): Promise<InfoOSRelator
 export interface LinhaRelatorio {
   id: string; inspecao_id: string; tipo: string; versao: number; status: string;
   arquivo_path: string | null; arquivo_hash: string | null; dados: SnapshotRelatorio | null;
+  assinado_hash?: string | null;
 }
 
 /** Relatórios ativos (não excluídos) da OS. */
 export async function relatoriosDaOS(inspecaoId: string): Promise<LinhaRelatorio[]> {
   const { data } = await getSupabaseAdmin().from("gp_relatorios")
-    .select("id, inspecao_id, tipo, versao, status, arquivo_path, arquivo_hash, dados")
+    .select("id, inspecao_id, tipo, versao, status, arquivo_path, arquivo_hash, assinado_hash, dados")
     .eq("inspecao_id", inspecaoId).is("excluido_em", null);
   return (data || []) as LinhaRelatorio[];
 }
 
 export function paraRelatorioRef(r: LinhaRelatorio): RelatorioRef {
-  return { id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash };
+  return { id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash, assinadoHash: r.assinado_hash || null };
 }
 
 /** Lê o arquivo JÁ ENVIADO ao storage (o navegador sobe direto, com URL

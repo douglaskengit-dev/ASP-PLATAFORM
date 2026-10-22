@@ -51,7 +51,7 @@ export function descreverAcaoFase(acao: string, faseDe: number, fasePara: number
     case "reprovar":
       return `Reprovou — Ajustar (voltou à fase ${fasePara})`;
     case "assinar":
-      return "Assinou os participantes";
+      return "Enviou a versão assinada do relatório";
     default:
       return `${acao}: fase ${faseDe} → ${fasePara}`;
   }

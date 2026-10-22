@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     const { data, error } = await getSupabaseAdmin()
       .from("gp_inspecoes")
-      .update({ procedimento: proc, atualizado_em: new Date().toISOString() })
+      .update({ procedimento: proc, atualizado_em: new Date().toISOString(), cadastro_atualizado_em: new Date().toISOString() })
       .eq("id", params.id)
       .select("id, procedimento")
       .single();
@@ -53,7 +53,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (erroTanque) return NextResponse.json({ erro: erroTanque }, { status: 400 });
     const { data, error } = await getSupabaseAdmin()
       .from("gp_inspecoes")
-      .update({ tanque: normalizarTanque(body.tanque), atualizado_em: new Date().toISOString() })
+      .update({ tanque: normalizarTanque(body.tanque), atualizado_em: new Date().toISOString(), cadastro_atualizado_em: new Date().toISOString() })
       .eq("id", params.id)
       .select("id, tanque")
       .single();
@@ -81,7 +81,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     const { data, error } = await getSupabaseAdmin()
       .from("gp_inspecoes")
-      .update({ identificacao: titulo, atualizado_em: new Date().toISOString() })
+      .update({ identificacao: titulo, atualizado_em: new Date().toISOString(), cadastro_atualizado_em: new Date().toISOString() })
       .eq("id", params.id)
       .select("id, identificacao")
       .single();
@@ -137,7 +137,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const supabase = getSupabaseRouteClient();
   const { data: inspecao, error } = await supabase
     .from("gp_inspecoes")
-    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, cliente:gp_orgaos(id, razao_social))")
+    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, atualizado_em, cliente:gp_orgaos(id, razao_social, updated_at))")
     .eq("id", params.id)
     .single();
 
@@ -154,12 +154,36 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     supabase.from("gp_fase_historico").select("*, autor_perfil:gp_profiles!autor(nome_completo, email)").eq("inspecao_id", params.id).order("criado_em", { ascending: false }),
   ]);
 
+  // Fase 5/9: nomes de quem enviou/avaliou/assinou cada versão; quais
+  // versões ESTE usuário já baixou (aviso "aprovar sem abrir"); quando as
+  // fotos da execução mudaram (aviso "mudou depois do envio"). Melhor
+  // esforço: sem as tabelas/colunas novas, a tela só perde os avisos.
+  const rels = (relatorios.data || []) as any[];
+  const idsPessoas = Array.from(new Set(rels.flatMap((r) =>
+    [r.enviado_por, r.aprovado_por, r.avaliado_por, r.assinado_por]).filter(Boolean))) as string[];
+  const admin = getSupabaseAdmin();
+  const [pessoas, vistos, fotos] = await Promise.all([
+    idsPessoas.length
+      ? admin.from("gp_profiles").select("id, nome_completo, email").in("id", idsPessoas)
+      : Promise.resolve({ data: [] as any[] }),
+    rels.length
+      ? admin.from("gp_relatorio_visualizacoes").select("relatorio_id").eq("usuario_id", profile.id).in("relatorio_id", rels.map((r) => r.id))
+      : Promise.resolve({ data: [] as any[] }),
+    admin.from("gp_fotos_execucao").select("atualizado_em").eq("inspecao_id", params.id).maybeSingle(),
+  ]);
+  const nomes: Record<string, string> = {};
+  for (const p of (pessoas.data || []) as any[]) nomes[p.id] = p.nome_completo || p.email || "usuário";
+
   return NextResponse.json({
     ok: true,
     inspecao,
     coletas: coletas.data || [],
     agendamentos: agendamentos.data || [],
-    relatorios: relatorios.data || [],
+    relatorios: rels,
     historico: historico.data || [],
+    nomes,
+    usuarioId: profile.id,
+    visualizados: ((vistos.data || []) as any[]).map((v) => v.relatorio_id),
+    fotosExecucaoEm: (fotos.data as any)?.atualizado_em || null,
   });
 }

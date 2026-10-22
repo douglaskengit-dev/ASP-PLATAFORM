@@ -4,7 +4,8 @@ import { getProfileAtual } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { BUCKET } from "@/lib/processos/arquivos";
 import { infoOSRelatorio, PERFIS_RELATORIO } from "@/lib/asp/relatorio-api";
-import { erroTipoNaFase, pastaFotosRascunho } from "@/lib/validacao";
+import { ehUuid } from "@/lib/asp/coleta-api";
+import { erroEnvioAssinado, erroTipoNaFase, pastaFotosRascunho } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -25,11 +26,33 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
+  const b = await req.json().catch(() => ({}));
+
+  // Versão ASSINADA (Fase 5/9) { assinado: relatorioId } →
+  // relatorios/<OS>/<tipo>-assinado-<uuid>.pdf. Comercial/Gerência/Admin; o
+  // registro (POST /api/relatorios/[id]/assinado) confere o arquivo de novo.
+  if (b?.assinado) {
+    const relId = String(b.assinado);
+    if (!ehUuid(relId)) return NextResponse.json({ erro: "Relatório inválido." }, { status: 400 });
+    const { data: rel } = await getSupabaseAdmin().from("gp_relatorios")
+      .select("id, inspecao_id, tipo, status, excluido_em").eq("id", relId).maybeSingle();
+    if (!rel || (rel as any).excluido_em) return NextResponse.json({ erro: "Relatório não encontrado." }, { status: 404 });
+    const infoA = await infoOSRelatorio((rel as any).inspecao_id);
+    if (!infoA) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
+    const erroA = erroEnvioAssinado({
+      perfil: profile.perfil, status: (rel as any).status, tipo: (rel as any).tipo, fase: infoA.fase, substituir: !!b.substituir,
+    });
+    if (erroA) return NextResponse.json({ erro: erroA }, { status: 403 });
+    const caminhoA = `relatorios/${infoA.id}/${(rel as any).tipo}-assinado-${randomUUID()}.pdf`;
+    const { data, error } = await getSupabaseAdmin().storage.from(BUCKET).createSignedUploadUrl(caminhoA);
+    if (error || !data) return NextResponse.json({ erro: error?.message || "Falha ao preparar o envio." }, { status: 500 });
+    return NextResponse.json({ ok: true, caminho: caminhoA, token: data.token });
+  }
+
   if (!PERFIS_RELATORIO.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Envio de relatório é responsabilidade de Operações." }, { status: 403 });
   }
 
-  const b = await req.json().catch(() => ({}));
   const inspecaoId = String(b?.inspecaoId || "");
   const info = await infoOSRelatorio(inspecaoId);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });

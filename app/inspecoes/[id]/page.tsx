@@ -13,7 +13,15 @@
  * em diante); o envio de arquivo de fora é conferido (PDF/DOCX de verdade,
  * 30 MB, arquivo repetido) e confirmado mostrando a versão que será criada e
  * a que será substituída; aprovar/reprovar age sobre o relatório mostrado.
- * Regras em lib/validacao/relatorio.ts; a API repete as que bloqueiam. */
+ * Regras em lib/validacao/relatorio.ts; a API repete as que bloqueiam.
+ *
+ * Fases 5/9 (aprovação): aprovar/reprovar exige o relatório em aprovação;
+ * reprovar exige categoria + descrição com sentido; a transição é atômica
+ * (dois cliques → um vale, o outro recebe "Já avaliado por…"). Avisos ao
+ * aprovar: mesma pessoa que preparou/enviou, arquivo não baixado, OS mudou
+ * depois do envio, inspeção sem medição aprovada. Aprovado, o Comercial/
+ * Gerência envia a versão ASSINADA (PDF), que vira o documento final.
+ * Regras em lib/validacao/aprovacao.ts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -46,6 +54,8 @@ import {
   arquivoRelatorioRepetido, codigoRelatorio, descreverRelatorio, emAprovacaoDoTipo, examinarArquivoRelatorio, faixaVolume,
   planejarEnvio, rascunhoDoTipo, RELATORIO_MAX_BYTES, RelatorioRef, revisaoDoTipo, ROTULO_STATUS_RELATORIO, ROTULO_TIPO,
   tipoDaFase, type FormatoRelatorio, type TipoRelatorio,
+  avisosAprovacao, avisosAssinatura, CATEGORIAS_REPROVACAO, formatarMotivo, mudancasDesdeEnvio, PERFIS_ASSINADO,
+  PERFIS_TROCAR_ASSINADO, resumoValidacao, ROTULOS_REPROVACAO, validarReprovacao,
 } from "@/lib/validacao";
 
 interface Projeto {
@@ -54,7 +64,8 @@ interface Projeto {
   pedido_compra: string | null;
   endereco: string | null;
   data_abertura?: string | null;
-  cliente: { id?: string; razao_social: string } | null;
+  atualizado_em?: string | null;
+  cliente: { id?: string; razao_social: string; updated_at?: string | null } | null;
 }
 interface Inspecao {
   id: string;
@@ -67,6 +78,8 @@ interface Inspecao {
   ferramenta_coleta: string;
   status_relatorio_inspecao: string;
   status_relatorio_execucao: string;
+  /** Quando TAG/procedimento/tanque mudaram (aviso da aprovação). */
+  cadastro_atualizado_em?: string | null;
   projeto: Projeto | null;
 }
 interface Historico {
@@ -75,6 +88,8 @@ interface Historico {
   fase_para: number;
   acao: string;
   motivo: string | null;
+  motivo_categoria?: string | null;
+  relatorio_id?: string | null;
   data_autenticacao: string | null;
   criado_em: string;
   autor_perfil: { nome_completo: string | null; email: string | null } | null;
@@ -83,7 +98,7 @@ interface Coleta {
   id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null;
   /** Fase 3: dia da coleta (AAAA-MM-DD), quem mediu, descrição do anexo. */
   data_coleta?: string | null; responsavel_id?: string | null; descricao?: string | null;
-  arquivo_hash?: string | null; aprovacao_retirada_em?: string | null;
+  arquivo_hash?: string | null; aprovacao_retirada_em?: string | null; atualizado_em?: string | null;
 }
 /** Salvar medição (Medidor) aguardando confirmar data/responsável. */
 interface ConfirmacaoMedicao {
@@ -97,6 +112,10 @@ interface Relatorio {
   id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any;
   /** Fase 4: SHA-256 do arquivo; substituída por outra versão enviada depois. */
   arquivo_hash?: string | null; substituido_por?: string | null; substituido_em?: string | null;
+  /** Fases 5/9: quem enviou/avaliou, categoria da reprovação e a versão assinada. */
+  enviado_por?: string | null; aprovado_por?: string | null; avaliado_por?: string | null; avaliado_em?: string | null;
+  motivo_categoria?: string | null; atualizado_em?: string | null;
+  assinado_path?: string | null; assinado_hash?: string | null; assinado_por?: string | null; assinado_em?: string | null;
 }
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
@@ -151,6 +170,20 @@ export default function InspecaoDetalhePage() {
   const [erro, setErro] = useState<string | null>(null);
   const [reprovar, setReprovar] = useState<OpcaoAcao | null>(null);
   const [motivo, setMotivo] = useState("");
+  const [categoria, setCategoria] = useState("");
+  const [tentouReprovar, setTentouReprovar] = useState(false);
+  /** Trava síncrona contra duplo clique (o estado só muda no próximo render). */
+  const processandoRef = useRef(false);
+  /** Fases 5/9: nomes (id → nome), quem sou eu, versões que já baixei. */
+  const [nomes, setNomes] = useState<Record<string, string>>({});
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [visualizados, setVisualizados] = useState<string[]>([]);
+  const [fotosExecucaoEm, setFotosExecucaoEm] = useState<string | null>(null);
+  /** Versão assinada: relatório escolhido + troca (Gerência/Admin). */
+  const [assinando, setAssinando] = useState<{ id: string; substituir: boolean } | null>(null);
+  const [enviandoAssinado, setEnviandoAssinado] = useState<string | null>(null);
+  const [erroAssinado, setErroAssinado] = useState<string | null>(null);
+  const assinadoInputRef = useRef<HTMLInputElement>(null);
 
   // Coleta
   const [modalMedidor, setModalMedidor] = useState(false);
@@ -307,6 +340,10 @@ export default function InspecaoDetalhePage() {
         setColetas(d.coletas || []);
         setRelatorios(d.relatorios || []);
         setAgendamentos(d.agendamentos || []);
+        setNomes(d.nomes || {});
+        if (d.usuarioId) setUsuarioId(d.usuarioId);
+        setVisualizados(d.visualizados || []);
+        setFotosExecucaoEm(d.fotosExecucaoEm || null);
       })
       .finally(() => setCarregando(false));
   }, [id]);
@@ -316,6 +353,7 @@ export default function InspecaoDetalhePage() {
     const supabase = getSupabaseBrowserClient();
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
+      setUsuarioId(data.user.id);
       const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao, nome_completo").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
       setFuncao((p as any)?.funcao ?? null);
@@ -358,6 +396,11 @@ export default function InspecaoDetalhePage() {
           lista.push({ grupo: r.tipo === "execucao" ? "execucao" : "inspecao", inspecao: i.identificacao,
             rotulo: `Relatório v${r.versao} — ${r.status}`, data: r.enviado_em,
             href: `/api/relatorios/${r.id}/download` });
+          if (r.assinado_path) {
+            lista.push({ grupo: r.tipo === "execucao" ? "execucao" : "inspecao", inspecao: i.identificacao,
+              rotulo: `Relatório v${r.versao} — versão assinada`, data: r.enviado_em,
+              href: `/api/relatorios/${r.id}/download?arquivo=assinado` });
+          }
         }
       }
       // RDOs são do projeto (um por dia, podem cobrir várias inspeções).
@@ -379,7 +422,7 @@ export default function InspecaoDetalhePage() {
    *  diante (a API recusa o outro). */
   const bloco: TipoRelatorio = tipoDaFase(insp?.fase ?? 2);
   const refsRelatorio = useMemo<RelatorioRef[]>(
-    () => relatorios.map((r) => ({ id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash || null })),
+    () => relatorios.map((r) => ({ id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash || null, assinadoHash: r.assinado_hash || null })),
     [relatorios]
   );
   /** Agendamento ativo do MESMO tipo do relatório (data e equipe). */
@@ -392,6 +435,51 @@ export default function InspecaoDetalhePage() {
   /** Fases 5/9: o relatório que a Gerência está avaliando (o mostrado). */
   const relEmAvaliacao = insp && (insp.fase === 5 || insp.fase === 9)
     ? emAprovacaoDoTipo(refsRelatorio, tipoDaFase(insp.fase))[0] || null : null;
+  const relAval = relEmAvaliacao ? relatorios.find((r) => r.id === relEmAvaliacao.id) || null : null;
+  /** Nome de um usuário (id) — para "Aprovado por…", "Enviado por…". */
+  const nomeDe = (uid?: string | null) => (uid ? nomes[uid] || usuarios.find((u) => u.id === uid)?.nome || "usuário" : "");
+
+  /** O que mudou na OS depois do envio da versão em avaliação (melhor esforço). */
+  const mudancasAval = useMemo(() => {
+    if (!relAval || !insp) return [];
+    const proj = insp.projeto;
+    return mudancasDesdeEnvio({
+      enviadoEm: relAval.enviado_em, tipo: relAval.tipo, dados: relAval.dados,
+      cadastroAtual: {
+        cliente: proj?.cliente?.razao_social || "", endereco: proj?.endereco || "", tag: insp.identificacao || "",
+        procedimento: insp.procedimento || "", codigoProjeto: proj?.codigo_projeto || proj?.pedido_compra || "",
+      },
+      cadastroOSEm: insp.cadastro_atualizado_em, projetoEm: proj?.atualizado_em, clienteEm: proj?.cliente?.updated_at,
+      coletas: coletas.map((c) => ({
+        id: c.id, tipo: c.tipo, criado_em: c.criado_em, atualizado_em: c.atualizado_em, aprovada_em: c.aprovada_em,
+        aprovacao_retirada_em: c.aprovacao_retirada_em,
+        rotulo: `${c.tipo === "anexo" ? "Anexo" : "Medição"}${c.data_coleta ? ` de ${formatarData(c.data_coleta)}` : ""}`,
+      })),
+      fotosExecucaoEm,
+    });
+  }, [relAval, insp, coletas, fotosExecucaoEm]);
+  /** ⚠️ ao aprovar a versão mostrada (nenhum bloqueia). */
+  const avisosAprov = useMemo(() => relAval ? avisosAprovacao({
+    usuarioId, relatorio: relAval, baixou: visualizados.includes(relAval.id),
+    temMedicaoAprovada: coletas.some((c) => c.aprovada_em), mudancas: mudancasAval,
+  }) : novoResultado(), [relAval, usuarioId, visualizados, coletas, mudancasAval]);
+
+  /** Reprovação: categoria + descrição; aviso se repetir a anterior do tipo. */
+  const reprovacaoAnterior = useMemo(() => {
+    if (!relAval) return null;
+    const ant = relatorios
+      .filter((r) => r.tipo === relAval.tipo && r.status === "ajustar" && r.motivo_ajuste)
+      .sort((a, b) => (b.avaliado_em || "").localeCompare(a.avaliado_em || "") || b.versao - a.versao)[0];
+    return ant ? { descricao: ant.motivo_ajuste, versao: ant.versao } : null;
+  }, [relAval, relatorios]);
+  const valReprovacao = useMemo(
+    () => validarReprovacao({ categoria, descricao: motivo, anterior: reprovacaoAnterior }),
+    [categoria, motivo, reprovacaoAnterior]
+  );
+  const podeAssinar = PERFIS_ASSINADO.includes(perfil || "");
+  const podeTrocarAssinado = PERFIS_TROCAR_ASSINADO.includes(perfil || "");
+  /** Marca na hora (o servidor grava no download) — o aviso some sem recarregar. */
+  const marcarBaixado = (relId: string) => setVisualizados((v) => (v.includes(relId) ? v : [...v, relId]));
 
   /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
    *  cliente, medição (aprovada, senão a mais recente) e cadastro do tanque.
@@ -465,29 +553,44 @@ export default function InspecaoDetalhePage() {
     },
   });
 
-  async function aplicar(acao: string, motivoTexto?: string) {
+  async function aplicar(acao: string, motivoTexto?: string, categoriaMotivo?: string) {
+    if (processandoRef.current) return;   // duplo clique: o 2º nem sai
+    processandoRef.current = true;
     setErro(null);
     setProcessando(true);
     try {
       // Aprovar/reprovar age sobre o relatório MOSTRADO (não "todos em aprovação").
       const relatorioId = acao === "aprovar" || acao === "reprovar" ? relEmAvaliacao?.id : undefined;
-      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST", { acao, motivo: motivoTexto, relatorioId }, "Ação de fase");
-      if (res.queued) { setReprovar(null); setMotivo(""); alert("Sem conexão — ação salva offline e aplicada ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Não foi possível aplicar a ação."); return; }
+      // faseDe: a API recusa (409) se a OS já saiu desta fase — não anda 2x.
+      const res = await enviarJson(`/api/inspecoes/${id}/fase`, "POST",
+        { acao, motivo: motivoTexto, categoria: categoriaMotivo, relatorioId, faseDe: insp?.fase }, "Ação de fase");
+      if (res.queued) { setReprovar(null); setMotivo(""); setCategoria(""); alert("Sem conexão — ação salva offline e aplicada ao reconectar."); return; }
+      if (!res.ok) {
+        setErro(res.data?.erro || "Não foi possível aplicar a ação.");
+        if (res.status === 409) { setReprovar(null); carregar(); }
+        return;
+      }
       setReprovar(null);
       setMotivo("");
+      setCategoria("");
       carregar();
       // A fase mudou: as seções abaixo se rearrumam para o novo padrão. O
       // foco volta ao card de ações, que mostra o que fazer agora.
       cardAcoesRef.current?.focus({ preventScroll: true });
       cardAcoesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } finally {
+      processandoRef.current = false;
       setProcessando(false);
     }
   }
 
   function clicarAcao(opcao: OpcaoAcao) {
-    if (opcao.exigeMotivo) { setMotivo(""); setReprovar(opcao); return; }
+    // ⛔ Aprovar/reprovar sem relatório em aprovação (a API recusa também).
+    if ((insp?.fase === 5 || insp?.fase === 9) && (opcao.acao === "aprovar" || opcao.acao === "reprovar") && !relEmAvaliacao) {
+      setErro(`Nenhum relatório de ${ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação — não há o que ${opcao.acao === "aprovar" ? "aprovar" : "reprovar"}.`);
+      return;
+    }
+    if (opcao.exigeMotivo) { setMotivo(""); setCategoria(""); setTentouReprovar(false); setErro(null); setReprovar(opcao); return; }
     // Pendências que só AVISAM, num confirm só — quem está em campo decide se
     // segue assim mesmo:
     //  · Inspeção → Relatório (3 → 4) sem medição aprovada (muitas OSs não
@@ -524,11 +627,18 @@ export default function InspecaoDetalhePage() {
           : `Nenhum relatório de ${ROTULO_TIPO[tipo]} foi enviado para aprovação nesta OS. A Gerência não terá o que aprovar.`);
       }
     }
-    if ((insp?.fase === 5 || insp?.fase === 9) && opcao.acao === "aprovar" && !relEmAvaliacao) {
-      titulo = "Aprovação sem relatório";
-      blocos.push(`Nenhum relatório de ${ROTULO_TIPO[tipoDaFase(insp.fase)]} está em aprovação nesta OS.`);
+    //  · Aprovação (5/9): mesma pessoa, arquivo não baixado, OS mudou depois
+    //    do envio, inspeção sem medição aprovada.
+    if ((insp?.fase === 5 || insp?.fase === 9) && opcao.acao === "aprovar") {
+      const av = resumoValidacao(avisosAprov).avisos;
+      if (av.length) { titulo = `Antes de aprovar a v${relEmAvaliacao?.versao}`; blocos.push(...av.map((a) => `• ${a}`)); }
     }
-    if (blocos.length > 0 && !confirm(`${titulo}:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
+    //  · Versão assinada: seguir da fase 6 sem a de inspeção; encerrar sem a
+    //    de execução.
+    const semAssinatura = insp ? avisosAssinatura(insp.fase, opcao.acao, refsRelatorio) : [];
+    if (semAssinatura.length) { if (!blocos.length) titulo = "Versão assinada"; blocos.push(...semAssinatura.map((a) => `• ${a}`)); }
+    const verbo = opcao.acao === "aprovar" ? "Aprovar" : "Avançar";
+    if (blocos.length > 0 && !confirm(`${titulo}:\n\n${blocos.join("\n\n")}\n\n${verbo} mesmo assim?`)) return;
     aplicar(opcao.acao);
   }
 
@@ -1069,6 +1179,63 @@ export default function InspecaoDetalhePage() {
     else setEnvioExterno((e) => (e ? { ...e, erro: r.erro || "Falha ao enviar." } : e));
   }
 
+  /** "Enviar versão assinada" (relatório aprovado): confere o PDF pelos
+   *  bytes (PDF de verdade, até 30 MB, não repetido na OS), confirma, sobe
+   *  direto ao storage e registra — a API confere tudo de novo. */
+  function pedirAssinado(rel: Relatorio, substituir: boolean) {
+    setErroAssinado(null);
+    setAssinando({ id: rel.id, substituir });
+    assinadoInputRef.current?.click();
+  }
+
+  async function escolherAssinado(f: File) {
+    const alvo = assinando;
+    if (assinadoInputRef.current) assinadoInputRef.current.value = "";
+    const rel = alvo ? relatorios.find((r) => r.id === alvo.id) : null;
+    if (!alvo || !rel) return;
+    const rotulo = `relatório de ${ROTULO_TIPO[rel.tipo as TipoRelatorio] || rel.tipo} v${rel.versao}`;
+    setEnviandoAssinado(rel.id);
+    setErroAssinado(null);
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const ex = await examinarArquivoRelatorio(bytes, { tamanho: f.size, max: RELATORIO_MAX_BYTES });
+      if (ex.erro) { setErroAssinado(ex.erro); return; }
+      if (ex.formato !== "pdf") { setErroAssinado("A versão assinada tem de ser PDF (este arquivo é DOCX). Exporte/imprima em PDF depois de assinar."); return; }
+      const hash = await sha256Hex(bytes);
+      if (rel.arquivo_hash === hash) { setErroAssinado("É o mesmo arquivo da versão enviada para aprovação, sem assinatura. Envie o documento assinado."); return; }
+      const igual = arquivoRelatorioRepetido(hash, refsRelatorio);
+      if (igual) {
+        setErroAssinado(igual.id === rel.id ? "Esta mesma versão assinada já foi enviada." : `Este mesmo arquivo já está nesta OS (${descreverRelatorio(igual)}).`);
+        return;
+      }
+      const msg = alvo.substituir
+        ? `Trocar a versão assinada do ${rotulo} por “${f.name}”?\n\nA versão assinada atual (enviada por ${nomeDe(rel.assinado_por)} em ${formatar(rel.assinado_em)}) será APAGADA — fica só a nova. A troca entra no histórico.`
+        : `Enviar “${f.name}” como a versão ASSINADA do ${rotulo}?\n\nEla passa a ser o documento final do relatório (o original continua disponível).`;
+      if (!confirm(msg)) return;
+      const rUrl = await fetch("/api/relatorios/upload-url", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assinado: rel.id, substituir: alvo.substituir }),
+      });
+      const dUrl = await rUrl.json().catch(() => ({}));
+      if (!rUrl.ok) { setErroAssinado(dUrl?.erro || "Falha ao preparar o envio."); return; }
+      const supabase = getSupabaseBrowserClient();
+      const up = await supabase.storage.from("gp-arquivos").uploadToSignedUrl(dUrl.caminho, dUrl.token, f, { contentType: "application/pdf" });
+      if (up.error) { setErroAssinado(`Falha ao enviar o arquivo: ${up.error.message}`); return; }
+      const res = await fetch(`/api/relatorios/${rel.id}/assinado`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": novoId() },
+        body: JSON.stringify({ caminho: dUrl.caminho, substituir: alvo.substituir }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setErroAssinado(data?.erro || "Falha ao registrar a versão assinada."); return; }
+      carregar();
+    } catch {
+      setErroAssinado("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setEnviandoAssinado(null);
+      setAssinando(null);
+    }
+  }
+
   /** Zera o que é comum ao abrir o modal (novo ou edição). */
   function prepararModalAgenda() {
     setAgEquipInput(""); setAgNovoItem("");
@@ -1462,7 +1629,13 @@ export default function InspecaoDetalhePage() {
         <h3 style={{ marginTop: 0 }}>Ações desta fase</h3>
         {reprovacao && (
           <p className="erro-texto" style={{ margin: "0 0 10px" }}>
-            Reprovado{reprovacao.motivo ? `: ${reprovacao.motivo}` : ""} — ajuste o relatório.
+            Reprovado{reprovacao.motivo ? `: ${formatarMotivo(reprovacao.motivo_categoria, reprovacao.motivo)}` : ""}
+            {reprovacao.autor_perfil ? ` (por ${reprovacao.autor_perfil.nome_completo || reprovacao.autor_perfil.email}, ${formatar(reprovacao.data_autenticacao || reprovacao.criado_em)})` : ""} — ajuste o relatório.
+          </p>
+        )}
+        {insp.fase >= ULTIMA_FASE && !relatorios.some((r) => r.tipo === "execucao" && r.status === "assinado") && (
+          <p className="val-msg val-aviso" style={{ margin: "0 0 10px" }}>
+            ⚠️ OS encerrada sem a versão assinada do relatório de execução — envie-a em Relatórios (“Enviar versão assinada”).
           </p>
         )}
         {acoes.length === 0 ? (
@@ -1477,15 +1650,23 @@ export default function InspecaoDetalhePage() {
             <p className="detalhe" style={{ margin: "0 0 10px" }}>
               {relEmAvaliacao ? (
                 <>Relatório em avaliação: <strong>{ROTULO_TIPO[relEmAvaliacao.tipo as TipoRelatorio]} v{relEmAvaliacao.versao}</strong>{" "}
-                  — <a href={`/api/relatorios/${relEmAvaliacao.id}/download`} target="_blank" rel="noopener noreferrer">baixar</a>.
+                  {relAval?.enviado_em ? `(enviado${relAval.enviado_por ? ` por ${nomeDe(relAval.enviado_por)}` : ""} em ${formatar(relAval.enviado_em)}) ` : ""}
+                  — <a href={`/api/relatorios/${relEmAvaliacao.id}/download`} target="_blank" rel="noopener noreferrer"
+                    onClick={() => marcarBaixado(relEmAvaliacao.id)}>baixar</a>.
                   Aprovar/reprovar vale só para esta versão.</>
-              ) : `Nenhum relatório de ${ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação.`}
+              ) : (
+                <span className="val-msg val-erro" style={{ display: "inline" }}>
+                  ⛔ Nenhum relatório de {ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação — não há o que aprovar nem reprovar. Operações precisa enviar o relatório.
+                </span>
+              )}
             </p>
           )}
+          {relAval && <ResumoValidacao r={avisosAprov} />}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {acoes.map((o) => (
-              <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)} disabled={processando}>
-                {o.rotulo}
+              <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)}
+                disabled={processando || ((insp.fase === 5 || insp.fase === 9) && (o.acao === "aprovar" || o.acao === "reprovar") && !relEmAvaliacao)}>
+                {processando ? "Enviando…" : o.rotulo}
               </button>
             ))}
           </div>
@@ -1717,6 +1898,11 @@ export default function InspecaoDetalhePage() {
         {erroRelatorio && (
           <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erroRelatorio}</p>
         )}
+        {erroAssinado && (
+          <p className="erro-texto" style={{ margin: "0 0 8px" }}>⛔ Versão assinada: {erroAssinado}</p>
+        )}
+        <input ref={assinadoInputRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) escolherAssinado(f); else setAssinando(null); }} />
         <p className="detalhe" style={{ marginTop: 0 }}>
           Cada envio para aprovação é uma nova versão (a que estava em aprovação é substituída). Um rascunho por tipo:
           gerar de novo atualiza o mesmo. Envio de fora: PDF ou DOCX, até 30 MB. A Gerência aprova ou marca “Ajustar”.
@@ -1739,8 +1925,23 @@ export default function InspecaoDetalhePage() {
                       {r.substituido_em ? ` em ${formatar(r.substituido_em)}` : ""} — saiu da fila da Gerência.
                     </div>
                   )}
-                  {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {r.motivo_ajuste}</div>}
-                  {r.enviado_em && <div className="detalhe" style={{ margin: 0 }}>Enviado em {formatar(r.enviado_em)}</div>}
+                  {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {formatarMotivo(r.motivo_categoria, r.motivo_ajuste)}</div>}
+                  {r.enviado_em && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      Enviado{r.enviado_por ? ` por ${nomeDe(r.enviado_por)}` : ""} em {formatar(r.enviado_em)}
+                    </div>
+                  )}
+                  {(r.status === "aprovado" || r.status === "assinado" || r.status === "ajustar") && (r.avaliado_por || r.aprovado_por) && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      {r.status === "ajustar" ? "Reprovado" : "Aprovado"} por {nomeDe(r.avaliado_por || r.aprovado_por)}
+                      {r.avaliado_em ? ` em ${formatar(r.avaliado_em)}` : ""}
+                    </div>
+                  )}
+                  {r.status === "assinado" && (
+                    <div className="detalhe" style={{ margin: 0 }}>
+                      Versão assinada enviada{r.assinado_por ? ` por ${nomeDe(r.assinado_por)}` : ""}{r.assinado_em ? ` em ${formatar(r.assinado_em)}` : ""} — é o documento final.
+                    </div>
+                  )}
                 </div>
                 <span className="linha-acoes">
                   {podeRelatorio && r.status === "rascunho" && (
@@ -1759,7 +1960,26 @@ export default function InspecaoDetalhePage() {
                       </button>
                     </>
                   )}
-                  <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer">Baixar</a>
+                  {podeAssinar && r.status === "aprovado" && (
+                    <button className="btn-dl" disabled={!!enviandoAssinado}
+                      title="Enviar o PDF assinado — passa a ser o documento final deste relatório"
+                      onClick={() => pedirAssinado(r, false)}>
+                      {enviandoAssinado === r.id ? "Enviando…" : "✍ Enviar versão assinada"}
+                    </button>
+                  )}
+                  {podeTrocarAssinado && r.status === "assinado" && (
+                    <button className="btn-dl btn-sec" disabled={!!enviandoAssinado}
+                      title="Trocar o PDF assinado (só Gerência/Admin) — o atual é apagado"
+                      onClick={() => pedirAssinado(r, true)}>
+                      {enviandoAssinado === r.id ? "Enviando…" : "Trocar assinada"}
+                    </button>
+                  )}
+                  {r.status === "assinado" && r.assinado_path && (
+                    <a className="btn-dl" href={`/api/relatorios/${r.id}/download?arquivo=assinado`} target="_blank" rel="noopener noreferrer"
+                      onClick={() => marcarBaixado(r.id)}>Baixar assinado</a>
+                  )}
+                  <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer"
+                    onClick={() => marcarBaixado(r.id)}>{r.status === "assinado" ? "Baixar original" : "Baixar"}</a>
                 </span>
               </div>
             ))}
@@ -1814,7 +2034,11 @@ export default function InspecaoDetalhePage() {
                 <div style={{ fontSize: 14, color: "var(--texto)", fontWeight: 600 }}>
                   {descreverAcaoFase(h.acao, h.fase_de, h.fase_para)}
                 </div>
-                {h.motivo && <div className="detalhe" style={{ margin: 0 }}>Motivo: {h.motivo}</div>}
+                {h.motivo && (
+                  <div className="detalhe" style={{ margin: 0 }}>
+                    {h.acao === "assinar" ? h.motivo : `Motivo: ${formatarMotivo(h.motivo_categoria, h.motivo)}`}
+                  </div>
+                )}
                 <div className="detalhe" style={{ margin: 0 }}>
                   Por {h.autor_perfil?.nome_completo || h.autor_perfil?.email || "usuário"} · {formatar(h.data_autenticacao || h.criado_em)}
                 </div>
@@ -2301,15 +2525,35 @@ export default function InspecaoDetalhePage() {
         <Modal titulo={reprovar.rotulo} onFechar={() => setReprovar(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <p style={{ margin: 0, color: "var(--texto-suave)" }}>
+              {relEmAvaliacao ? <>Reprovando a <strong>v{relEmAvaliacao.versao}</strong>. </> : null}
               A OS volta para a fase {reprovar.destino} ({nomeFase(reprovar.destino)}) com a tag “Ajustar”. Informe o motivo:
             </p>
-            <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={4}
-              placeholder="O que precisa ser ajustado no relatório?"
-              style={{ ...inputStyle, resize: "vertical" }} autoFocus />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Categoria *</span>
+              <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={inputStyle} aria-label="Categoria do ajuste">
+                <option value="">Escolha…</option>
+                {CATEGORIAS_REPROVACAO.map((c) => <option key={c.valor} value={c.valor}>{c.rotulo}</option>)}
+              </select>
+            </label>
+            <MensagensCampo r={valReprovacao} campo="categoria" mostrarErros={tentouReprovar} />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>O que ajustar *</span>
+              <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={4}
+                placeholder="Ex.: a foto 3 é de outro tanque; o volume do tópico 7 não bate com a medição."
+                style={{ ...inputStyle, resize: "vertical" }} autoFocus />
+            </label>
+            <MensagensCampo r={valReprovacao} campo="motivo" mostrarErros={tentouReprovar} />
+            <ResumoValidacao r={valReprovacao} rotulos={ROTULOS_REPROVACAO} mostrarErros={tentouReprovar} />
             {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button className="btn-azul btn-sec" onClick={() => setReprovar(null)} disabled={processando}>Cancelar</button>
-              <button className="btn-azul" onClick={() => { if (!motivo.trim()) { setErro("Informe o motivo do ajuste."); return; } aplicar(reprovar.acao, motivo); }} disabled={processando}>
+              <button className="btn-azul" onClick={() => {
+                setTentouReprovar(true);
+                if (temErros(valReprovacao)) return;
+                const av = resumoValidacao(valReprovacao, ROTULOS_REPROVACAO).avisos;
+                if (av.length && !confirm(`Atenção:\n\n• ${av.join("\n• ")}\n\nReprovar mesmo assim?`)) return;
+                aplicar(reprovar.acao, motivo, categoria);
+              }} disabled={processando}>
                 {processando ? "Enviando…" : "Confirmar ajuste"}
               </button>
             </div>

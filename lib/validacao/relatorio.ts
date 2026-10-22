@@ -28,6 +28,8 @@ export interface RelatorioRef {
   versao: number;
   status: string;
   arquivoHash?: string | null;
+  /** SHA-256 da versão assinada (Fase 5/9), se houver. */
+  assinadoHash?: string | null;
 }
 
 const MB = 1024 * 1024;
@@ -128,10 +130,11 @@ export function descreverRelatorio(r: RelatorioRef): string {
   return `o relatório de ${tipo} v${r.versao} (${ROTULO_STATUS_RELATORIO[r.status] || r.status})`;
 }
 
-/** Relatório desta OS (qualquer tipo, não excluído) com o mesmo arquivo. */
+/** Relatório desta OS (qualquer tipo, não excluído) com o mesmo arquivo —
+ *  o enviado ou a versão assinada. */
 export function arquivoRelatorioRepetido(hash: string | null | undefined, rels: RelatorioRef[], excluirId?: string | null): RelatorioRef | null {
   if (!hash) return null;
-  return rels.find((r) => r.id !== excluirId && r.arquivoHash === hash) || null;
+  return rels.find((r) => r.id !== excluirId && (r.arquivoHash === hash || r.assinadoHash === hash)) || null;
 }
 
 // ── Arquivo (PDF / DOCX) ─────────────────────────────────────────────────────
