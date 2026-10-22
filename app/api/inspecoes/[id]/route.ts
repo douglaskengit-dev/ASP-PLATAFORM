@@ -52,10 +52,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if (typeof body.identificacao === "string") {
     if (!PERFIS_EDICAO.includes(profile.perfil)) {
-      return NextResponse.json({ erro: "Sem permissão para renomear a inspeção." }, { status: 403 });
+      return NextResponse.json({ erro: "Sem permissão para renomear a OS." }, { status: 403 });
     }
     const titulo = body.identificacao.trim();
-    if (!titulo) return NextResponse.json({ erro: "Informe o título da inspeção." }, { status: 400 });
+    if (!titulo) return NextResponse.json({ erro: "Informe a identificação da OS." }, { status: 400 });
     if (titulo.length > 160) {
       return NextResponse.json({ erro: "Título muito longo (máx. 160 caracteres)." }, { status: 400 });
     }
@@ -83,7 +83,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir inspeções." }, { status: 403 });
+  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir Ordens de Serviço." }, { status: 403 });
   const admin = getSupabaseAdmin();
   if (req.nextUrl.searchParams.get("definitivo") === "1") {
     const { error } = await admin.from("gp_inspecoes").delete().eq("id", params.id);

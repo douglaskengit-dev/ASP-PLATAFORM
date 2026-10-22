@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   const inspecaoId = String(b?.inspecaoId || "");
   const tipo = b?.tipo === "execucao" ? "execucao" : "inspecao";
   const ext = String(b?.ext || "").toLowerCase();
-  if (!inspecaoId) return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
+  if (!inspecaoId) return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   if (ext !== "pdf" && ext !== "docx") {
     return NextResponse.json({ erro: "Envie o relatório em PDF ou DOCX." }, { status: 400 });
   }

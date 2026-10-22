@@ -38,7 +38,7 @@ const rotFiltro: React.CSSProperties = {
 
 /** Status do projeto derivado das fases das suas inspeções. */
 function statusProjeto(inspecoes: InspecaoResumo[]): { label: string; cor: string; pct: number; chave: string } {
-  if (!inspecoes.length) return { label: "Sem inspeções", cor: "#5a6b7b", pct: 0, chave: "sem" };
+  if (!inspecoes.length) return { label: "Sem OS", cor: "#5a6b7b", pct: 0, chave: "sem" };
   const media = inspecoes.reduce((a, i) => a + i.fase, 0) / inspecoes.length;
   const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
   if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Encerrado", cor: "#16a34a", pct: 100, chave: "encerrado" };
@@ -51,7 +51,7 @@ const STATUS_OPCOES = [
   { chave: "andamento", label: "Em andamento" },
   { chave: "aprovacao", label: "Aguardando aprovação" },
   { chave: "encerrado", label: "Encerrado" },
-  { chave: "sem", label: "Sem inspeções" },
+  { chave: "sem", label: "Sem OS" },
 ];
 export default function ProjetosPage() {
   const router = useRouter();
@@ -165,7 +165,7 @@ export default function ProjetosPage() {
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
             <span className="fu-badge" style={{ background: st.cor, color: "#fff" }}>{st.label}</span>
             <span className="detalhe" style={{ margin: 0 }}>
-              {p.inspecoes_total} inspeç{p.inspecoes_total === 1 ? "ão" : "ões"}
+              {p.inspecoes_total} OS{p.inspecoes_total === 1 ? "" : "s"}
             </span>
           </div>
         </div>
@@ -179,7 +179,7 @@ export default function ProjetosPage() {
   return (
     <div className="page-larga">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <TituloPagina titulo={verLixeira ? "Projetos — Lixeira" : "Projetos"} subtitulo={verLixeira ? "Excluídos recentemente. Podem ser restaurados por 30 dias; depois são apagados de vez." : "Cada projeto corresponde a um pedido de compra e reúne as inspeções (tanques/pontos)."} />
+        <TituloPagina titulo={verLixeira ? "Projetos — Lixeira" : "Projetos"} subtitulo={verLixeira ? "Excluídos recentemente. Podem ser restaurados por 30 dias; depois são apagados de vez." : "Cada projeto corresponde a um pedido de compra e reúne as Ordens de Serviço — OSs (tanques/pontos)."} />
         <div style={{ display: "flex", gap: 8 }}>
           {podeExcluir && (
             <button className="btn-azul btn-sec" onClick={() => setVerLixeira((v) => !v)}>
@@ -221,7 +221,7 @@ export default function ProjetosPage() {
                 <option value="antigos">Mais antigos</option>
                 <option value="codigo">Código do projeto</option>
                 <option value="cliente">Cliente (A–Z)</option>
-                <option value="inspecoes">Nº de inspeções</option>
+                <option value="inspecoes">Nº de OSs</option>
               </select>
             </div>
           </div>

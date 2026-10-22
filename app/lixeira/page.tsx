@@ -15,7 +15,7 @@ interface Item {
 }
 
 const ROTULO: Record<Item["tipo"], string> = {
-  projeto: "Projetos", inspecao: "Inspeções", cliente: "Clientes",
+  projeto: "Projetos", inspecao: "Ordens de Serviço", cliente: "Clientes",
   medicao: "Medições", relatorio: "Relatórios",
 };
 const ORDEM: Item["tipo"][] = ["projeto", "inspecao", "cliente", "medicao", "relatorio"];
@@ -25,7 +25,7 @@ function descrever(it: Item): string {
   const d = it.dados || {};
   switch (it.tipo) {
     case "projeto": return d.codigo_projeto || d.pedido_compra || "Projeto sem código";
-    case "inspecao": return `${d.identificacao || "Inspeção"} · fase ${d.fase ?? "—"}`;
+    case "inspecao": return `${d.identificacao || "OS"} · fase ${d.fase ?? "—"}`;
     case "cliente": return `${d.razao_social || "Cliente"}${d.cidade ? ` · ${d.cidade}/${d.uf || ""}` : ""}`;
     case "medicao": return `Medição (${d.tipo || "sedimento"})`;
     case "relatorio": return `Relatório ${d.tipo || ""} v${d.versao ?? "?"} — ${d.status || ""}`;

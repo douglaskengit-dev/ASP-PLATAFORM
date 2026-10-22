@@ -46,7 +46,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 /**
  * Exclui o usuário definitivamente (perfil + conta de login).
- * Se ele já tiver registros vinculados (projetos, inspeções, coletas etc.),
+ * Se ele já tiver registros vinculados (projetos, OSs, coletas etc.),
  * o banco bloqueia a exclusão para não perder o histórico — nesse caso a
  * orientação é desativá-lo.
  */
@@ -68,7 +68,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
       return NextResponse.json(
         {
           erro:
-            "Este usuário possui registros vinculados (projetos, inspeções, coletas etc.) e não pode ser excluído. Desmarque \"Ativo\" para bloquear o acesso mantendo o histórico.",
+            "Este usuário possui registros vinculados (projetos, OSs, coletas etc.) e não pode ser excluído. Desmarque \"Ativo\" para bloquear o acesso mantendo o histórico.",
         },
         { status: 409 }
       );

@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   const projetoId = req.nextUrl.searchParams.get("projetoId");
   const inspecaoId = req.nextUrl.searchParams.get("inspecaoId");
-  if (!projetoId && !inspecaoId) return NextResponse.json({ erro: "Informe o projeto ou a inspeção." }, { status: 400 });
+  if (!projetoId && !inspecaoId) return NextResponse.json({ erro: "Informe o projeto ou a OS." }, { status: 400 });
   const supabase = getSupabaseRouteClient();
 
   // Purga preguiçosa da lixeira: RDO excluído há mais de 30 dias sai de vez.

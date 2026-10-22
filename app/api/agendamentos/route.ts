@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as NovoAgendamentoBody;
   if (!body.inspecaoId) {
-    return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
+    return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   }
   if (!body.dataVisita) {
     return NextResponse.json({ erro: "Informe a data da visita." }, { status: 400 });
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
       .select("identificacao, projeto:gp_projetos(codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(razao_social))")
       .eq("id", body.inspecaoId)
       .single();
-    const ident = insp?.identificacao || "Inspeção";
+    const ident = insp?.identificacao || "OS";
     const projeto: any = insp?.projeto;
     const projLabel = projeto?.codigo_projeto || projeto?.pedido_compra || "";
     const endereco = projeto?.endereco || "";
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
     });
     const resultadoEmail = await enviarEmail(
       paraEmails, titulo, html,
-      [{ filename: "inspecao.ics", content: ics, contentType: "text/calendar" }],
+      [{ filename: "agendamento.ics", content: ics, contentType: "text/calendar" }],
       { cc: ccEmails }
     );
     return NextResponse.json({ ok: true, agendamento: data, email: { destinatarios: paraEmails.length, ...resultadoEmail } });

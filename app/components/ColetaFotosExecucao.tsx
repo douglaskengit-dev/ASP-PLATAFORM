@@ -300,7 +300,7 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
         )}
         {!exigida ? (
           <p className="detalhe" style={{ margin: "6px 0 0" }}>
-            Não exigida nesta inspeção.
+            Não exigida nesta OS.
             {guardadas > 0 && ` ${guardadas} foto(s) já coletada(s) continuam guardadas e voltam se marcar de novo.`}
           </p>
         ) : (

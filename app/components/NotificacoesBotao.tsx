@@ -206,7 +206,7 @@ export default function NotificacoesBotao() {
             ⏳ Aguardando sua atuação{perfil ? ` (${NOME_PERFIL[perfil] || perfil})` : ""}
           </span>
           {inspecoes.length === 0 ? (
-            <p className="vazio">✅ Nenhuma inspeção aguardando a sua área.</p>
+            <p className="vazio">✅ Nenhuma OS aguardando a sua área.</p>
           ) : (
             inspecoes.map((i) => (
               <Link href={`/inspecoes/${i.id}`} className="item notif" key={i.id}

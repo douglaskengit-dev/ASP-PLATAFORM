@@ -66,7 +66,7 @@ export default function HistoricoConteudo() {
               <div className="fu-barra" style={{ width: `${pct}%` }} />
             </div>
             <span className="detalhe">
-              {p.cliente?.razao_social || "Cliente não informado"} — {p.inspecoes.length} inspeç{p.inspecoes.length === 1 ? "ão" : "ões"}
+              {p.cliente?.razao_social || "Cliente não informado"} — {p.inspecoes.length} OS{p.inspecoes.length === 1 ? "" : "s"}
             </span>
           </Link>
         );

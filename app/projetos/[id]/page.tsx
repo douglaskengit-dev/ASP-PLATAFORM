@@ -112,9 +112,9 @@ export default function ProjetoDetalhePage() {
   }, [id]);
 
   async function excluirInspecao(iid: string) {
-    if (!confirm("Enviar esta inspeção para a lixeira? Recuperável por 30 dias.")) return;
+    if (!confirm("Enviar esta OS para a lixeira? Recuperável por 30 dias.")) return;
     const r = await fetch(`/api/inspecoes/${iid}`, { method: "DELETE" });
-    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir inspeção."); return; }
+    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir a OS."); return; }
     carregar();
   }
   function abrirLixeiraInsp() {
@@ -127,7 +127,7 @@ export default function ProjetoDetalhePage() {
     abrirLixeiraInsp(); carregar();
   }
   async function excluirInspDefinitivo(iid: string) {
-    if (!confirm("Excluir DEFINITIVAMENTE esta inspeção?")) return;
+    if (!confirm("Excluir DEFINITIVAMENTE esta OS?")) return;
     const r = await fetch(`/api/inspecoes/${iid}?definitivo=1`, { method: "DELETE" });
     if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir."); return; }
     abrirLixeiraInsp();
@@ -168,7 +168,7 @@ export default function ProjetoDetalhePage() {
       });
       const d = await r.json();
       if (!r.ok) {
-        setErro(d.erro || "Não foi possível criar a inspeção.");
+        setErro(d.erro || "Não foi possível criar a OS.");
         return;
       }
       setInspecoes((prev) => [...prev, d.inspecao]);
@@ -231,7 +231,7 @@ export default function ProjetoDetalhePage() {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "22px 0 12px", gap: 8, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontFamily: "var(--fonte-titulo)", color: "var(--texto)" }}>
-          {verLixeiraInsp ? "Inspeções — Lixeira" : `Inspeções (${inspecoes.length})`}
+          {verLixeiraInsp ? "Ordens de Serviço — Lixeira" : `Ordens de Serviço (${inspecoes.length})`}
         </h3>
         <div style={{ display: "flex", gap: 8 }}>
           {podeExcluir && (
@@ -240,14 +240,14 @@ export default function ProjetoDetalhePage() {
             </button>
           )}
           {!verLixeiraInsp && (
-            <button className="btn-azul" onClick={() => { setErro(null); setModalAberto(true); }}>+ Nova inspeção</button>
+            <button className="btn-azul" onClick={() => { setErro(null); setModalAberto(true); }}>+ Nova OS</button>
           )}
         </div>
       </div>
 
       {verLixeiraInsp ? (
         inspLixeira.length === 0 ? (
-          <p className="vazio">A lixeira de inspeções está vazia.</p>
+          <p className="vazio">A lixeira de OSs está vazia.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {inspLixeira.map((i) => (
@@ -262,7 +262,7 @@ export default function ProjetoDetalhePage() {
           </div>
         )
       ) : inspecoes.length === 0 ? (
-        <p className="vazio">Nenhuma inspeção. Adicione um tanque/ponto para iniciar o fluxo.</p>
+        <p className="vazio">Nenhuma OS. Adicione um tanque/ponto para iniciar o fluxo.</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {inspecoes.map((i) => {
@@ -288,7 +288,7 @@ export default function ProjetoDetalhePage() {
                   </div>
                 </Link>
                 {podeExcluir && (
-                  <button className="fu-icone-btn lixeira" title="Excluir inspeção (lixeira)"
+                  <button className="fu-icone-btn lixeira" title="Excluir OS (lixeira)"
                     onClick={() => excluirInspecao(i.id)}
                     style={{ position: "absolute", top: 12, right: 12 }}>🗑</button>
                 )}
@@ -328,7 +328,7 @@ export default function ProjetoDetalhePage() {
       )}
 
       {modalAberto && (
-        <Modal titulo="Nova inspeção" onFechar={() => setModalAberto(false)}>
+        <Modal titulo="Nova Ordem de Serviço (OS)" onFechar={() => setModalAberto(false)}>
           <div className="form-projeto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Identificação</label>
@@ -339,7 +339,7 @@ export default function ProjetoDetalhePage() {
                 autoFocus
                 onKeyDown={(e) => { if (e.key === "Enter") criarInspecao(); }}
               />
-              <small style={{ color: "var(--cinza)" }}>A inspeção começa na fase 2 (Agendamento). Coleta padrão: medidor de sedimento.</small>
+              <small style={{ color: "var(--cinza)" }}>A OS começa na fase 2 (Agendamento). Coleta padrão: medidor de sedimento.</small>
             </div>
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Procedimento</label>
@@ -358,14 +358,14 @@ export default function ProjetoDetalhePage() {
             <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 12 }}>
               <strong style={{ fontSize: 13 }}>Tanque</strong>
               <p className="detalhe" style={{ margin: "2px 0 10px" }}>
-                Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta inspeção.
+                Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta OS.
               </p>
               <FormularioTanque valor={tanque} onChange={setTanque} desabilitado={salvando} />
             </div>
             {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button className="btn-azul btn-sec" onClick={() => setModalAberto(false)} disabled={salvando}>Cancelar</button>
-              <button className="btn-azul" onClick={criarInspecao} disabled={salvando}>{salvando ? "Criando…" : "Criar inspeção"}</button>
+              <button className="btn-azul" onClick={criarInspecao} disabled={salvando}>{salvando ? "Criando…" : "Criar OS"}</button>
             </div>
           </div>
         </Modal>

@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
   if (!["admin", "comercial", "gerencia"].includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Sem permissão para criar inspeções." }, { status: 403 });
+    return NextResponse.json({ erro: "Sem permissão para criar Ordens de Serviço." }, { status: 403 });
   }
 
   const body = (await req.json()) as NovaInspecaoBody;

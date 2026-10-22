@@ -363,7 +363,7 @@ export default function OrgaoDetalhePage() {
                   <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
                     <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                       <strong style={{ fontSize: 13 }}>{p.codigo_projeto || p.pedido_compra || "Projeto"}</strong>
-                      <span className="detalhe" style={{ margin: 0 }}>{p.inspecoes.length} inspeç{p.inspecoes.length === 1 ? "ão" : "ões"} · {pct}%</span>
+                      <span className="detalhe" style={{ margin: 0 }}>{p.inspecoes.length} OS{p.inspecoes.length === 1 ? "" : "s"} · {pct}%</span>
                     </div>
                     <div className="fu-progresso" style={{ marginTop: 8 }}>
                       <div className="fu-barra" style={{ width: `${pct}%` }} />

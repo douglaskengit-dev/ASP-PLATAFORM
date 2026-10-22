@@ -114,7 +114,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page-larga">
-      <TituloPagina titulo="Dashboard" subtitulo="Visão geral de projetos e inspeções" />
+      <TituloPagina titulo="Dashboard" subtitulo="Visão geral de projetos e Ordens de Serviço (OS)" />
 
       {/* Filtros */}
       <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 16 }}>
@@ -157,27 +157,27 @@ export default function DashboardPage() {
           <div className="dash-kpis">
             <Kpi valor={projetosFiltrados.length} nome="Projetos" desc="pedidos de compra"
               tip={<TipStatus c={statusCount} />} />
-            <Kpi valor={k.total} nome="Inspeções" desc="tanques/pontos"
-              tip={<span>Média de {projetosFiltrados.length ? (k.total / projetosFiltrados.length).toFixed(1) : 0} inspeções por projeto.</span>} />
+            <Kpi valor={k.total} nome="Ordens de Serviço" desc="OSs · tanques/pontos"
+              tip={<span>Média de {projetosFiltrados.length ? (k.total / projetosFiltrados.length).toFixed(1) : 0} OSs por projeto.</span>} />
             <Kpi valor={k.andamento} nome="Em andamento" desc="não encerradas"
-              tip={<span>Inspeções ainda antes da fase {ULTIMA_FASE} (Encerramento).</span>} />
+              tip={<span>OSs ainda antes da fase {ULTIMA_FASE} (Encerramento).</span>} />
             <Kpi valor={k.aprovacao} cor={k.aprovacao ? "#c2410c" : undefined} nome="Aguardando aprovação" desc="fases 5 e 9 (Gerência)"
               tip={<span>Relatórios na fila da Gerência (fase 5 = inspeção, fase 9 = execução).</span>} />
             <Kpi valor={k.execucao} nome="Em execução" desc="fases 6–9"
-              tip={<span>Inspeções no ciclo de execução.</span>} />
+              tip={<span>OSs no ciclo de execução.</span>} />
             <Kpi valor={k.encerradas} nome="Encerradas" desc="fase 10"
-              tip={<span>Taxa de conclusão: {k.conclusao}% das inspeções.</span>} />
-            <Kpi valor={`${k.progresso}%`} nome="Progresso médio" desc="avanço das inspeções"
-              tip={<span>Média das fases das inspeções, normalizada de 0 a 100%.</span>} />
+              tip={<span>Taxa de conclusão: {k.conclusao}% das OSs.</span>} />
+            <Kpi valor={`${k.progresso}%`} nome="Progresso médio" desc="avanço das OSs"
+              tip={<span>Média das fases das OSs, normalizada de 0 a 100%.</span>} />
             <Kpi valor={k.coleta} nome="Em coleta" desc="fase 3 (Operações)"
-              tip={<span>Inspeções na fase de coleta de dados de campo.</span>} />
+              tip={<span>OSs na fase de coleta de dados de campo.</span>} />
           </div>
 
           <div className="dash-colunas" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", marginTop: 16 }}>
             <div className="card">
-              <h2 style={{ marginTop: 0 }}>Inspeções por fase</h2>
-              <BarrasHorizontais dados={porFase} vazio="Nenhuma inspeção ainda."
-                renderPopover={(d) => <span>{d.valor} inspeç{d.valor === 1 ? "ão" : "ões"} em <strong>{d.rotulo}</strong>.</span>} />
+              <h2 style={{ marginTop: 0 }}>OSs por fase</h2>
+              <BarrasHorizontais dados={porFase} vazio="Nenhuma OS ainda."
+                renderPopover={(d) => <span>{d.valor} OS{d.valor === 1 ? "" : "s"} em <strong>{d.rotulo}</strong>.</span>} />
             </div>
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Projetos por cliente</h2>

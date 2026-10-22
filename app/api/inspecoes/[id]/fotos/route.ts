@@ -37,7 +37,7 @@ async function garantirRegistro(supabase: Supa, inspecaoId: string, autor: strin
   const { data } = await supabase.from(TABELA).select("*").eq("inspecao_id", inspecaoId).maybeSingle();
   if (data) return data as Linha;
   const padrao = await aguaPotavelDoProcedimento(supabase, inspecaoId);
-  if (padrao === null) return "Inspeção não encontrada.";
+  if (padrao === null) return "OS não encontrada.";
   const { data: novo, error } = await supabase.from(TABELA)
     .insert({ inspecao_id: inspecaoId, agua_antes: padrao, agua_depois: padrao, itens: {}, criado_por: autor })
     .select("*").single();
@@ -71,7 +71,7 @@ async function alterar(
 
 const resposta = (r: Linha | string, status = 500) =>
   typeof r === "string"
-    ? NextResponse.json({ erro: r }, { status: r === "Inspeção não encontrada." ? 404 : status })
+    ? NextResponse.json({ erro: r }, { status: r === "OS não encontrada." ? 404 : status })
     : NextResponse.json({ ok: true, registro: r });
 
 /** GET → registro (ou os padrões do procedimento, se ainda não existe).
@@ -104,7 +104,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   let registro: RegistroFotosExecucao | null = data as RegistroFotosExecucao | null;
   if (!registro) {
     const padrao = await aguaPotavelDoProcedimento(supabase, params.id);
-    if (padrao === null) return NextResponse.json({ erro: "Inspeção não encontrada." }, { status: 404 });
+    if (padrao === null) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
     registro = { ...registroVazio(padrao), inspecao_id: params.id };
   }
   return NextResponse.json({ ok: true, podeEditar: PERFIS.includes(profile.perfil), registro });

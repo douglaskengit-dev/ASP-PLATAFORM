@@ -176,12 +176,12 @@ export default function ArquivosPage() {
 
   return (
     <div className="page-larga">
-      <TituloPagina titulo="Arquivos" subtitulo="Coletas, relatórios e RDOs, organizados por projeto e inspeção." />
+      <TituloPagina titulo="Arquivos" subtitulo="Coletas, relatórios e RDOs, organizados por projeto e OS." />
 
       <div className="item" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 20 }}>
         <div style={{ flex: 2, minWidth: 200 }}>
           <label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Buscar</label>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="projeto, cliente ou inspeção…" style={inp} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="projeto, cliente ou OS…" style={inp} />
         </div>
         <div style={{ flex: 1, minWidth: 160 }}>
           <label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Cliente</label>
@@ -206,9 +206,9 @@ export default function ArquivosPage() {
         <div style={{ flex: 1, minWidth: 220 }}>
           <label className="detalhe" style={{ display: "block", marginBottom: 4 }}>Estrutura das pastas</label>
           <select value={estrutura} onChange={(e) => setEstrutura(e.target.value as typeof estrutura)} style={inp}>
-            <option value="cli/proj/insp">Cliente / Projeto / Inspeção</option>
-            <option value="proj/insp">Projeto / Inspeção</option>
-            <option value="cli/proj/insp/tipo">Cliente / Projeto / Inspeção / Tipo</option>
+            <option value="cli/proj/insp">Cliente / Projeto / OS</option>
+            <option value="proj/insp">Projeto / OS</option>
+            <option value="cli/proj/insp/tipo">Cliente / Projeto / OS / Tipo</option>
           </select>
         </div>
         <button className="btn-azul" onClick={() => baixarZip(false)} disabled={!!baixando}>

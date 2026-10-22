@@ -130,7 +130,7 @@ export default function CatalogoPage() {
     // O código identifica o procedimento na inspeção e no relatório. Sem ele,
     // o item aparece nos seletores como se fosse "não definido".
     if (tipo === "procedimento" && !String(item.codigo || "").trim()) {
-      setErro("Informe o código do procedimento (ex.: PO 011) — é por ele que a inspeção e o relatório o identificam.");
+      setErro("Informe o código do procedimento (ex.: PO 011) — é por ele que a OS e o relatório o identificam.");
       return;
     }
     setSalvando(true);
@@ -389,7 +389,7 @@ export default function CatalogoPage() {
                 <p className="detalhe" style={{ margin: "2px 0 0" }}>
                   A coleta de fotos da execução já começa com as coletas de água antes e depois da
                   limpeza marcadas como necessárias (pH, cloro e procedimento de coleta). Na
-                  inspeção, dá para desmarcar caso a caso.
+                  OS, dá para desmarcar caso a caso.
                 </p>
               </span>
             </label>

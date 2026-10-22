@@ -18,7 +18,7 @@ function tabelaDe(t: any): string | null {
 function validarProcedimento(dados: any): string | null {
   if (!dados) return "Dados do procedimento ausentes.";
   if (typeof dados.codigo !== "string" || !dados.codigo.trim()) {
-    return "Informe o código do procedimento (ex.: PO 011). Ele identifica o procedimento na inspeção e no relatório.";
+    return "Informe o código do procedimento (ex.: PO 011). Ele identifica o procedimento na OS e no relatório.";
   }
   dados.codigo = dados.codigo.trim();
   if (typeof dados.nome === "string") dados.nome = dados.nome.trim();

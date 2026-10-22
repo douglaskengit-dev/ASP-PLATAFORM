@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!inspecaoId) {
-    return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
+    return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   }
   if (arquivo && !arquivo.name.toLowerCase().endsWith(".pdf")) {
     return NextResponse.json({ erro: "Anexe o relatório exportado em PDF." }, { status: 400 });

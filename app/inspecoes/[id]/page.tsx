@@ -395,7 +395,7 @@ export default function InspecaoDetalhePage() {
         blocos.push(`Coleta de fotos da execução incompleta (${pend.length} pendência(s)):\n• ${pend.join("\n• ")}\n` +
           "As fotos que faltam não entram no Relatório de Execução.");
       }
-      if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta inspeção.");
+      if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta OS.");
       if (blocos.length > 0 && !confirm(`Pendências da Execução:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
     }
     aplicar(opcao.acao);
@@ -503,7 +503,7 @@ export default function InspecaoDetalhePage() {
         body: JSON.stringify({ identificacao: titulo }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setErro(data?.erro || "Falha ao renomear a inspeção."); return; }
+      if (!res.ok) { setErro(data?.erro || "Falha ao renomear a OS."); return; }
       setEditandoTitulo(false);
       carregar();
     } catch {
@@ -593,11 +593,11 @@ export default function InspecaoDetalhePage() {
     try {
       const { gerarPdfMedicao } = await import("@/lib/asp/relatorio-medicao");
       const blob = await gerarPdfMedicao(estado, {
-        inspecao: insp?.identificacao || "Inspeção",
+        inspecao: insp?.identificacao || "OS",
         projeto: insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || undefined,
         cliente: insp?.projeto?.cliente?.razao_social || undefined,
       });
-      const nome = `Medicao-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}.pdf`;
+      const nome = `Medicao-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}.pdf`;
       const arquivo = new File([blob], nome, { type: "application/pdf" });
       const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento", dados: JSON.stringify(estado) }, arquivo, "Relatório da medição");
       if (res.queued) { alert("Sem conexão — o relatório será enviado ao reconectar."); return; }
@@ -840,7 +840,7 @@ export default function InspecaoDetalhePage() {
   if (naoEncontrado || !insp)
     return (
       <div className="page-larga">
-        <p className="vazio">Inspeção não encontrada.</p>
+        <p className="vazio">OS não encontrada.</p>
         <Link href="/projetos" style={{ color: "var(--primaria)" }}>← Voltar aos projetos</Link>
       </div>
     );
@@ -923,7 +923,7 @@ export default function InspecaoDetalhePage() {
               <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span>{insp.identificacao}</span>
                 {podeRenomear && (
-                  <button className="fu-icone-btn" title="Renomear a inspeção"
+                  <button className="fu-icone-btn" title="Renomear a OS"
                     onClick={() => { setTituloNovo(insp.identificacao); setEditandoTitulo(true); }}>✎</button>
                 )}
               </h2>
@@ -1030,7 +1030,7 @@ export default function InspecaoDetalhePage() {
         )}
         {acoes.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>
-            {insp.fase >= ULTIMA_FASE ? "Inspeção encerrada."
+            {insp.fase >= ULTIMA_FASE ? "OS encerrada."
               : perfil && !perfilAtuaNaFase(perfil, insp.fase) ? `Fase com ${def?.area || "outra área"} — você está em modo consulta.`
               : "Nenhuma ação disponível para o seu perfil nesta fase."}
           </p>
@@ -1438,14 +1438,14 @@ export default function InspecaoDetalhePage() {
         <GerarRelatorio
           onFechar={() => { setModalRelatorio(false); setRascunhoEmEdicao(null); }}
           estadoSalvo={rascunhoEmEdicao?.dados || null}
-          nomeArquivo={`Relatorio-${(insp?.identificacao || "inspecao").replace(/[^\w-]+/g, "-")}`}
+          nomeArquivo={`Relatorio-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
           coletas={coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0)}
           // Relatório de Execução: as fotos da coleta entram já posicionadas.
           coletaFotos={(tipoRelatorio || bloco) === "execucao" ? fotosExec : undefined}
           onSalvar={async (blob, snapshot) => {
-            const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "inspecao"}.docx`, {
+            const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "OS"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             });
             await enviarRelatorio(arquivo, true, snapshot, rascunhoEmEdicao?.id);   // true = rascunho
@@ -1573,10 +1573,10 @@ export default function InspecaoDetalhePage() {
 
       {/* Modal: cadastro do tanque */}
       {editandoTanque && (
-        <Modal titulo="Tanque da inspeção" onFechar={() => setEditandoTanque(false)}>
+        <Modal titulo="Tanque da OS" onFechar={() => setEditandoTanque(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p className="detalhe" style={{ margin: 0 }}>
-              Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta inspeção.
+              Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta OS.
             </p>
             <FormularioTanque valor={tanqueForm} onChange={setTanqueForm} desabilitado={salvandoTanque} />
             {erroTanque && <p className="erro-texto" style={{ margin: 0 }}>{erroTanque}</p>}
@@ -1595,7 +1595,7 @@ export default function InspecaoDetalhePage() {
         <Modal titulo={reprovar.rotulo} onFechar={() => setReprovar(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <p style={{ margin: 0, color: "var(--texto-suave)" }}>
-              A inspeção volta para a fase {reprovar.destino} ({nomeFase(reprovar.destino)}) com a tag “Ajustar”. Informe o motivo:
+              A OS volta para a fase {reprovar.destino} ({nomeFase(reprovar.destino)}) com a tag “Ajustar”. Informe o motivo:
             </p>
             <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={4}
               placeholder="O que precisa ser ajustado no relatório?"

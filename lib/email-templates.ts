@@ -39,14 +39,14 @@ export function emailAgendamentoHtml(d: {
           ${linha("Cliente", d.cliente)}
           ${linha("Projeto", d.projeto)}
           ${linha("Local / Endereço", d.endereco)}
-          ${linha("Tanque / Ponto", d.ident)}
+          ${linha("OS (tanque / ponto)", d.ident)}
           ${linha("Data e hora", d.quando)}
           ${linha("Equipe", (d.equipe || []).join(", "))}
           ${linha("Equipamentos", (d.equipamentos || []).join(", "))}
           ${linha("Checklist", check)}
         </table>
         <div style="text-align:center;margin:24px 0 8px">
-          <a href="${d.link}" style="display:inline-block;background:#0f5cad;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px">Abrir inspeção →</a>
+          <a href="${d.link}" style="display:inline-block;background:#0f5cad;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px">Abrir OS →</a>
         </div>
         <p style="margin:14px 0 0;color:#5a6b7b;font-size:12px">O convite em anexo (.ics) pode ser adicionado à agenda do seu celular.</p>
       </td>

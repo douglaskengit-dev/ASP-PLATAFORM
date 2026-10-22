@@ -55,6 +55,10 @@ administração de usuários.
 * `gp_solicitacoes_exclusao` — editor pede, admin aprova/recusa (guarda
   snapshot `descricao_cadastro` e decisão).
 * `gp_feedbacks` — erros/sugestões (💬), status aberto/resolvido.
+* `gp_inspecoes` — **Ordem de Serviço (OS)** na tela: o registro por tanque/
+  ponto dentro do projeto (rota `/inspecoes/[id]`). Tabela, colunas, rotas e
+  identificadores seguem com "inspecao"; "inspeção" na tela fica só para o
+  TIPO de serviço (inspeção × execução, fases e relatórios de inspeção).
 
 ## Fluxo do processo (lib/processos/etapas.ts — ETAPAS_FLUXO)
 
