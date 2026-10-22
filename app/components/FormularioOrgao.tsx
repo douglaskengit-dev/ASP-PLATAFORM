@@ -3,10 +3,40 @@
 /** D37: formulário de cadastro de órgão, extraído de OrgaosConteudo para ser
  * reaproveitado também no modal "+ Novo órgão" do Follow-up — mesmo
  * formulário completo (tipo, razão social, CNPJ, cidade, UF e contatos),
- * em vez do atalho reduzido que existia antes. */
-import { useState } from "react";
+ * em vez do atalho reduzido que existia antes.
+ * Validação: lib/validacao/cliente.ts (CNPJ válido e único, razão social
+ * parecida, contatos), mensagens junto de cada campo + resumo no botão. */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NovoContatoInput, OrgaoComAcoes, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
+import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
+import {
+  ClienteRef, mesclar, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao,
+  ROTULOS_CLIENTE, temErros, validarCliente, validarContatos,
+} from "@/lib/validacao";
+
+/** Clientes que conflitam com o digitado (CNPJ igual / razão parecida),
+ * consultados em /api/orgaos/verificar com debounce. Também usado na
+ * edição do cliente (app/orgaos/[id]). */
+export function useClientesConflitantes(cnpj: string, razaoSocial: string, excluirId?: string): ClienteRef[] {
+  const [clientes, setClientes] = useState<ClienteRef[]>([]);
+  const seq = useRef(0);
+  const digitos = normalizarCnpj(cnpj);
+  const razao = normalizarEspacos(razaoSocial);
+  useEffect(() => {
+    const n = ++seq.current;
+    if (!razao && digitos.length !== 14) { setClientes([]); return; }
+    const t = setTimeout(() => {
+      const q = new URLSearchParams({ cnpj: digitos.length === 14 ? digitos : "", razaoSocial: razao, excluirId: excluirId || "" });
+      fetch(`/api/orgaos/verificar?${q}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d && n === seq.current) setClientes(d.clientes || []); })
+        .catch(() => {});
+    }, 350);
+    return () => clearTimeout(t);
+  }, [digitos, razao, excluirId]);
+  return clientes;
+}
 
 function novoContatoVazio(): NovoContatoInput {
   return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
@@ -31,9 +61,20 @@ export default function FormularioOrgao({
   const [contatos, setContatos] = useState<NovoContatoInput[]>([novoContatoVazio()]);
   const [salvando, setSalvando] = useState(false);
   const [mensagemForm, setMensagemForm] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+  const [tentou, setTentou] = useState(false);
+  const [servidor, setServidor] = useState<ResultadoValidacao>(novoResultado());
+
+  const conflitantes = useClientesConflitantes(cnpj, razaoSocial);
+  const resultado = useMemo(
+    () => mesclar(validarCliente({ razaoSocial, cnpj, cidade, uf }, { clientes: conflitantes }), validarContatos(contatos), servidor),
+    [razaoSocial, cnpj, cidade, uf, conflitantes, contatos, servidor]
+  );
+  /** Erro de campo vazio só aparece depois de tentar salvar. */
+  const mostrar = (valor: string | undefined) => tentou || !!valor?.trim();
 
   function atualizarContato(idx: number, campo: keyof NovoContatoInput, valor: string) {
     setContatos((prev) => prev.map((c, i) => (i === idx ? { ...c, [campo]: valor } : c)));
+    setServidor(novoResultado());
   }
 
   function adicionarContato() {
@@ -42,38 +83,35 @@ export default function FormularioOrgao({
 
   function removerContato(idx: number) {
     setContatos((prev) => prev.filter((_, i) => i !== idx));
+    setServidor(novoResultado());
   }
 
   async function cadastrarOrgao() {
     setMensagemForm(null);
-
-    const faltando: string[] = [];
-    if (!razaoSocial.trim()) faltando.push("Razão social");
-    if (!cnpj.trim()) faltando.push("CNPJ");
-    if (!cidade.trim()) faltando.push("Cidade");
-    if (!uf.trim()) faltando.push("UF");
-    if (faltando.length > 0) {
-      setMensagemForm({ tipo: "erro", texto: "Preencha: " + faltando.join(", ") });
+    setTentou(true);
+    if (temErros(resultado)) {
+      setMensagemForm({ tipo: "erro", texto: "Corrija os campos marcados com ⛔." });
       return;
     }
-
-    const contatosPreenchidos = contatos.filter(
-      (c) => c.nomeCompleto.trim() || c.cargo.trim() || c.email.trim() || c.telefone?.trim()
-    );
 
     setSalvando(true);
     try {
       const resp = await fetch("/api/orgaos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, contatos: contatosPreenchidos }),
+        // Lista inteira: a API ignora blocos em branco e devolve as mensagens
+        // com o índice do bloco na tela.
+        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, contatos }),
       });
       const dados = await resp.json();
-      if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao cadastrar o órgão.");
+      if (!resp.ok || !dados.ok) {
+        if (dados.erros) setServidor({ erros: dados.erros, avisos: dados.avisos || {} });
+        throw new Error(dados.erro || "Falha ao cadastrar o cliente.");
+      }
 
       onSucesso(dados.orgao);
     } catch (err: any) {
-      setMensagemForm({ tipo: "erro", texto: err.message || "Erro inesperado ao cadastrar o órgão." });
+      setMensagemForm({ tipo: "erro", texto: err.message || "Erro inesperado ao cadastrar o cliente." });
     } finally {
       setSalvando(false);
     }
@@ -86,23 +124,29 @@ export default function FormularioOrgao({
           <label>Razão social / Nome *</label>
           <input
             value={razaoSocial}
-            onChange={(e) => setRazaoSocial(e.target.value)}
+            onChange={(e) => { setRazaoSocial(e.target.value); setServidor(novoResultado()); }}
+            onBlur={() => setRazaoSocial((v) => normalizarEspacos(v))}
             placeholder="Ex.: Refinaria Industrial S/A"
           />
+          <MensagensCampo r={resultado} campo="razaoSocial" mostrarErros={mostrar(razaoSocial)} />
         </div>
         <div className="field">
           <label>CNPJ *</label>
           <input
             value={cnpj}
-            onChange={(e) => setCnpj(mascaraCnpj(e.target.value))}
+            onChange={(e) => { setCnpj(mascaraCnpj(e.target.value)); setServidor(novoResultado()); }}
             placeholder="00.000.000/0000-00"
             inputMode="numeric"
             maxLength={18}
+            className={(tentou || normalizarCnpj(cnpj).length === 14) && resultado.erros.cnpj ? "val-invalido" : undefined}
           />
+          {/* CNPJ incompleto não é "inválido" enquanto se digita. */}
+          <MensagensCampo r={resultado} campo="cnpj" mostrarErros={tentou || normalizarCnpj(cnpj).length === 14} />
         </div>
         <div className="field">
           <label>Cidade *</label>
           <input value={cidade} onChange={(e) => setCidade(e.target.value)} />
+          <MensagensCampo r={resultado} campo="cidade" mostrarErros={tentou} />
         </div>
         <div className="field">
           <label>Endereço</label>
@@ -119,12 +163,14 @@ export default function FormularioOrgao({
               </option>
             ))}
           </select>
+          <MensagensCampo r={resultado} campo="uf" mostrarErros={tentou} />
         </div>
       </div>
 
       <h3 style={{ marginTop: 16, marginBottom: 4, fontSize: 15 }}>Contatos (opcional)</h3>
       <p style={{ fontSize: 13, color: "var(--texto-suave)", marginTop: 0 }}>
-        Responsáveis do cliente. Podem ser preenchidos agora ou depois.
+        Responsáveis do cliente. Podem ser preenchidos agora ou depois — um bloco
+        começado precisa de nome, cargo e e-mail.
       </p>
 
       {contatos.map((c, idx) => (
@@ -146,10 +192,12 @@ export default function FormularioOrgao({
                 value={c.nomeCompleto}
                 onChange={(e) => atualizarContato(idx, "nomeCompleto", e.target.value)}
               />
+              <MensagensCampo r={resultado} campo={`contatos.${idx}.nomeCompleto`} mostrarErros={mostrar(c.nomeCompleto)} />
             </div>
             <div className="field">
               <label>Cargo</label>
               <input value={c.cargo} onChange={(e) => atualizarContato(idx, "cargo", e.target.value)} />
+              <MensagensCampo r={resultado} campo={`contatos.${idx}.cargo`} mostrarErros={mostrar(c.cargo)} />
             </div>
             <div className="field">
               <label>Telefone (com DDD)</label>
@@ -160,6 +208,7 @@ export default function FormularioOrgao({
                 inputMode="numeric"
                 maxLength={15}
               />
+              <MensagensCampo r={resultado} campo={`contatos.${idx}.telefone`} />
             </div>
             <div className="field">
               <label>E-mail</label>
@@ -168,6 +217,7 @@ export default function FormularioOrgao({
                 value={c.email}
                 onChange={(e) => atualizarContato(idx, "email", e.target.value)}
               />
+              <MensagensCampo r={resultado} campo={`contatos.${idx}.email`} mostrarErros={mostrar(c.email)} />
             </div>
           </div>
         </div>
@@ -176,6 +226,8 @@ export default function FormularioOrgao({
       <button type="button" className="btn secondary" onClick={adicionarContato}>
         + Adicionar contato
       </button>
+
+      {tentou && <div style={{ marginTop: 16 }}><ResumoValidacao r={resultado} rotulos={ROTULOS_CLIENTE} /></div>}
 
       <div className="actions" style={{ marginTop: 16 }}>
         <button className="btn" onClick={cadastrarOrgao} disabled={salvando}>

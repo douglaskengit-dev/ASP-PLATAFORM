@@ -44,7 +44,7 @@ export function cnpjValido(valor: string): boolean {
  * (XX) XXXX-XXXX (fixo, 10 dígitos) conforme o usuário digita. DDD sempre
  * obrigatório — os dois primeiros dígitos. */
 export function mascaraTelefone(valorDigitado: string): string {
-  const d = somenteDigitos(valorDigitado).slice(0, 11);
+  const d = semDdi(somenteDigitos(valorDigitado)).slice(0, 11);
   if (d.length === 0) return "";
   if (d.length <= 2) return `(${d}`;
   if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
@@ -52,9 +52,17 @@ export function mascaraTelefone(valorDigitado: string): string {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
 
-/** Telefone com DDD é válido quando tem 10 dígitos (fixo) ou 11 (celular),
- * com o DDD (2 primeiros dígitos) preenchido. */
+/** Tira o +55 do começo quando ele vem junto (colado de outro lugar):
+ * 12–13 dígitos começando por 55 = DDI + DDD + número. */
+function semDdi(d: string): string {
+  return (d.length === 12 || d.length === 13) && d.startsWith("55") ? d.slice(2) : d;
+}
+
+/** Telefone com DDD é válido quando tem 10 dígitos (fixo) ou 11 (celular,
+ * começando por 9), com DDD que não começa por 0. Aceita +55 opcional. */
 export function telefoneValido(valor: string): boolean {
-  const d = somenteDigitos(valor);
-  return d.length === 10 || d.length === 11;
+  const d = semDdi(somenteDigitos(valor));
+  if (d.length !== 10 && d.length !== 11) return false;
+  if (d[0] === "0") return false;
+  return d.length === 10 || d[2] === "9";
 }

@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
+import { iniciaisDoPerfil, PERFIS_ESCRITA, validarProjetoNoServidor } from "@/lib/asp/projeto-validacao-api";
+import { hojeBrasil, normalizarCodigoProjeto, normalizarEspacos, primeiroErro, ROTULOS_PROJETO, temErros } from "@/lib/validacao";
 
 export const runtime = "nodejs";
-
-const PERFIS_ESCRITA = ["admin", "comercial", "gerencia"];
 const DIAS_LIXEIRA = 30;
 
 /** Lista projetos com o cliente e a contagem de inspeções.
@@ -46,9 +46,13 @@ interface NovoProjetoBody {
   endereco?: string;
   responsavelProjeto?: string;
   dataAbertura?: string;
+  /** "Usar dados do contato do cliente?" = Sim. */
+  usarContato?: boolean;
+  contatoId?: string | null;
 }
 
-/** Abre um novo projeto (fase 1 — Comercial). */
+/** Abre um novo projeto (fase 1 — Comercial). Todas as regras ⛔ de
+ * lib/validacao/projeto.ts são repetidas aqui — a tela não é confiável. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
@@ -59,25 +63,37 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json()) as NovoProjetoBody;
-  if (!body.pedidoCompra?.trim() && !body.codigoProjeto?.trim()) {
-    return NextResponse.json({ erro: "Informe ao menos o pedido de compra ou o código do projeto." }, { status: 400 });
+  // Sem data, vale hoje (é o default da coluna) — mas validada do mesmo jeito.
+  const dados = { ...body, dataAbertura: body.dataAbertura || hojeBrasil() };
+  const { resultado, conflito } = await validarProjetoNoServidor(dados, { iniciaisCriador: iniciaisDoPerfil(profile) });
+  if (temErros(resultado)) {
+    return NextResponse.json(
+      { erro: primeiroErro(resultado, ROTULOS_PROJETO), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { status: conflito ? 409 : 400 }
+    );
   }
 
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
     .from("gp_projetos")
     .insert({
-      cliente_id: body.clienteId || null,
-      codigo_projeto: body.codigoProjeto?.trim() || null,
-      pedido_compra: body.pedidoCompra?.trim() || null,
-      endereco: body.endereco?.trim() || null,
-      responsavel_projeto: body.responsavelProjeto?.trim() || null,
-      data_abertura: body.dataAbertura || undefined,
+      cliente_id: dados.clienteId,
+      codigo_projeto: normalizarCodigoProjeto(dados.codigoProjeto),
+      pedido_compra: normalizarEspacos(dados.pedidoCompra),
+      endereco: normalizarEspacos(dados.endereco) || null,
+      responsavel_projeto: normalizarEspacos(dados.responsavelProjeto) || null,
+      data_abertura: dados.dataAbertura,
       criado_por: profile.id,
     })
     .select("*")
     .single();
 
-  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, projeto: data });
+  if (error) {
+    // 23505 = índice único do código (corrida entre a checagem e o insert).
+    if ((error as any).code === "23505") {
+      return NextResponse.json({ erro: "Código do projeto: já usado por outro projeto. Atualize a sugestão e tente de novo." }, { status: 409 });
+    }
+    return NextResponse.json({ erro: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, projeto: data, avisos: resultado.avisos });
 }

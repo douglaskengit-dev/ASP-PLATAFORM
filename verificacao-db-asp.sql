@@ -257,6 +257,46 @@ create policy gp_rdos_write on public.gp_rdos for all to authenticated
   using (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'))
   with check (public.gp_perfil_atual_asp() in ('admin','operacoes','gerencia'));
 
+-- ============================================================================
+-- ASP — Código do projeto único (Fase 1, validação da abertura).
+--
+-- O código (NN/INICIAIS/AA, ex.: 37/MG/26) não pode se repetir no sistema,
+-- nem com projetos na lixeira. Compara normalizado: sem espaços e em
+-- maiúsculas — "37/mg/ 26" = "37/MG/26" (mesma regra de
+-- lib/validacao/codigoProjeto.ts; a API já grava normalizado).
+--
+-- Se o banco JÁ tiver códigos repetidos, o índice não é criado (falharia):
+-- sai um NOTICE listando os repetidos e a migração segue. A API continua
+-- barrando repetição nova. Corrija os repetidos (editar o projeto) e rode de
+-- novo — é idempotente.
+-- ============================================================================
+do $$
+declare
+  repetidos text;
+begin
+  if exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_projetos_codigo_norm') then
+    return;
+  end if;
+
+  select string_agg(format('%s (%s projetos)', codigo, qtd), ', ')
+    into repetidos
+  from (
+    select upper(regexp_replace(codigo_projeto, '\s', '', 'g')) as codigo, count(*) as qtd
+    from public.gp_projetos
+    where codigo_projeto is not null
+    group by 1
+    having count(*) > 1
+  ) d;
+
+  if repetidos is not null then
+    raise notice 'Índice de código único NÃO criado — códigos repetidos: %', repetidos;
+  else
+    create unique index uq_gp_projetos_codigo_norm
+      on public.gp_projetos (upper(regexp_replace(codigo_projeto, '\s', '', 'g')))
+      where codigo_projeto is not null;
+  end if;
+end $$;
+
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
 
@@ -279,9 +319,16 @@ with esperado(tabela, coluna) as (values
   ('gp_rdos','dados'), ('gp_rdos','inspecoes'), ('gp_rdos','arquivo_em'),
   ('gp_push_subscriptions','endpoint')
 )
-select e.tabela, e.coluna,
-  case when c.column_name is not null then 'OK' else '*** FALTANDO ***' end as status
-from esperado e
-left join information_schema.columns c
-  on c.table_schema = 'public' and c.table_name = e.tabela and c.column_name = e.coluna
-order by status desc, e.tabela, e.coluna;
+select * from (
+  select e.tabela, e.coluna,
+    case when c.column_name is not null then 'OK' else '*** FALTANDO ***' end as status
+  from esperado e
+  left join information_schema.columns c
+    on c.table_schema = 'public' and c.table_name = e.tabela and c.column_name = e.coluna
+  union all
+  -- Índice do código único do projeto (pode ficar PENDENTE se há repetidos).
+  select 'gp_projetos', 'índice código único',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_projetos_codigo_norm')
+      then 'OK' else 'PENDENTE — códigos duplicados' end
+) r
+order by status desc, tabela, coluna;

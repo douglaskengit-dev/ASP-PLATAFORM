@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
-import { contatoValido, NovoContatoInput } from "@/lib/orgaos/types";
+import { NovoContatoInput } from "@/lib/orgaos/types";
+import { contatosDoCliente } from "@/lib/orgaos/validacao-api";
+import { contatoParaGravar, primeiroErro, temErros, validarContato } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -13,11 +15,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
 
+  // Regras em lib/validacao/cliente.ts: nome/cargo/e-mail obrigatórios,
+  // e-mail válido, nome e e-mail sem repetir dentro do mesmo cliente.
   const body = (await req.json()) as NovoContatoInput;
-  const faltando = contatoValido(body);
-  if (faltando.length > 0) {
+  const resultado = validarContato(body, await contatosDoCliente(params.id));
+  if (temErros(resultado)) {
     return NextResponse.json(
-      { erro: "Campos obrigatórios do contato não preenchidos: " + faltando.join(", ") },
+      { erro: primeiroErro(resultado), erros: resultado.erros, avisos: resultado.avisos },
       { status: 400 }
     );
   }
@@ -35,13 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const { data: contato, error } = await supabase
     .from("gp_orgaos_contatos")
-    .insert({
-      orgao_id: params.id,
-      nome_completo: body.nomeCompleto.trim(),
-      cargo: body.cargo.trim(),
-      telefone: body.telefone?.trim() || null,
-      email: body.email.trim(),
-    })
+    .insert({ orgao_id: params.id, ...contatoParaGravar(body) })
     .select("*")
     .single();
 
@@ -52,5 +50,5 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  return NextResponse.json({ ok: true, contato });
+  return NextResponse.json({ ok: true, contato, avisos: resultado.avisos });
 }
