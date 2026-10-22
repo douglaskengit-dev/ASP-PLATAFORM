@@ -888,12 +888,17 @@ function preencherLaudo(xml: string, cabecalho: string, valores?: string[][]): s
       if (!dados) return;
       const celulas = linha.match(/<w:tc\b[\s\S]*?<\/w:tc>/g);
       if (!celulas) return;
-      let linhaNova = linha;
-      // célula 0 é o nome do parâmetro; as seguintes recebem os valores
-      celulas.slice(1).forEach((cel, j) => {
-        const v = dados[j];
-        if (!v || !textoDe(cel).includes("[dado coletado]")) return;
-        linhaNova = linhaNova.replace(cel, trocarTexto(cel, "[dado coletado]", v));
+      // célula 0 é o nome do parâmetro; as seguintes recebem os valores.
+      // Troca POR POSIÇÃO: células com o mesmo XML (todas "[dado coletado]")
+      // fariam um replace por texto cair na primeira igual — com só o Limite
+      // preenchido, ele iria parar na coluna Incerteza.
+      let k = -1;
+      const linhaNova = linha.replace(/<w:tc\b[\s\S]*?<\/w:tc>/g, (cel) => {
+        k++;
+        if (k === 0) return cel;
+        const v = dados[k - 1];
+        if (!v || !textoDe(cel).includes("[dado coletado]")) return cel;
+        return trocarTexto(cel, "[dado coletado]", v);
       });
       nova = nova.replace(linha, linhaNova);
     });

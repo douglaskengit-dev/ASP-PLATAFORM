@@ -1,0 +1,505 @@
+/** Fase 8 — o RELATÓRIO DE EXECUÇÃO: o que é próprio dele, além das regras
+ * gerais do relatório (relatorio.ts, Fase 4) e da aprovação (aprovacao.ts).
+ * Puro: o formulário (GerarRelatorio), a página da OS e a API usam as mesmas
+ * funções.
+ *
+ *   pH / cloro antes e depois (modal "Valores das coletas e do laudo")
+ *     ⛔ número (pH 0–14, cloro ≥ 0) — rascunho antigo em texto é convertido
+ *     ⚠️ diferente da coleta de fotos · diferente do RDO (mesma OS e
+ *        momento) · cloro abaixo de 0,2 (CVS 6) ou acima do limite do
+ *        procedimento
+ *   Operação
+ *     ⚠️ data fora do período da execução · data sem RDO da OS · dias do
+ *        período sem RDO · equipe do relatório × equipe dos RDOs
+ *   Laudo de laboratório
+ *     ⛔ célula que não é número nem <LQ, ND, Ausente, Presente (P/A só com
+ *        Ausente/Presente) · LD maior que LQ · PDF do laudo ausente ao ENVIAR
+ *        para aprovação (o rascunho pode ser salvo sem ele)
+ *     ⚠️ incerteza maior que o valor · valor fora do limite (e não citado na
+ *        conclusão) · laudo ANTES idêntico ao DEPOIS */
+import { addAviso, addErro, novoResultado, type ResultadoValidacao } from "./resultado";
+import { normalizarNome, normalizarTexto } from "./texto";
+import { dataIsoValida } from "./formatos";
+import { contemDia, textoPeriodoLongo, type Periodo } from "./periodo";
+import { diasSemRdo, textoDiasSemRdo } from "./execucao";
+import { ehLimpezaRobotizada, LAUDO_COLUNAS, LAUDO_PARAMETROS, type DadosRelatorio } from "../asp/relatorio";
+import { numeroBr, valorDoSlot, type RegistroFotosExecucao, type UnidadeCloro } from "../asp/fotos-execucao";
+import { CLORO_MINIMO, type AtividadeRdo, type MembroRdo } from "../asp/rdo";
+
+// ── Números em pt-BR ─────────────────────────────────────────────────────────
+
+/** Número digitado em pt-BR: "7,2", "1.234,5", "0,005". Sem vírgula, um
+ *  ponto é decimal ("7.2", "0.005") — exceto quando separa milhar ("1.500",
+ *  "12.000.000"). Qualquer outro texto → null. */
+export function lerNumeroBr(s: string | null | undefined): number | null {
+  const t = (s || "").trim().replace(/\s+/g, "");
+  if (!t) return null;
+  let norm: string;
+  if (/^[+-]?\d{1,3}(\.\d{3})*(,\d+)?$/.test(t) || /^[+-]?\d+(,\d+)?$/.test(t)) {
+    norm = t.replace(/\./g, "").replace(",", ".");
+    // "0.005" / "7.250": com zero à esquerda o ponto é decimal
+    if (/^[+-]?0\.\d{3}$/.test(t)) norm = t;
+  } else if (/^[+-]?\d*\.\d+$/.test(t)) {
+    norm = t;
+  } else return null;
+  const n = Number(norm);
+  return isFinite(n) ? n : null;
+}
+
+/** 7.25 → "7,25" (sem separador de milhar — é valor de laboratório). */
+export function textoNumeroBr(n: number): string {
+  return String(Math.round(n * 1e6) / 1e6).replace(".", ",");
+}
+
+// ── pH e cloro ───────────────────────────────────────────────────────────────
+
+export const CAMPOS_PH_CLORO = ["phAntes", "cloroAntes", "phDepois", "cloroDepois"] as const;
+export type CampoPhCloro = (typeof CAMPOS_PH_CLORO)[number];
+
+export const ROTULOS_PH_CLORO: Record<CampoPhCloro, string> = {
+  phAntes: "pH antes", cloroAntes: "Cloro livre antes", phDepois: "pH depois", cloroDepois: "Cloro livre depois",
+};
+
+/** Vaga da coleta de fotos de onde vem o valor de cada campo. */
+export const SLOT_PH_CLORO: Record<CampoPhCloro, string> = {
+  phAntes: "agua_antes_ph", cloroAntes: "agua_antes_cloro", phDepois: "agua_depois_ph", cloroDepois: "agua_depois_cloro",
+};
+
+const ehCloro = (k: CampoPhCloro) => k.startsWith("cloro");
+const momentoDe = (k: CampoPhCloro): "antes" | "depois" => (k.endsWith("Antes") ? "antes" : "depois");
+
+/** Valor medido (pH/cloro) aceitando o texto dos rascunhos antigos, que
+ *  traziam a unidade junto: "0,5 mg/L", "0,3 PPM", "pH 7,2". */
+export function lerValorMedido(s: string | null | undefined): number | null {
+  const t = (s || "").trim().replace(/^ph\s*:?\s*/i, "").replace(/\s*(mg\s*\/\s*l|ppm)\.?$/i, "");
+  return lerNumeroBr(t);
+}
+
+/** Rascunho antigo (pH/cloro em texto livre) → número em pt-BR. O que não dá
+ *  para ler fica vazio, com o aviso do valor que se perdeu. */
+export function converterPhCloroLegado(d: Partial<DadosRelatorio>): { d: Partial<DadosRelatorio>; avisos: string[] } {
+  const out: Partial<DadosRelatorio> = { ...d };
+  const avisos: string[] = [];
+  for (const k of CAMPOS_PH_CLORO) {
+    const v = (d[k] || "").trim();
+    if (!v) continue;
+    const n = lerValorMedido(v);
+    if (n === null) {
+      out[k] = "";
+      avisos.push(`${ROTULOS_PH_CLORO[k]}: o valor do rascunho (“${v}”) não é um número — o campo ficou em branco; digite de novo.`);
+    } else out[k] = textoNumeroBr(n);
+  }
+  return { d: out, avisos };
+}
+
+/** Valor do campo para o documento: cloro sai com a unidade do procedimento. */
+export function textoPhCloroDoc(k: CampoPhCloro, v: string | null | undefined, unidade: UnidadeCloro): string {
+  const n = lerValorMedido(v);
+  if (n === null) return (v || "").trim();
+  return ehCloro(k) ? `${textoNumeroBr(n)} ${unidade}` : textoNumeroBr(n);
+}
+
+// ── Laudo de laboratório ─────────────────────────────────────────────────────
+
+/** Fonte dos limites pré-preenchidos (o usuário pode editar a célula). */
+export const FONTE_PORTARIA_888 = "Portaria GM/MS nº 888/2021";
+
+export interface LimitePortaria {
+  /** Igual a LAUDO_PARAMETROS[i]. */
+  parametro: string;
+  /** Texto que vai na coluna "Limite". */
+  limite: string;
+  /** "max" = valor numérico máximo; "pa" = presença/ausência. */
+  tipo: "max" | "pa";
+  /** Como a frase da conclusão chama o limite. */
+  rotulo: string;
+}
+
+/** Limites do padrão de potabilidade — Portaria GM/MS nº 888, de 4 de maio de
+ *  2021 (altera o Anexo XX da Portaria de Consolidação GM/MS nº 5/2017):
+ *   · Cor aparente: VMP 15 uH (uH ≈ mg Pt-Co/L) — padrão organoléptico.
+ *   · Turbidez: VMP 5 uT (uT ≈ NTU) — padrão organoléptico (sistema de
+ *     distribuição / reservatório).
+ *   · Coliformes totais e Escherichia coli: ausência em 100 mL — padrão
+ *     microbiológico.
+ *   · Bactérias heterotróficas: 500 UFC/mL — valor de referência (não é VMP).
+ *  Na mesma ordem de LAUDO_PARAMETROS. CONFIRMAR com o responsável técnico. */
+export const LIMITES_PORTARIA_888: LimitePortaria[] = [
+  { parametro: LAUDO_PARAMETROS[0], limite: "15", tipo: "max", rotulo: "valor máximo permitido" },
+  { parametro: LAUDO_PARAMETROS[1], limite: "5", tipo: "max", rotulo: "valor máximo permitido" },
+  { parametro: LAUDO_PARAMETROS[2], limite: "Ausente", tipo: "pa", rotulo: "ausência em 100 mL" },
+  { parametro: LAUDO_PARAMETROS[3], limite: "Ausente", tipo: "pa", rotulo: "ausência em 100 mL" },
+  { parametro: LAUDO_PARAMETROS[4], limite: "500", tipo: "max", rotulo: "valor de referência" },
+];
+
+export const COL_VALOR = 0, COL_INCERTEZA = 1, COL_LQ = 2, COL_LD = 3, COL_LIMITE = 4;
+
+/** "Turbidez (NTU)" → { nome: "Turbidez", unidade: "NTU", pa: false }. */
+export function infoParametro(i: number): { nome: string; unidade: string; pa: boolean } {
+  const p = LAUDO_PARAMETROS[i] || "";
+  const m = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(p);
+  const nome = (m ? m[1] : p).trim();
+  const unidade = m ? m[2].trim() : "";
+  const pa = unidade.toUpperCase() === "P/A";
+  return { nome, unidade: pa ? "" : unidade, pa };
+}
+
+export const TOKENS_LAUDO = ["<LQ", "ND", "Ausente", "Presente"] as const;
+export type TokenLaudo = (typeof TOKENS_LAUDO)[number];
+
+export type CelulaLaudo =
+  | { tipo: "vazio" }
+  | { tipo: "numero"; n: number }
+  | { tipo: "token"; token: TokenLaudo }
+  | { tipo: "invalido" };
+
+function tokenDe(s: string): TokenLaudo | null {
+  const k = normalizarTexto(s).replace(/[\s.]/g, "");
+  if (k === "<lq") return "<LQ";
+  if (k === "nd") return "ND";
+  if (k === "ausente" || k === "ausencia") return "Ausente";
+  if (k === "presente" || k === "presenca") return "Presente";
+  return null;
+}
+
+/** Uma célula do laudo: número (pt-BR) ou <LQ, ND, Ausente, Presente
+ *  (sem diferença de caixa e acento). */
+export function lerCelulaLaudo(s: string | null | undefined): CelulaLaudo {
+  const t = (s || "").trim();
+  if (!t) return { tipo: "vazio" };
+  const tok = tokenDe(t);
+  if (tok) return { tipo: "token", token: tok };
+  const n = lerNumeroBr(t);
+  return n === null ? { tipo: "invalido" } : { tipo: "numero", n };
+}
+
+/** Texto da célula como fica no documento: "ausente" → "Ausente", "<lq" →
+ *  "<LQ", "7.2" → "7,2". Inválido fica como foi digitado. */
+export function normalizarCelulaLaudo(s: string | null | undefined): string {
+  const c = lerCelulaLaudo(s);
+  if (c.tipo === "token") return c.token;
+  if (c.tipo === "numero") return textoNumeroBr(c.n);
+  return (s || "").trim();
+}
+
+/** Grade completa (parâmetros × colunas), sem buraco. */
+export function gradeLaudo(g: string[][] | null | undefined): string[][] {
+  return LAUDO_PARAMETROS.map((_, i) => LAUDO_COLUNAS.map((__, j) => (g?.[i]?.[j] ?? "") + ""));
+}
+
+/** Coluna "Limite" vazia → o limite da Portaria 888. O resto fica. */
+export function preencherLimitesPadrao(g: string[][] | null | undefined): string[][] {
+  const out = gradeLaudo(g);
+  LIMITES_PORTARIA_888.forEach((l, i) => { if (!out[i][COL_LIMITE].trim()) out[i][COL_LIMITE] = l.limite; });
+  return out;
+}
+
+export type ChaveLaudo = "laudoAntes" | "laudoDepois";
+export const MOMENTO_LAUDO: Record<ChaveLaudo, string> = {
+  laudoAntes: "na amostra coletada antes da limpeza", laudoDepois: "na amostra coletada após a limpeza",
+};
+const TITULO_LAUDO: Record<ChaveLaudo, string> = { laudoAntes: "Laudo antes", laudoDepois: "Laudo depois" };
+
+export interface ForaDoLimite {
+  chave: ChaveLaudo;
+  linha: number;
+  nome: string;
+  unidade: string;
+  pa: boolean;
+  valor: string;
+  limite: string;
+  /** O limite da célula é o da Portaria 888 (a frase cita a portaria). */
+  daPortaria: boolean;
+}
+
+/** Parâmetros com valor fora do limite da própria linha: número acima do
+ *  limite numérico; P/A com "Presente". */
+export function foraDoLimite(chave: ChaveLaudo, g: string[][] | null | undefined): ForaDoLimite[] {
+  if (!g) return [];
+  const grade = gradeLaudo(g);
+  const out: ForaDoLimite[] = [];
+  grade.forEach((linha, i) => {
+    const info = infoParametro(i);
+    const v = lerCelulaLaudo(linha[COL_VALOR]);
+    const lim = lerCelulaLaudo(linha[COL_LIMITE]);
+    let fora = false;
+    if (info.pa) fora = v.tipo === "token" && v.token === "Presente";
+    else fora = v.tipo === "numero" && lim.tipo === "numero" && v.n > lim.n;
+    if (!fora) return;
+    const portaria = LIMITES_PORTARIA_888[i];
+    out.push({
+      chave, linha: i, nome: info.nome, unidade: info.unidade, pa: info.pa,
+      valor: normalizarCelulaLaudo(linha[COL_VALOR]), limite: normalizarCelulaLaudo(linha[COL_LIMITE]),
+      daPortaria: !!portaria && normalizarCelulaLaudo(portaria.limite) === normalizarCelulaLaudo(linha[COL_LIMITE] || portaria.limite),
+    });
+  });
+  return out;
+}
+
+/** Frase para a Conclusão, por parâmetro fora do limite. */
+export function fraseForaDoLimite(f: ForaDoLimite): string {
+  const onde = MOMENTO_LAUDO[f.chave];
+  const fonte = f.daPortaria ? ` (${FONTE_PORTARIA_888})` : " (limite informado no laudo)";
+  if (f.pa) {
+    return `O parâmetro ${f.nome} apresentou resultado Presente ${onde}, em desacordo com o padrão de ausência em 100 mL${fonte}.`;
+  }
+  const u = f.unidade ? ` ${f.unidade}` : "";
+  const rot = LIMITES_PORTARIA_888[f.linha]?.rotulo || "valor máximo permitido";
+  return `O parâmetro ${f.nome} apresentou ${f.valor}${u} ${onde}, acima do ${rot} de ${f.limite}${u}${fonte}.`;
+}
+
+/** Texto do HTML do editor (sem tags), para procurar o nome do parâmetro. */
+function textoDoHtml(html: string | null | undefined): string {
+  return (html || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+}
+
+/** Parâmetros fora do limite que a Conclusão não cita pelo nome. */
+export function foraNaoCitados(itens: ForaDoLimite[], conclusao: string | null | undefined): ForaDoLimite[] {
+  const texto = normalizarTexto(textoDoHtml(conclusao));
+  return itens.filter((f) => !texto.includes(normalizarTexto(f.nome)));
+}
+
+/** Parágrafos a acrescentar na Conclusão (HTML do editor), sem repetir
+ *  frase que já está lá. */
+export function sugestaoConclusao(itens: ForaDoLimite[], conclusao: string | null | undefined): string {
+  const atual = normalizarTexto(textoDoHtml(conclusao));
+  return itens.map(fraseForaDoLimite)
+    .filter((f) => !atual.includes(normalizarTexto(f)))
+    .map((f) => `<p>${f.replace(/</g, "&lt;")}</p>`).join("");
+}
+
+/** ANTES idêntico ao DEPOIS: todas as células preenchidas (fora a coluna
+ *  Limite, que já vem preenchida) iguais, e ao menos uma preenchida. */
+export function laudosIdenticos(a: string[][] | null | undefined, b: string[][] | null | undefined): boolean {
+  if (!a || !b) return false;
+  const ga = gradeLaudo(a), gb = gradeLaudo(b);
+  let preenchidas = 0;
+  for (let i = 0; i < ga.length; i++) {
+    for (let j = 0; j < COL_LIMITE; j++) {
+      const x = normalizarCelulaLaudo(ga[i][j]), y = normalizarCelulaLaudo(gb[i][j]);
+      if (x !== y) return false;
+      if (x) preenchidas++;
+    }
+  }
+  return preenchidas > 0;
+}
+
+/** ⛔/⚠️ de uma tabela de laudo. Chaves: "laudoAntes.<linha>.<coluna>" para
+ *  a célula e "laudoAntes.<linha>" para a linha. */
+export function validarLaudo(chave: ChaveLaudo, g: string[][] | null | undefined, r: ResultadoValidacao = novoResultado()): ResultadoValidacao {
+  if (!g) return r;
+  const grade = gradeLaudo(g);
+  grade.forEach((linha, i) => {
+    const info = infoParametro(i);
+    const cel = linha.map(lerCelulaLaudo);
+    cel.forEach((c, j) => {
+      const campo = `${chave}.${i}.${j}`;
+      const onde = `${TITULO_LAUDO[chave]} — ${info.nome} (${LAUDO_COLUNAS[j]})`;
+      if (c.tipo === "invalido") {
+        addErro(r, campo, `${onde}: “${linha[j].trim()}” não é um número nem <LQ, ND, Ausente ou Presente.`);
+        return;
+      }
+      if (c.tipo === "numero" && c.n < 0) { addErro(r, campo, `${onde}: não pode ser negativo.`); return; }
+      const pa = c.tipo === "token" && (c.token === "Ausente" || c.token === "Presente");
+      if (info.pa && (j === COL_VALOR || j === COL_LIMITE) && c.tipo !== "vazio" && !pa) {
+        addErro(r, campo, `${onde}: parâmetro de presença/ausência — use Ausente ou Presente.`);
+      } else if (pa && !info.pa) {
+        addErro(r, campo, `${onde}: Ausente/Presente só vale para os parâmetros P/A (coliformes totais, E. coli).`);
+      } else if (pa && info.pa && j !== COL_VALOR && j !== COL_LIMITE) {
+        addErro(r, campo, `${onde}: Ausente/Presente só nas colunas Valor e Limite.`);
+      }
+    });
+    const lq = cel[COL_LQ], ld = cel[COL_LD], v = cel[COL_VALOR], inc = cel[COL_INCERTEZA];
+    if (lq.tipo === "numero" && ld.tipo === "numero" && ld.n > lq.n) {
+      addErro(r, `${chave}.${i}.${COL_LD}`, `${TITULO_LAUDO[chave]} — ${info.nome}: o LD (${textoNumeroBr(ld.n)}) não pode ser maior que o LQ (${textoNumeroBr(lq.n)}).`);
+    }
+    if (inc.tipo === "numero" && v.tipo === "numero" && inc.n > v.n) {
+      addAviso(r, `${chave}.${i}`, `${TITULO_LAUDO[chave]} — ${info.nome}: a incerteza (${textoNumeroBr(inc.n)}) é maior que o valor (${textoNumeroBr(v.n)}) — confira.`);
+    }
+  });
+  for (const f of foraDoLimite(chave, grade)) {
+    const u = f.unidade ? ` ${f.unidade}` : "";
+    addAviso(r, `${chave}.${f.linha}`, f.pa
+      ? `${TITULO_LAUDO[chave]} — ${f.nome}: Presente — fora do padrão (ausência em 100 mL).`
+      : `${TITULO_LAUDO[chave]} — ${f.nome}: ${f.valor}${u} — acima do limite (${f.limite}${u}).`);
+  }
+  return r;
+}
+
+// ── PDF do laudo ─────────────────────────────────────────────────────────────
+
+/** PDF do laudo do laboratório, referenciado no snapshot do relatório. */
+export interface LaudoPdf {
+  /** relatorios/<OS>/laudo-<uuid>.pdf */
+  caminho: string;
+  /** SHA-256 dos bytes (conferido no servidor). */
+  hash: string;
+  nome: string;
+  enviado_em: string;
+  enviado_por?: string | null;
+  tamanho?: number;
+}
+
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+export function caminhoLaudoValido(caminho: string | null | undefined, inspecaoId: string): boolean {
+  if (!caminho || caminho.includes("..")) return false;
+  const p = `relatorios/${inspecaoId}/laudo-`;
+  return caminho.startsWith(p) && new RegExp(`^${UUID}\\.pdf$`, "i").test(caminho.slice(p.length));
+}
+
+/** O procedimento tem o bloco do laudo — o mesmo critério que mostra a
+ *  tabela do laudo no formulário (limpeza robotizada, POP 001). */
+export function procedimentoUsaLaudo(proc: { limpeza_robotizada?: unknown; codigo?: unknown } | null | undefined): boolean {
+  return ehLimpezaRobotizada(proc);
+}
+
+export const MSG_LAUDO_OBRIGATORIO = "Anexe o PDF do laudo do laboratório — sem ele o relatório de execução não pode ser enviado para aprovação.";
+
+// ── Validação do formulário ──────────────────────────────────────────────────
+
+/** RDO como a página/API o tem (só o que importa aqui). */
+export interface RdoResumo {
+  data: string;
+  inspecoes?: string[] | null;
+  dados?: { equipe?: MembroRdo[] | null; atividades?: AtividadeRdo[] | null } | null;
+}
+
+export interface ContextoRelatorioExecucao {
+  inspecaoId: string;
+  hoje: string;
+  unidadeCloro: UnidadeCloro;
+  limiteCloro: number;
+  /** Procedimento com o bloco do laudo (limpeza robotizada). */
+  usaLaudo: boolean;
+  /** Envio para aprovação: sem o PDF do laudo é ⛔ (no rascunho, ⚠️). */
+  exigirLaudoPdf?: boolean;
+  coleta?: RegistroFotosExecucao | null;
+  /** RDOs que cobrem a OS; null/undefined = não carregados (sem avisos). */
+  rdos?: RdoResumo[] | null;
+  periodo?: Periodo | null;
+  /** Nomes da equipe marcada no relatório. undefined = não checa. */
+  equipeRelatorio?: string[];
+}
+
+function dataBr(iso: string): string {
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+}
+
+/** Valores de pH/cloro dos RDOs para esta OS e momento. */
+export function valoresRdo(rdos: RdoResumo[] | null | undefined, inspecaoId: string, k: CampoPhCloro): { data: string; valor: number }[] {
+  const out: { data: string; valor: number }[] = [];
+  for (const rdo of rdos || []) {
+    const umaSo = (rdo.inspecoes || []).length <= 1;
+    for (const a of rdo.dados?.atividades || []) {
+      if (a?.momento !== momentoDe(k)) continue;
+      if (a.inspecaoId ? a.inspecaoId !== inspecaoId : !umaSo) continue;
+      const v = ehCloro(k) ? a.cloro : a.ph;
+      if (v != null && isFinite(Number(v))) out.push({ data: rdo.data, valor: Number(v) });
+    }
+  }
+  return out;
+}
+
+/** Mesma pessoa? Nome normalizado igual, ou um contém todas as partes do
+ *  outro ("João Silva" × "João da Silva Santos"). */
+export function mesmaPessoa(a: string, b: string): boolean {
+  const x = normalizarNome(a), y = normalizarNome(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const [menor, maior] = x.length <= y.length ? [x, y] : [y, x];
+  const partes = new Set(maior.split(" "));
+  const m = menor.split(" ");
+  return m.length >= 2 && m.every((p) => partes.has(p));
+}
+
+/** Equipe do relatório × equipe dos RDOs do período. */
+export function cruzarEquipe(relatorio: string[], rdos: RdoResumo[]): { soNoRelatorio: string[]; soNosRdos: string[] } {
+  const nosRdos: string[] = [];
+  for (const r of rdos) for (const m of r.dados?.equipe || []) {
+    const nome = (m?.nome || "").trim();
+    if (nome && !nosRdos.some((n) => mesmaPessoa(n, nome))) nosRdos.push(nome);
+  }
+  return {
+    soNoRelatorio: relatorio.filter((n) => n.trim() && !nosRdos.some((x) => mesmaPessoa(x, n))),
+    soNosRdos: nosRdos.filter((n) => !relatorio.some((x) => mesmaPessoa(x, n))),
+  };
+}
+
+export interface SnapshotExecucao {
+  d: Partial<DadosRelatorio>;
+  laudoPdf?: LaudoPdf | null;
+}
+
+export function validarRelatorioExecucao(s: SnapshotExecucao, ctx: ContextoRelatorioExecucao): ResultadoValidacao {
+  const r = novoResultado();
+  const d = s.d || {};
+  const u = ctx.unidadeCloro;
+
+  // pH e cloro
+  for (const k of CAMPOS_PH_CLORO) {
+    const bruto = (d[k] || "").trim();
+    if (!bruto) continue;
+    const n = lerValorMedido(bruto);
+    if (n === null) { addErro(r, k, "Digite um número (ex.: 7,2)."); continue; }
+    if (!ehCloro(k) && (n < 0 || n > 14)) { addErro(r, k, "pH fora da escala — use um valor de 0 a 14."); continue; }
+    if (ehCloro(k) && n < 0) { addErro(r, k, "O cloro não pode ser negativo."); continue; }
+    const un = ehCloro(k) ? ` ${u}` : "";
+    const c = ctx.coleta ? valorDoSlot(ctx.coleta, SLOT_PH_CLORO[k]) : null;
+    if (c != null && Math.abs(c - n) > 1e-9) addAviso(r, k, `Diferente da coleta de fotos (${numeroBr(c)}${un}).`);
+    const doRdo = valoresRdo(ctx.rdos, ctx.inspecaoId, k);
+    if (doRdo.length && !doRdo.some((x) => Math.abs(x.valor - n) < 1e-9)) {
+      addAviso(r, k, `Diferente do RDO — aqui ${textoNumeroBr(n)}${un}; ${doRdo.map((x) => `RDO de ${dataBr(x.data)}: ${textoNumeroBr(x.valor)}${un}`).join("; ")}.`);
+    }
+    if (ehCloro(k)) {
+      if (n < CLORO_MINIMO) addAviso(r, k, `Abaixo do mínimo de 0,2 ${u} de cloro livre (comunicado CVS 6).`);
+      else if (n > ctx.limiteCloro) addAviso(r, k, `Acima do limite de aviso do procedimento (${textoNumeroBr(ctx.limiteCloro)} ${u}) — confira o valor.`);
+    }
+  }
+
+  // Operação: data × período × RDOs
+  const dop = (d.dataOperacao || "").trim();
+  if (dop && dataIsoValida(dop) && ctx.periodo && !contemDia(ctx.periodo, dop)) {
+    addAviso(r, "dataOperacao", `Fora do período da execução (${textoPeriodoLongo(ctx.periodo)}).`);
+  }
+  if (ctx.rdos) {
+    const datas = ctx.rdos.map((x) => (x.data || "").slice(0, 10));
+    if (dop && dataIsoValida(dop) && !datas.includes(dop)) {
+      addAviso(r, "dataOperacao", `Nenhum RDO desta OS em ${dataBr(dop)}.`);
+    }
+    const faltam = diasSemRdo(ctx.periodo || null, datas, ctx.hoje, ctx.hoje);
+    if (faltam.length) addAviso(r, "rdos", `Dias do período da execução sem RDO desta OS: ${textoDiasSemRdo(faltam)}.`);
+    if (ctx.equipeRelatorio) {
+      const doPeriodo = ctx.periodo ? ctx.rdos.filter((x) => contemDia(ctx.periodo!, (x.data || "").slice(0, 10))) : ctx.rdos;
+      if (doPeriodo.length) {
+        const { soNoRelatorio, soNosRdos } = cruzarEquipe(ctx.equipeRelatorio, doPeriodo);
+        if (soNoRelatorio.length) addAviso(r, "equipe", `Na equipe do relatório, mas em nenhum RDO do período: ${soNoRelatorio.join(", ")}.`);
+        if (soNosRdos.length) addAviso(r, "equipe", `Nos RDOs do período, mas fora da equipe do relatório: ${soNosRdos.join(", ")}.`);
+      }
+    }
+  }
+
+  // Laudo
+  const temLaudo = (g?: string[][]) => !!g && g.some((l) => (l || []).some((c, j) => j !== COL_LIMITE && (c || "").trim()));
+  validarLaudo("laudoAntes", d.laudoAntes, r);
+  validarLaudo("laudoDepois", d.laudoDepois, r);
+  if (laudosIdenticos(d.laudoAntes, d.laudoDepois)) {
+    addAviso(r, "laudoDepois", "O laudo DEPOIS da limpeza é idêntico ao de ANTES — confira se não foi copiado.");
+  }
+  const fora = [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)];
+  const naoCitados = foraNaoCitados(fora, d.conclusao);
+  if (naoCitados.length) {
+    const nomes = Array.from(new Set(naoCitados.map((f) => f.nome)));
+    addAviso(r, "conclusao", `Parâmetro(s) fora do limite não citado(s) na Conclusão: ${nomes.join(", ")}. Use “Sugerir texto na conclusão”.`);
+  }
+  if (ctx.usaLaudo && !s.laudoPdf?.caminho) {
+    if (ctx.exigirLaudoPdf) addErro(r, "laudoPdf", MSG_LAUDO_OBRIGATORIO);
+    else addAviso(r, "laudoPdf", `${temLaudo(d.laudoAntes) || temLaudo(d.laudoDepois) ? "" : "Sem laudo. "}O PDF do laudo do laboratório é obrigatório para enviar para aprovação (o rascunho pode ser salvo sem ele).`);
+  }
+  return r;
+}
+
+export const ROTULOS_RELATORIO_EXECUCAO: Record<string, string> = {
+  phAntes: "pH antes", cloroAntes: "Cloro livre antes", phDepois: "pH depois", cloroDepois: "Cloro livre depois",
+  rdos: "RDOs", equipe: "Equipe de trabalho", laudoPdf: "PDF do laudo", conclusao: "Conclusão",
+};

@@ -11,8 +11,29 @@ import { tituloFase } from "@/lib/asp/fases";
 import { dataBr, numeroRdo } from "@/lib/asp/rdo";
 
 interface Coleta { id: string; tipo: string; pdf_path: string | null; criado_em: string }
-interface Relatorio { id: string; tipo: string; versao: number; status: string; arquivo_path: string | null; assinado_path?: string | null; enviado_em: string | null }
-interface Inspecao { id: string; identificacao: string; fase: number; coletas: Coleta[]; relatorios: Relatorio[] }
+interface LaudoArq { caminho: string; nome?: string; enviado_em?: string | null }
+interface Relatorio {
+  id: string; tipo: string; versao: number; status: string; arquivo_path: string | null; assinado_path?: string | null; enviado_em: string | null;
+  /** PDF do laudo do laboratório (relatório de execução, Fase 8). */
+  laudo?: LaudoArq | null;
+}
+/** Laudo da OS (o mesmo PDF pode estar em várias versões do relatório):
+ *  baixa pelo relatório mais recente que o usa. */
+interface LaudoOS { relId: string; nome: string; enviado_em: string | null; versoes: number[] }
+
+/** Laudos distintos (por arquivo) dos relatórios da OS. */
+function laudosDa(relatorios: Relatorio[]): LaudoOS[] {
+  const m = new Map<string, LaudoOS>();
+  for (const r of [...relatorios].sort((a, b) => b.versao - a.versao)) {
+    const l = r.laudo;
+    if (!l?.caminho) continue;
+    const atual = m.get(l.caminho);
+    if (atual) atual.versoes.push(r.versao);
+    else m.set(l.caminho, { relId: r.id, nome: l.nome || "laudo.pdf", enviado_em: l.enviado_em || null, versoes: [r.versao] });
+  }
+  return Array.from(m.values());
+}
+interface Inspecao { id: string; identificacao: string; fase: number; coletas: Coleta[]; relatorios: Relatorio[]; laudos?: LaudoOS[] }
 /** RDO com arquivo gerado; `inspecoes` já vem com os nomes. */
 interface Rdo { id: string; numero: number; data: string; arquivo_em: string | null; inspecoes: string[] }
 interface Projeto {
@@ -24,7 +45,7 @@ interface Projeto {
   rdos?: Rdo[];
 }
 
-type FiltroTipo = "todos" | "coletas" | "relatorio_inspecao" | "relatorio_execucao" | "rdo";
+type FiltroTipo = "todos" | "coletas" | "relatorio_inspecao" | "relatorio_execucao" | "laudo" | "rdo";
 
 function fmt(iso?: string | null) {
   if (!iso) return "";
@@ -77,9 +98,10 @@ export default function ArquivosPage() {
             relatorios: i.relatorios.filter((r) =>
               tipo === "todos" ? true : tipo === "relatorio_inspecao" ? r.tipo === "inspecao" : tipo === "relatorio_execucao" ? r.tipo === "execucao" : false
             ),
+            laudos: tipo === "todos" || tipo === "laudo" ? laudosDa(i.relatorios) : [],
           }))
           .filter((i) => {
-            const temArquivo = i.coletas.length > 0 || i.relatorios.length > 0;
+            const temArquivo = i.coletas.length > 0 || i.relatorios.length > 0 || i.laudos.length > 0;
             if (!temArquivo) return false;
             if (!termo) return true;
             const alvo = `${p.codigo_projeto || ""} ${p.pedido_compra || ""} ${p.cliente?.razao_social || ""} ${i.identificacao}`.toLowerCase();
@@ -98,16 +120,17 @@ export default function ArquivosPage() {
   function limpar(s?: string | null) {
     return (s || "").replace(/[\\/:*?"<>|]/g, "-").trim() || "sem-nome";
   }
-  function caminhoArquivo(p: Projeto, i: Inspecao, item: any, kind: "coleta" | "relatorio") {
+  function caminhoArquivo(p: Projeto, i: Inspecao, item: any, kind: "coleta" | "relatorio" | "laudo") {
     const cli = limpar(p.cliente?.razao_social || "Sem cliente");
     const proj = limpar(p.codigo_projeto || p.pedido_compra || "Projeto");
     const insp = limpar(i.identificacao);
     let nome: string;
     if (kind === "coleta") nome = `Coleta-${limpar(item.tipo)}-${(item.criado_em || "").slice(0, 10)}.pdf`;
+    else if (kind === "laudo") nome = `Laudo-${limpar(String(item.nome || "laudo").replace(/\.pdf$/i, ""))}.pdf`;
     else { const ext = !item.assinado_path && String(item.arquivo_path || "").endsWith(".docx") ? "docx" : "pdf"; nome = `Relatorio-${limpar(item.tipo)}-v${item.versao}${item.assinado_path ? "-assinado" : ""}.${ext}`; }
     let base: string;
     if (estrutura === "proj/insp") base = `${proj}/${insp}`;
-    else if (estrutura === "cli/proj/insp/tipo") base = `${cli}/${proj}/${insp}/${kind === "coleta" ? "Coletas" : "Relatorios"}`;
+    else if (estrutura === "cli/proj/insp/tipo") base = `${cli}/${proj}/${insp}/${kind === "coleta" ? "Coletas" : kind === "laudo" ? "Laudos" : "Relatorios"}`;
     else base = `${cli}/${proj}/${insp}`;
     return `${base}/${nome}`;
   }
@@ -143,6 +166,14 @@ export default function ArquivosPage() {
             const resp = await fetch(`/api/coletas/${c.id}/download`);
             if (!resp.ok) continue;
             zip.file(caminhoArquivo(p, i, c, "coleta"), await resp.blob());
+            count++;
+          }
+          for (const l of i.laudos || []) {
+            const dt = l.enviado_em ? new Date(l.enviado_em).getTime() : 0;
+            if (apenasNovos && dt <= corte) continue;
+            const resp = await fetch(`/api/relatorios/${l.relId}/download?arquivo=laudo`);
+            if (!resp.ok) continue;
+            zip.file(caminhoArquivo(p, i, l, "laudo"), await resp.blob());
             count++;
           }
           for (const r of i.relatorios) {
@@ -197,6 +228,7 @@ export default function ArquivosPage() {
             <option value="coletas">Coletas</option>
             <option value="relatorio_inspecao">Relatório de inspeção</option>
             <option value="relatorio_execucao">Relatório de execução</option>
+            <option value="laudo">Laudos (laboratório)</option>
             <option value="rdo">RDO (diário de operação)</option>
           </select>
         </div>
@@ -274,6 +306,19 @@ export default function ArquivosPage() {
                       </span>
                     </div>
                   ))}
+                  {(i.laudos || []).length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      <span className="detalhe" style={{ margin: 0, fontWeight: 600 }}>Laudos</span>
+                      {(i.laudos || []).map((l) => (
+                        <div key={l.relId} className="downloads" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                          <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere" }}>
+                            🧪 {l.nome} · relatório de execução v{l.versoes.sort((a, b) => a - b).join(", v")}{l.enviado_em ? ` · ${fmt(l.enviado_em)}` : ""}
+                          </span>
+                          <a className="btn-dl btn-sec" href={`/api/relatorios/${l.relId}/download?arquivo=laudo`} target="_blank" rel="noopener noreferrer">⬇ Laudo</a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

@@ -10,6 +10,9 @@ export interface ImagemPreparada {
   arquivo: File;
   extensao: "png" | "jpeg";
   hash: string;
+  /** SHA-256 do arquivo escolhido, antes da conversão (= `hash` quando já
+   *  era PNG/JPEG). Compara com o original guardado na coleta de fotos. */
+  hashOriginal: string;
   /** Foi convertida (ex.: "WebP → PNG"). */
   convertida?: string;
 }
@@ -59,7 +62,8 @@ export async function prepararImagemRelatorio(original: Blob, nome: string): Pro
   if (fmt === "png" || fmt === "jpeg") {
     const arquivo = original instanceof File && original.name === nome
       ? original : new File([bytes], nome, { type: `image/${fmt}` });
-    return { arquivo, extensao: fmt, hash: await sha256Hex(bytes) };
+    const h = await sha256Hex(bytes);
+    return { arquivo, extensao: fmt, hash: h, hashOriginal: h };
   }
   if (fmt === "webp" || fmt === "gif" || fmt === "bmp" || fmt === "heic") {
     const destino = fmt === "heic" ? "image/jpeg" : "image/png";
@@ -78,7 +82,7 @@ export async function prepararImagemRelatorio(original: Blob, nome: string): Pro
     }
     return {
       arquivo: new File([final], `${base}.${ext === "png" ? "png" : "jpg"}`, { type: destino }),
-      extensao: ext, hash: await sha256Hex(final), convertida: `${fmt.toUpperCase()} → ${ext.toUpperCase()}`,
+      extensao: ext, hash: await sha256Hex(final), hashOriginal: await sha256Hex(bytes), convertida: `${fmt.toUpperCase()} → ${ext.toUpperCase()}`,
     };
   }
   return { erro: `“${nome}” não é uma imagem reconhecida. Envie PNG ou JPEG (WebP, GIF e HEIC são convertidos quando possível).` };

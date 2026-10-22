@@ -65,7 +65,9 @@ import {
   PERFIS_TROCAR_ASSINADO, resumoValidacao, ROTULOS_REPROVACAO, validarReprovacao,
   aguaPotavelDesmarcada, avisosExecucao, CHECKLIST_PADRAO, diasSemRdo, execucaoAtiva, nomesEquipamentosProcedimento,
   periodoDe, periodoMudou, periodosSobrepoem, textoDiasSemRdo, textoPeriodo, equipamentosFaltando,
+  MSG_LAUDO_OBRIGATORIO, procedimentoUsaLaudo, type LaudoPdf,
 } from "@/lib/validacao";
+import { arquivosDaOS, enviarLaudoPdf, examinarLaudoLocal } from "@/lib/asp/laudo-pdf";
 
 interface Projeto {
   id: string;
@@ -141,8 +143,10 @@ interface Agendamento {
 interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null }
 /** Arquivo do projeto, classificado para exibição agrupada. */
 interface ArquivoProjeto {
-  grupo: "inspecao" | "execucao" | "medicao" | "rdo";
+  grupo: "inspecao" | "execucao" | "laudo" | "medicao" | "rdo";
   inspecao: string; rotulo: string; data?: string | null; href: string;
+  /** Laudo: caminho do PDF (o mesmo arquivo aparece uma vez só). */
+  chave?: string;
 }
 
 // Fase 1 é nível-projeto (abertura); as demais correm na inspeção.
@@ -280,6 +284,8 @@ export default function InspecaoDetalhePage() {
    *  mostra a versão que será criada. O tipo é sempre o da fase da OS. */
   const [envioExterno, setEnvioExterno] = useState<{
     arquivo: File; formato: FormatoRelatorio | null; erro: string | null; chave: string;
+    /** Fase 8: PDF do laudo (relatório de execução com laudo) já no storage. */
+    laudo?: LaudoPdf | null; erroLaudo?: string | null; enviandoLaudo?: boolean;
   } | null>(null);
   const [verificandoArquivo, setVerificandoArquivo] = useState(false);
   const relatorioInputRef = useRef<HTMLInputElement>(null);
@@ -421,6 +427,12 @@ export default function InspecaoDetalhePage() {
               rotulo: `Relatório v${r.versao} — versão assinada`, data: r.enviado_em,
               href: `/api/relatorios/${r.id}/download?arquivo=assinado` });
           }
+          // Fase 8: o PDF do laudo, uma vez por arquivo (várias versões podem usar o mesmo).
+          if (r.laudo?.caminho && !lista.some((a) => a.grupo === "laudo" && a.chave === r.laudo.caminho)) {
+            lista.push({ grupo: "laudo", inspecao: i.identificacao, chave: r.laudo.caminho,
+              rotulo: `${r.laudo.nome || "Laudo"} — relatório de execução v${r.versao}`, data: r.laudo.enviado_em || r.enviado_em,
+              href: `/api/relatorios/${r.id}/download?arquivo=laudo` });
+          }
         }
       }
       // RDOs são do projeto (um por dia, podem cobrir várias inspeções).
@@ -442,6 +454,8 @@ export default function InspecaoDetalhePage() {
   const hojeExec = hojeBrasil();
   /** Procedimento da OS no Catálogo (equipamentos previstos, água potável). */
   const procOS = procedimentos.find((p) => p.codigo === insp?.procedimento) || null;
+  /** Arquivos da OS que o PDF do laudo não pode repetir (SHA-256). */
+  const arquivosOS = useMemo(() => arquivosDaOS(relatorios, coletas), [relatorios, coletas]);
   /** Nomes previstos no procedimento; undefined enquanto o Catálogo não chega. */
   const equipProcOS = useMemo(
     () => (procedimentos.length && catalogoEquipCompleto.length
@@ -467,6 +481,9 @@ export default function InspecaoDetalhePage() {
   /** O tipo do relatório é o da fase: inspeção até a 5, execução da 6 em
    *  diante (a API recusa o outro). */
   const bloco: TipoRelatorio = tipoDaFase(insp?.fase ?? 2);
+  /** Fase 8: relatório de execução de procedimento com laudo — o PDF do
+   *  laudo do laboratório é exigido para enviar para aprovação. */
+  const exigeLaudoExecucao = bloco === "execucao" && procedimentoUsaLaudo(procOS);
   const refsRelatorio = useMemo<RelatorioRef[]>(
     () => relatorios.map((r) => ({ id: r.id, tipo: r.tipo, versao: r.versao, status: r.status, arquivoHash: r.arquivo_hash || null, assinadoHash: r.assinado_hash || null })),
     [relatorios]
@@ -1156,6 +1173,10 @@ export default function InspecaoDetalhePage() {
   /** Submete um rascunho já anexado à aprovação da Gerência. Confirma a
    *  versão que ele terá e a versão em aprovação que será substituída. */
   async function enviarParaAprovacao(rel: Relatorio) {
+    if (rel.tipo === "execucao" && exigeLaudoExecucao && !rel.dados?.laudoPdf?.caminho) {
+      setErroRelatorio(`${MSG_LAUDO_OBRIGATORIO} Clique em Editar, anexe o PDF no bloco do laudo e salve o rascunho de novo.`);
+      return;
+    }
     const plano = planejarEnvio(refsRelatorio, rel.tipo, rel.id);
     const linhas = [`Enviar o rascunho do relatório de ${ROTULO_TIPO[rel.tipo as TipoRelatorio] || rel.tipo} para aprovação como v${plano.versao}?`];
     plano.substitui.forEach((x) => linhas.push(`⚠️ A versão v${x.versao} em aprovação será substituída (sai da fila da Gerência).`));
@@ -1181,7 +1202,7 @@ export default function InspecaoDetalhePage() {
    *  decidida pela API; o tipo é o da fase. Devolve o erro em vez de só
    *  mostrar — o formulário de geração e o diálogo de envio o exibem. */
   async function enviarRelatorio(arquivo: File, opcoes: {
-    rascunho?: boolean; dados?: any; formato?: FormatoRelatorio | null; chave?: string;
+    rascunho?: boolean; dados?: any; formato?: FormatoRelatorio | null; chave?: string; laudoPdf?: LaudoPdf | null;
   } = {}): Promise<{ ok: boolean; erro?: string }> {
     setEnviandoRelatorio(true);
     setErroRelatorio(null);
@@ -1202,7 +1223,8 @@ export default function InspecaoDetalhePage() {
       if (up.error) return { ok: false, erro: `Falha ao enviar o arquivo: ${up.error.message}` };
 
       const res = await enviarJson("/api/relatorios", "POST",
-        { inspecaoId: id, tipo: bloco, arquivoPath: dUrl.caminho, rascunho: !!opcoes.rascunho, dados: opcoes.dados || null },
+        { inspecaoId: id, tipo: bloco, arquivoPath: dUrl.caminho, rascunho: !!opcoes.rascunho, dados: opcoes.dados || null,
+          ...(opcoes.laudoPdf ? { laudoPdf: opcoes.laudoPdf } : {}) },
         "Relatório", opcoes.chave || novoId());
       if (res.queued) { alert("Sem conexão — relatório salvo offline e registrado ao reconectar."); return { ok: true }; }
       if (!res.ok) return { ok: false, erro: res.data?.erro || "Falha ao enviar o relatório." };
@@ -1236,9 +1258,31 @@ export default function InspecaoDetalhePage() {
     }
   }
 
+  /** Fase 8: PDF do laudo no envio de fora (relatório de execução com
+   *  laudo): confere e sobe já; a API confere de novo ao registrar. */
+  async function escolherLaudoExterno(f: File | undefined | null) {
+    if (!f) return;
+    setEnvioExterno((e) => (e ? { ...e, enviandoLaudo: true, erroLaudo: null } : e));
+    try {
+      const ex = await examinarLaudoLocal(f, arquivosOS);
+      if (ex.erro || !ex.hash) { setEnvioExterno((e) => (e ? { ...e, erroLaudo: ex.erro || "Arquivo inválido." } : e)); return; }
+      const laudo = await enviarLaudoPdf(id, f, ex.hash);
+      setEnvioExterno((e) => (e ? { ...e, laudo, erroLaudo: null } : e));
+    } catch (e) {
+      const m = e instanceof Error ? e.message : "Falha ao enviar o laudo.";
+      setEnvioExterno((x) => (x ? { ...x, erroLaudo: m } : x));
+    } finally {
+      setEnvioExterno((e) => (e ? { ...e, enviandoLaudo: false } : e));
+    }
+  }
+
   async function confirmarEnvioExterno() {
     if (!envioExterno || envioExterno.erro) return;
-    const r = await enviarRelatorio(envioExterno.arquivo, { formato: envioExterno.formato, chave: envioExterno.chave });
+    if (exigeLaudoExecucao && !envioExterno.laudo) {
+      setEnvioExterno((e) => (e ? { ...e, erroLaudo: MSG_LAUDO_OBRIGATORIO } : e));
+      return;
+    }
+    const r = await enviarRelatorio(envioExterno.arquivo, { formato: envioExterno.formato, chave: envioExterno.chave, laudoPdf: envioExterno.laudo || null });
     if (r.ok) setEnvioExterno(null);
     else setEnvioExterno((e) => (e ? { ...e, erro: r.erro || "Falha ao enviar." } : e));
   }
@@ -2050,6 +2094,9 @@ export default function InspecaoDetalhePage() {
                     </div>
                   )}
                   {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {formatarMotivo(r.motivo_categoria, r.motivo_ajuste)}</div>}
+                  {r.status === "rascunho" && r.tipo === "execucao" && exigeLaudoExecucao && !r.dados?.laudoPdf?.caminho && (
+                    <div className="val-msg val-aviso" style={{ margin: 0 }}>⚠️ Sem o PDF do laudo do laboratório — obrigatório para enviar para aprovação.</div>
+                  )}
                   {r.enviado_em && (
                     <div className="detalhe" style={{ margin: 0 }}>
                       Enviado{r.enviado_por ? ` por ${nomeDe(r.enviado_por)}` : ""} em {formatar(r.enviado_em)}
@@ -2071,7 +2118,8 @@ export default function InspecaoDetalhePage() {
                   {podeRelatorio && r.status === "rascunho" && (
                     <>
                       <button className="btn-dl" disabled={enviandoRelatorio}
-                        title="Submeter este rascunho à Gerência"
+                        title={r.tipo === "execucao" && exigeLaudoExecucao && !r.dados?.laudoPdf?.caminho
+                          ? "Falta o PDF do laudo do laboratório — clique em Editar e anexe" : "Submeter este rascunho à Gerência"}
                         onClick={() => enviarParaAprovacao(r)}>
                         {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
                       </button>
@@ -2104,6 +2152,10 @@ export default function InspecaoDetalhePage() {
                   )}
                   <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download`} target="_blank" rel="noopener noreferrer"
                     onClick={() => marcarBaixado(r.id)}>{r.status === "assinado" ? "Baixar original" : "Baixar"}</a>
+                  {r.dados?.laudoPdf?.caminho && (
+                    <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download?arquivo=laudo`} target="_blank" rel="noopener noreferrer"
+                      title={`PDF do laudo do laboratório: ${r.dados.laudoPdf.nome || ""}`}>🧪 Laudo</a>
+                  )}
                 </span>
               </div>
             ))}
@@ -2118,11 +2170,12 @@ export default function InspecaoDetalhePage() {
         {arquivos.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum arquivo anexado neste projeto.</p>
         ) : (
-          (["inspecao", "execucao", "rdo", "medicao"] as const).map((grupo) => {
+          (["inspecao", "execucao", "laudo", "rdo", "medicao"] as const).map((grupo) => {
             const itens = arquivos.filter((a) => a.grupo === grupo);
             if (itens.length === 0) return null;
             const titulo = grupo === "inspecao" ? "Relatórios de inspeção"
               : grupo === "execucao" ? "Relatórios de execução"
+              : grupo === "laudo" ? "Laudos (laboratório)"
               : grupo === "rdo" ? "RDOs — diário de operação" : "Medições";
             return (
               <div key={grupo} style={{ marginTop: 14 }}>
@@ -2296,6 +2349,8 @@ export default function InspecaoDetalhePage() {
           codigoEsperado={codigoRelatorio(codigoProjetoOS, revisaoRelatorio)}
           podeEditarRevisao={podeEditarRevisao({ perfil, funcao })}
           equipeAgendada={(agDoBloco?.equipe || []).map((m) => m.id).filter(Boolean)}
+          // Fase 8: RDOs, período da execução e arquivos da OS (laudo).
+          execucao={bloco === "execucao" ? { rdos: rdosInsp, periodo: periodoExec, arquivosOS } : undefined}
           onSalvar={async (blob, snapshot) => {
             const arquivo = new File([blob], `Relatorio-${insp?.identificacao || "OS"}.docx`, {
               type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -2332,9 +2387,24 @@ export default function InspecaoDetalhePage() {
                 <p className="detalhe" style={{ margin: 0 }}>O rascunho v{rascunhoBloco.versao} continua como rascunho.</p>
               )}
               {envioExterno.erro && <p className="val-msg val-erro" style={{ margin: 0 }}>⛔ {envioExterno.erro}</p>}
+              {!envioExterno.erro && exigeLaudoExecucao && (
+                <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }} htmlFor="laudo-externo">
+                    PDF do laudo do laboratório * <span className="detalhe">(obrigatório no relatório de execução deste procedimento)</span>
+                  </label>
+                  {envioExterno.laudo ? (
+                    <p className="detalhe" style={{ margin: 0, overflowWrap: "anywhere" }}>📎 {envioExterno.laudo.nome}</p>
+                  ) : null}
+                  <input id="laudo-externo" type="file" accept="application/pdf,.pdf" disabled={!!envioExterno.enviandoLaudo || enviandoRelatorio}
+                    onChange={(e) => { escolherLaudoExterno(e.target.files?.[0]); e.target.value = ""; }} />
+                  {envioExterno.enviandoLaudo && <span className="detalhe" style={{ display: "block" }}>Conferindo e enviando o laudo…</span>}
+                  {envioExterno.erroLaudo && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {envioExterno.erroLaudo}</p>}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <button className="btn-azul btn-sec" onClick={() => setEnvioExterno(null)} disabled={enviandoRelatorio}>Cancelar</button>
-                <button className="btn-azul" onClick={confirmarEnvioExterno} disabled={!!envioExterno.erro || enviandoRelatorio}>
+                <button className="btn-azul" onClick={confirmarEnvioExterno}
+                  disabled={!!envioExterno.erro || enviandoRelatorio || !!envioExterno.enviandoLaudo || (exigeLaudoExecucao && !envioExterno.laudo)}>
                   {enviandoRelatorio ? "Enviando…" : `Enviar como v${plano.versao}`}
                 </button>
               </div>

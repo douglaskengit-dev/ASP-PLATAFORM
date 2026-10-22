@@ -18,6 +18,7 @@ import { addAviso, addErro, novoResultado, ResultadoValidacao } from "./resultad
 import { dataIsoValida } from "./formatos";
 import { normalizarEspacos, normalizarTexto } from "./texto";
 import type { DadosRelatorio } from "../asp/relatorio";
+import type { LaudoPdf } from "./relatorioExecucao";
 
 export type TipoRelatorio = "inspecao" | "execucao";
 
@@ -214,6 +215,12 @@ export interface FotoSalva {
   fonte?: string;
   /** Veio da coleta de fotos da execução (rótulo do item). */
   coleta?: string;
+  /** SHA-256 do arquivo ESCOLHIDO (antes de converter WebP/HEIC…) — upload
+   *  manual. Igual a `hash` quando já era PNG/JPEG. */
+  hashOriginal?: string;
+  /** SHA-256 guardado na coleta de fotos da execução (do original, antes da
+   *  compressão) — fotos pré-carregadas. A API o relê do banco. */
+  hashColeta?: string;
 }
 
 /** Tópico das fotos das seções extras do procedimento (âncora extra-<i>):
@@ -260,6 +267,8 @@ export interface SnapshotRelatorio {
    *  só troca o que a MEDIÇÃO mudou desde então, não o que foi digitado. */
   medicaoBase?: Record<string, string>;
   fotos?: FotoSalva[];
+  /** PDF do laudo do laboratório (relatório de execução, Fase 8). */
+  laudoPdf?: LaudoPdf | null;
 }
 
 /** Campos que vêm do cadastro (só leitura no formulário). */
@@ -431,13 +440,15 @@ export function validarRelatorio(s: SnapshotRelatorio, ctx: ContextoRelatorio): 
     const campo = `fotos.${i}`;
     const nome = f.coleta || f.nome || `foto ${i + 1}`;
     if (f.extensao !== "png" && f.extensao !== "jpeg") addErro(r, campo, `“${nome}”: só PNG ou JPEG entram no documento.`);
-    if (f.hash) {
-      const j = porHash.get(f.hash);
-      if (j !== undefined) {
-        const outra = fotos[j];
-        addErro(r, campo, `“${nome}” é a mesma imagem de “${outra.coleta || outra.nome}” (${nomeTopico(outra.topico)}). Remova uma delas.`);
-      } else porHash.set(f.hash, i);
-    }
+    // A mesma imagem: o arquivo do relatório, o original escolhido (antes da
+    // conversão) ou o original da coleta de fotos da execução (antes da
+    // compressão) — a foto pré-carregada e o mesmo original anexado à mão.
+    const chaves = Array.from(new Set([f.hash, f.hashOriginal, f.hashColeta].filter((h): h is string => !!h)));
+    const j = chaves.map((h) => porHash.get(h)).find((x) => x !== undefined);
+    if (j !== undefined) {
+      const outra = fotos[j];
+      addErro(r, campo, `“${nome}” é a mesma imagem de “${outra.coleta || outra.nome}” (${nomeTopico(outra.topico)}). Remova uma delas.`);
+    } else chaves.forEach((h) => porHash.set(h, i));
     if (!f.vaga) {
       const leg = normalizarTexto(f.legenda);
       if (!leg) addErro(r, campo, `Escreva a legenda de “${nome}”.`);

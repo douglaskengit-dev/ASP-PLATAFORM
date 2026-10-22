@@ -16,13 +16,14 @@ export const runtime = "nodejs";
  *  pela função: o navegador fala direto com o storage, e a API só registra o
  *  caminho depois — e confere o arquivo lá (formato, tamanho, SHA-256).
  *
- *  Dois usos:
+ *  Usos:
  *   · relatório  { inspecaoId, tipo, ext } → relatorios/<OS>/<tipo>-<uuid>.<ext>
  *     O caminho NÃO leva a versão: ela só é decidida no registro (POST
  *     /api/relatorios), então nome e versão nunca divergem.
  *   · foto de rascunho { inspecaoId, foto: { hash, ext } } →
  *     relatorios/<OS>/rascunho-fotos/<sha256>.<ext>. Mesmo conteúdo = mesmo
- *     caminho: se já existe, responde { existe: true } e não sobe de novo. */
+ *     caminho: se já existe, responde { existe: true } e não sobe de novo.
+ *   · PDF do laudo { inspecaoId, laudo: true } → relatorios/<OS>/laudo-<uuid>.pdf */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
@@ -57,6 +58,18 @@ export async function POST(req: NextRequest) {
   const info = await infoOSRelatorio(inspecaoId);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
   const storage = getSupabaseAdmin().storage.from(BUCKET);
+
+  // PDF do laudo do laboratório (relatório de execução, Fase 8) →
+  // relatorios/<OS>/laudo-<uuid>.pdf. O registro (salvar o rascunho ou o
+  // envio de fora) confere o arquivo no storage: PDF, tamanho e SHA-256.
+  if (b?.laudo) {
+    const erroL = erroTipoNaFase("execucao", info.fase);
+    if (erroL) return NextResponse.json({ erro: erroL }, { status: 400 });
+    const caminhoL = `relatorios/${inspecaoId}/laudo-${randomUUID()}.pdf`;
+    const { data, error } = await storage.createSignedUploadUrl(caminhoL);
+    if (error || !data) return NextResponse.json({ erro: error?.message || "Falha ao preparar o envio do laudo." }, { status: 500 });
+    return NextResponse.json({ ok: true, caminho: caminhoL, token: data.token });
+  }
 
   if (b?.foto) {
     const hash = String(b.foto.hash || "").toLowerCase();
