@@ -7,6 +7,8 @@ import {
 } from "@/lib/asp/agendamento-api";
 import { periodoMudou, primeiroErro, ROTULOS_AGENDAMENTO, temErros, validarAgendamento } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Edita um agendamento ativo. Campos ausentes no corpo ficam como estão.
@@ -31,6 +33,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const { data: atual } = await getSupabaseAdmin().from("gp_agendamentos").select("*").eq("id", params.id).maybeSingle();
   if (!atual) return NextResponse.json({ erro: "Agendamento não encontrado." }, { status: 404 });
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(atual.inspecao_id);
+  if (travada) return travada;
   if (atual.substituido_em) {
     return NextResponse.json({ erro: "Este agendamento já foi remarcado — edite o agendamento atual." }, { status: 409 });
   }
@@ -143,6 +148,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   }
   const supabase = getSupabaseRouteClient();
   const { data: atual } = await supabase.from("gp_agendamentos").select("inspecao_id, a_definir, substituido_em").eq("id", params.id).maybeSingle();
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(atual?.inspecao_id);
+  if (travada) return travada;
   const { error } = await supabase.from("gp_agendamentos").delete().eq("id", params.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   if (atual?.a_definir && !atual.substituido_em) await resolverAvisoADefinir(atual.inspecao_id);

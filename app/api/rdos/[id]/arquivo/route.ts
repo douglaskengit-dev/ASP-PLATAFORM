@@ -3,6 +3,7 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { uploadArquivo, removerArquivos, DOCX_MIME } from "@/lib/processos/arquivos";
 import { caminhoRdo } from "@/lib/asp/rdo";
 import { PERFIS_RDO } from "@/lib/asp/rdo-api";
+import { garantirOsAberta, osDoRdo } from "@/lib/asp/os-encerrada";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { data: rdo } = await supabase.from("gp_rdos")
     .select("id, projeto_id, numero, data, arquivo_path").eq("id", params.id).is("excluido_em", null).maybeSingle();
   if (!rdo) return NextResponse.json({ erro: "RDO não encontrado." }, { status: 404 });
+  // ⛔ Gerar de novo o .docx é alterar o RDO: travado se cobre OS encerrada.
+  const travada = await garantirOsAberta(await osDoRdo(params.id), { rdo: true });
+  if (travada) return travada;
 
   const form = await req.formData();
   const f = form.get("arquivo");

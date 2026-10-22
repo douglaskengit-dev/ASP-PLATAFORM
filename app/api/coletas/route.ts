@@ -11,6 +11,8 @@ import {
   DadosColeta, medicaoPreenchida, normalizarEspacos, primeiroErro, ROTULOS_COLETA, temErros, TipoColeta,
 } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Salva uma coleta da OS. Aceita JSON (só dados) ou multipart/form-data
@@ -51,6 +53,10 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, coleta: existente, repetido: true });
   }
+
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(inspecaoId);
+  if (travada) return travada;
 
   const cx = await contextoColeta(inspecaoId);
   if (!cx) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });

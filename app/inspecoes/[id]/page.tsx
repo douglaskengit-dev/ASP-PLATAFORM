@@ -36,7 +36,14 @@
  * O card da execução avisa checklist de segurança, equipamento do
  * procedimento fora da lista (um clique adiciona) e equipe sem Coordenador/
  * Engenheiro; 6 → 7 confirma segurança e água potável; 7 → 8 lista os dias
- * do período sem RDO. Regras em lib/validacao/agendamento.ts + execucao.ts. */
+ * do período sem RDO. Regras em lib/validacao/agendamento.ts + execucao.ts.
+ *
+ * Fase 10 (encerramento): o card de ações mostra as pendências (cada uma com
+ * link para a seção), "Encerrar OS", "Encerrar manualmente" (Admin/Gerência,
+ * com justificativa) e "Reabrir OS"; a seção "Entregas ao cliente" registra
+ * o que foi entregue, a quem e quando. OS encerrada = só consulta: os botões
+ * de edição somem/desabilitam aqui e a API recusa (409). Regras em
+ * lib/validacao/encerramento.ts. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -76,6 +83,9 @@ import {
   MSG_LAUDO_OBRIGATORIO, procedimentoUsaLaudo, type LaudoPdf,
 } from "@/lib/validacao";
 import { arquivosDaOS, enviarLaudoPdf, examinarLaudoLocal } from "@/lib/asp/laudo-pdf";
+import EncerramentoOS from "@/app/components/EncerramentoOS";
+import EntregasCliente from "@/app/components/EntregasCliente";
+import { textoEncerrada } from "@/lib/validacao";
 
 interface Projeto {
   id: string;
@@ -99,6 +109,11 @@ interface Inspecao {
   status_relatorio_execucao: string;
   /** Quando TAG/procedimento/tanque mudaram (aviso da aprovação). */
   cadastro_atualizado_em?: string | null;
+  /** Fase 10: encerrada (data) e por quem; manual = ignorou pendências. */
+  encerrada_em?: string | null;
+  encerrada_por?: string | null;
+  encerramento_manual?: boolean;
+  encerramento_justificativa?: string | null;
   projeto: Projeto | null;
 }
 interface Historico {
@@ -359,6 +374,9 @@ export default function InspecaoDetalhePage() {
   const [pedidoNovoRdo, setPedidoNovoRdo] = useState(0);
   /** Lista completa das 10 fases no cabeçalho (recolhida por padrão). */
   const [verFases, setVerFases] = useState(false);
+  /** Sobe a cada recarga: o card do encerramento e as entregas reconsultam. */
+  const [versaoDados, setVersaoDados] = useState(0);
+  const [resumoEntregas, setResumoEntregas] = useState("");
   /** Card "Ações desta fase" — recebe o foco depois de aplicar uma ação. */
   const cardAcoesRef = useRef<HTMLDivElement>(null);
 
@@ -377,6 +395,7 @@ export default function InspecaoDetalhePage() {
         if (d.usuarioId) setUsuarioId(d.usuarioId);
         setVisualizados(d.visualizados || []);
         setFotosExecucaoEm(d.fotosExecucaoEm || null);
+        setVersaoDados((v) => v + 1);
       })
       .finally(() => setCarregando(false));
   }, [id]);
@@ -557,8 +576,10 @@ export default function InspecaoDetalhePage() {
     () => validarReprovacao({ categoria, descricao: motivo, anterior: reprovacaoAnterior, tipo: relAval?.tipo || null }),
     [categoria, motivo, reprovacaoAnterior, relAval?.tipo]
   );
-  const podeAssinar = PERFIS_ASSINADO.includes(perfil || "");
-  const podeTrocarAssinado = PERFIS_TROCAR_ASSINADO.includes(perfil || "");
+  /** Fase 10: OS encerrada = só consulta (a API recusa as gravações com 409). */
+  const encerrada = !!insp?.encerrada_em;
+  const podeAssinar = PERFIS_ASSINADO.includes(perfil || "") && !encerrada;
+  const podeTrocarAssinado = PERFIS_TROCAR_ASSINADO.includes(perfil || "") && !encerrada;
   /** Marca na hora (o servidor grava no download) — o aviso some sem recarregar. */
   const marcarBaixado = (relId: string) => setVisualizados((v) => (v.includes(relId) ? v : [...v, relId]));
 
@@ -609,11 +630,11 @@ export default function InspecaoDetalhePage() {
       ...faixaVolume(volume),
     };
   }, [insp, coletas, agDoBloco, bloco, revisaoRelatorio, codigoProjetoOS, contatoCliente, procedimentos]);
-  const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
-  const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
-  const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "");
-  const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "");
-  const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao });
+  const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
+  const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "") && !encerrada;
+  const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
+  const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "") && !encerrada;
+  const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao }) && !encerrada;
 
   // Reprovação que trouxe a inspeção de volta para esta fase (o histórico
   // vem do mais recente para o mais antigo): abre Relatórios e Histórico e
@@ -1659,6 +1680,23 @@ export default function InspecaoDetalhePage() {
 
       <AvisoCliente clienteId={insp.projeto?.cliente?.id} />
 
+      {encerrada && (
+        <div className="card" role="status" style={{ marginTop: 12, borderLeft: "4px solid #16a34a", display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <span aria-hidden="true" style={{ fontSize: 20 }}>🔒</span>
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ color: "var(--texto)" }}>
+              {textoEncerrada(insp.encerrada_em, nomeDe(insp.encerrada_por) || null, insp.encerramento_manual)}
+            </strong>
+            {insp.encerramento_manual && insp.encerramento_justificativa && (
+              <p className="detalhe" style={{ margin: "2px 0 0" }}>Justificativa: {insp.encerramento_justificativa}</p>
+            )}
+            <p className="detalhe" style={{ margin: "2px 0 0" }}>
+              Só consulta: coletas, fotos, RDOs, relatórios, agendamentos, checklist e cadastro não podem ser alterados. Downloads e entregas ao cliente seguem liberados.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div style={{ minWidth: 0, flex: "1 1 260px" }}>
@@ -1796,12 +1834,9 @@ export default function InspecaoDetalhePage() {
             {reprovacao.autor_perfil ? ` (por ${reprovacao.autor_perfil.nome_completo || reprovacao.autor_perfil.email}, ${formatar(reprovacao.data_autenticacao || reprovacao.criado_em)})` : ""} — ajuste o relatório.
           </p>
         )}
-        {insp.fase >= ULTIMA_FASE && !relatorios.some((r) => r.tipo === "execucao" && r.status === "assinado") && (
-          <p className="val-msg val-aviso" style={{ margin: "0 0 10px" }}>
-            ⚠️ OS encerrada sem a versão assinada do relatório de execução — envie-a em Relatórios (“Enviar versão assinada”).
-          </p>
-        )}
-        {acoes.length === 0 ? (
+        {insp.fase >= ULTIMA_FASE ? (
+          <EncerramentoOS inspecaoId={id} perfil={perfil} versao={versaoDados} onMudou={carregar} />
+        ) : acoes.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>
             {insp.fase >= ULTIMA_FASE ? "OS encerrada."
               : perfil && !perfilAtuaNaFase(perfil, insp.fase) ? `Fase com ${def?.area || "outra área"} — você está em modo consulta.`
@@ -2009,6 +2044,7 @@ export default function InspecaoDetalhePage() {
         aberta={secoes.aberta("checklist")} onAlternar={() => secoes.alternar("checklist")}
         resumo={resumoChecklist}>
         <ChecklistEquipamentos
+          key={encerrada ? "ro" : "rw"}
           inspecaoId={id}
           etapa={bloco}
           procedimento={insp.procedimento}
@@ -2025,7 +2061,7 @@ export default function InspecaoDetalhePage() {
         <SecaoRecolhivel id="fotos" titulo="Coleta de fotos da execução" style={{ marginTop: 16 }}
           aberta={secoes.aberta("fotos")} onAlternar={() => secoes.alternar("fotos")}
           resumo={resumoFotos}>
-          <ColetaFotosExecucao inspecaoId={id} onMudar={setFotosExec} embutido
+          <ColetaFotosExecucao key={encerrada ? "ro" : "rw"} inspecaoId={id} onMudar={setFotosExec} embutido
             onLocais={setFotosLocais} onErro={setErroFotos} aguaPotavel={!!procOS?.agua_potavel}
             cloroUnidade={cloroOS.unidade} cloroLimiteAviso={cloroOS.limite} periodoExecucao={periodoExec} />
         </SecaoRecolhivel>
@@ -2052,7 +2088,7 @@ export default function InspecaoDetalhePage() {
           <Rdos projetoId={insp.projeto.id} inspecaoId={id}
             codigoProjeto={insp.projeto.codigo_projeto || insp.projeto.pedido_compra}
             cliente={insp.projeto.cliente?.razao_social} clienteId={insp.projeto.cliente?.id}
-            podeEditar={podeColeta} embutido pedidoNovo={pedidoNovoRdo}
+            podeEditar={podeColeta} somenteLeitura={encerrada} embutido pedidoNovo={pedidoNovoRdo}
             onMudar={setRdosInsp} onErro={setErroRdos} />
         </SecaoRecolhivel>
       )}
@@ -2180,6 +2216,15 @@ export default function InspecaoDetalhePage() {
           </div>
         )}
       </SecaoRecolhivel>
+
+      {/* Fase 10: entregas ao cliente (vale também com a OS encerrada). */}
+      {insp.fase >= ULTIMA_FASE && (
+        <SecaoRecolhivel id="entregas" titulo="Entregas ao cliente" style={{ marginTop: 16 }}
+          aberta={secoes.aberta("entregas")} onAlternar={() => secoes.alternar("entregas")}
+          resumo={resumoEntregas}>
+          <EntregasCliente inspecaoId={id} perfil={perfil} versao={versaoDados} onResumo={setResumoEntregas} />
+        </SecaoRecolhivel>
+      )}
 
       {/* Arquivos do projeto inteiro, para consulta sem sair da inspeção. */}
       <SecaoRecolhivel id="arquivos" titulo={`Arquivos do projeto (${arquivos.length})`} style={{ marginTop: 16 }}

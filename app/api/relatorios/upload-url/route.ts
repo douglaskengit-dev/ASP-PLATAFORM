@@ -7,6 +7,8 @@ import { infoOSRelatorio, PERFIS_RELATORIO } from "@/lib/asp/relatorio-api";
 import { ehUuid } from "@/lib/asp/coleta-api";
 import { erroEnvioAssinado, erroTipoNaFase, pastaFotosRascunho } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Gera uma URL assinada para o navegador enviar o arquivo DIRETO ao storage.
@@ -38,6 +40,8 @@ export async function POST(req: NextRequest) {
     const { data: rel } = await getSupabaseAdmin().from("gp_relatorios")
       .select("id, inspecao_id, tipo, status, excluido_em").eq("id", relId).maybeSingle();
     if (!rel || (rel as any).excluido_em) return NextResponse.json({ erro: "Relatório não encontrado." }, { status: 404 });
+    const travadaA = await garantirOsAberta((rel as any).inspecao_id);
+    if (travadaA) return travadaA;
     const infoA = await infoOSRelatorio((rel as any).inspecao_id);
     if (!infoA) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
     const erroA = erroEnvioAssinado({
@@ -55,6 +59,9 @@ export async function POST(req: NextRequest) {
   }
 
   const inspecaoId = String(b?.inspecaoId || "");
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(inspecaoId);
+  if (travada) return travada;
   const info = await infoOSRelatorio(inspecaoId);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
   const storage = getSupabaseAdmin().storage.from(BUCKET);

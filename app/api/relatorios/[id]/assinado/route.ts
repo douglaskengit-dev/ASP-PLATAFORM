@@ -9,6 +9,8 @@ import {
   caminhoAssinadoValido, descreverRelatorio, erroEnvioAssinado, RELATORIO_MAX_BYTES, ROTULO_TIPO, type TipoRelatorio,
 } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Registra a VERSÃO ASSINADA de um relatório aprovado (Fase 5/9 em diante).
@@ -46,6 +48,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (feito) return NextResponse.json({ ok: true, relatorio: rel, repetido: true });
   }
 
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(rel.inspecao_id);
+  if (travada) return travada;
   const info = await infoOSRelatorio(rel.inspecao_id);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
   const caminhoOk = caminhoAssinadoValido(caminho, info.id, rel.tipo);

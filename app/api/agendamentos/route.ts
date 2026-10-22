@@ -9,6 +9,8 @@ import {
   validarAgendamento,
 } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Lista agendamentos ATIVOS (não substituídos por uma remarcação) — para o
@@ -59,6 +61,9 @@ export async function POST(req: NextRequest) {
   if (!body?.inspecaoId) {
     return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   }
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(body.inspecaoId);
+  if (travada) return travada;
   const dados = limparDados(body);
 
   const { ctx, info } = await contextoAgendamento({ inspecaoId: body.inspecaoId, dataVisita: dados.dataVisita, dataFim: dados.dataFim });

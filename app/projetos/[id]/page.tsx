@@ -19,7 +19,7 @@ import { resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import { periodoDe, textoPeriodoLongo } from "@/lib/validacao/periodo";
 import {
-  identificacaoRepetida, mesclar, novoResultado, ResultadoValidacao, ROTULOS_OS, temErros, validarOS,
+  dataBrCompleta, identificacaoRepetida, mesclar, novoResultado, ResultadoValidacao, ROTULOS_OS, temErros, validarOS,
 } from "@/lib/validacao";
 
 interface Cliente {
@@ -37,12 +37,16 @@ interface Projeto {
   responsavel_projeto: string | null;
   data_abertura: string;
   cliente: Cliente | null;
+  /** Fase 10: todas as OSs ativas encerradas (gravado pela API). */
+  concluido_em?: string | null;
 }
 interface Inspecao {
   id: string;
   identificacao: string;
   fase: number;
   ferramenta_coleta: string;
+  /** Fase 10: data do encerramento (null = aberta). */
+  encerrada_em?: string | null;
   /** Cadastro do tanque: dimensões, capacidade e material. */
   tanque?: Tanque | null;
   agendamentos?: { data_visita: string | null; data_fim?: string | null; hora: string | null; tipo: string; a_definir?: boolean; substituido_em?: string | null }[];
@@ -262,7 +266,15 @@ export default function ProjetoDetalhePage() {
 
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <h2 style={{ marginTop: 0, marginBottom: 0 }}>{projeto.codigo_projeto || projeto.pedido_compra || "Projeto"}</h2>
+          <h2 style={{ marginTop: 0, marginBottom: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>{projeto.codigo_projeto || projeto.pedido_compra || "Projeto"}</span>
+            {projeto.concluido_em && (
+              <span className="fu-badge" style={{ background: "#16a34a", color: "#fff", fontSize: 12 }}
+                title="Todas as OSs ativas do projeto foram encerradas">
+                ✓ Concluído em {dataBrCompleta(projeto.concluido_em)}
+              </span>
+            )}
+          </h2>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn-azul btn-sec" onClick={abrirEdicao}>✎ Editar projeto</button>
             {podeExcluir && (
@@ -329,7 +341,9 @@ export default function ProjetoDetalhePage() {
                 <Link href={`/inspecoes/${i.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
                   <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, paddingRight: podeExcluir ? 28 : 0 }}>
                     <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
-                    <span className="detalhe" style={{ margin: 0 }}>Fase {i.fase} · {tituloFase(i.fase)}</span>
+                    <span className="detalhe" style={{ margin: 0 }}>
+                      {i.encerrada_em ? <strong style={{ color: "#16a34a" }}>🔒 Encerrada em {dataBrCompleta(i.encerrada_em)}</strong> : <>Fase {i.fase} · {tituloFase(i.fase)}</>}
+                    </span>
                   </div>
                   {i.tanque && <span className="detalhe" style={{ margin: "4px 0 0" }}>🛢 {resumoTanque(i.tanque)}</span>}
                   {data && <span className="detalhe" style={{ margin: "4px 0 0" }}>📅 Agendada: {data}</span>}
@@ -343,7 +357,7 @@ export default function ProjetoDetalhePage() {
                     <div className="fu-barra" style={{ width: `${pct}%` }} />
                   </div>
                 </Link>
-                {podeExcluir && (
+                {podeExcluir && !i.encerrada_em && (
                   <button className="fu-icone-btn lixeira" title="Excluir OS (lixeira)"
                     onClick={() => excluirInspecao(i.id)}
                     style={{ position: "absolute", top: 12, right: 12 }}>🗑</button>

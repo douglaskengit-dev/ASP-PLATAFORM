@@ -13,7 +13,7 @@ import { tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
 import { hojeBrasil } from "@/lib/validacao";
 
 interface Cliente { id: string; razao_social: string }
-interface InspecaoResumo { id: string; fase: number }
+interface InspecaoResumo { id: string; fase: number; encerrada_em?: string | null }
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
@@ -23,19 +23,23 @@ interface Projeto {
   cliente: Cliente | null;
   inspecoes: InspecaoResumo[];
   inspecoes_total: number;
+  /** Fase 10: todas as OSs ativas encerradas. */
+  concluido_em?: string | null;
 }
 
 const FASES_INSPECAO = [2, 3, 4, 5, 6, 7, 8, 9, 10];
-type Status = "" | "andamento" | "aprovacao" | "execucao" | "encerrado";
+type Status = "" | "andamento" | "aprovacao" | "execucao" | "encerramento" | "concluido";
 
-function statusProjeto(insp: InspecaoResumo[]): Exclude<Status, ""> {
-  if (insp.length > 0 && insp.every((i) => i.fase >= ULTIMA_FASE)) return "encerrado";
+/** Concluído = todas as OSs ativas encerradas (concluido_em, Fase 10). */
+function statusProjeto(insp: InspecaoResumo[], concluidoEm?: string | null): Exclude<Status, ""> {
+  if (concluidoEm) return "concluido";
+  if (insp.length > 0 && insp.every((i) => i.fase >= ULTIMA_FASE)) return "encerramento";
   if (insp.some((i) => i.fase === 5 || i.fase === 9)) return "aprovacao";
   if (insp.some((i) => i.fase >= 6 && i.fase <= 9)) return "execucao";
   return "andamento";
 }
 const ROTULO_STATUS: Record<Exclude<Status, "">, string> = {
-  andamento: "Em andamento", aprovacao: "Aguardando aprovação", execucao: "Em execução", encerrado: "Encerrado",
+  andamento: "Em andamento", aprovacao: "Aguardando aprovação", execucao: "Em execução", encerramento: "Em encerramento", concluido: "Concluído",
 };
 
 const FILTROS_VAZIOS = { cliente: "", de: "", ate: "", status: "" as Status };
@@ -125,7 +129,7 @@ export default function DashboardPage() {
     if (f.cliente && p.cliente?.id !== f.cliente) return false;
     if (f.de && (p.data_abertura || "") < f.de) return false;
     if (f.ate && (p.data_abertura || "") > f.ate) return false;
-    if (f.status && statusProjeto(p.inspecoes) !== f.status) return false;
+    if (f.status && statusProjeto(p.inspecoes, p.concluido_em) !== f.status) return false;
     return true;
   }), [projetos, f]);
 
@@ -133,10 +137,10 @@ export default function DashboardPage() {
 
   const k = useMemo(() => {
     const total = inspecoes.length;
-    const andamento = inspecoes.filter((i) => i.fase < ULTIMA_FASE).length;
+    const andamento = inspecoes.filter((i) => !i.encerrada_em).length;
     const aprovacao = inspecoes.filter((i) => i.fase === 5 || i.fase === 9).length;
     const execucao = inspecoes.filter((i) => i.fase >= 6 && i.fase <= 9).length;
-    const encerradas = inspecoes.filter((i) => i.fase >= ULTIMA_FASE).length;
+    const encerradas = inspecoes.filter((i) => !!i.encerrada_em).length;
     const coleta = inspecoes.filter((i) => i.fase === 3).length;
     const media = total ? inspecoes.reduce((a, i) => a + i.fase, 0) / total : 1;
     const progresso = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
@@ -145,8 +149,8 @@ export default function DashboardPage() {
   }, [inspecoes]);
 
   const statusCount = useMemo(() => {
-    const c = { andamento: 0, aprovacao: 0, execucao: 0, encerrado: 0 };
-    projetosFiltrados.forEach((p) => { c[statusProjeto(p.inspecoes)]++; });
+    const c = { andamento: 0, aprovacao: 0, execucao: 0, encerramento: 0, concluido: 0 };
+    projetosFiltrados.forEach((p) => { c[statusProjeto(p.inspecoes, p.concluido_em)]++; });
     return c;
   }, [projetosFiltrados]);
 
@@ -193,7 +197,8 @@ export default function DashboardPage() {
             <option value="andamento">Em andamento</option>
             <option value="aprovacao">Aguardando aprovação</option>
             <option value="execucao">Em execução</option>
-            <option value="encerrado">Encerrado</option>
+            <option value="encerramento">Em encerramento</option>
+            <option value="concluido">Concluído</option>
           </select>
         </div>
         <div>
@@ -221,12 +226,12 @@ export default function DashboardPage() {
             <Kpi valor={k.total} nome="Ordens de Serviço" desc="OSs · tanques/pontos"
               tip={<span>Média de {projetosFiltrados.length ? (k.total / projetosFiltrados.length).toFixed(1) : 0} OSs por projeto.</span>} />
             <Kpi valor={k.andamento} nome="Em andamento" desc="não encerradas"
-              tip={<span>OSs ainda antes da fase {ULTIMA_FASE} (Encerramento).</span>} />
+              tip={<span>OSs ainda não encerradas (inclui as que estão na fase {ULTIMA_FASE} aguardando o encerramento).</span>} />
             <Kpi valor={k.aprovacao} cor={k.aprovacao ? "#c2410c" : undefined} nome="Aguardando aprovação" desc="fases 5 e 9 (Gerência)"
               tip={<span>Relatórios na fila da Gerência (fase 5 = inspeção, fase 9 = execução).</span>} />
             <Kpi valor={k.execucao} nome="Em execução" desc="fases 6–9"
               tip={<span>OSs no ciclo de execução.</span>} />
-            <Kpi valor={k.encerradas} nome="Encerradas" desc="fase 10"
+            <Kpi valor={k.encerradas} nome="Encerradas" desc="OS encerrada (fase 10)"
               tip={<span>Taxa de conclusão: {k.conclusao}% das OSs.</span>} />
             <Kpi valor={`${k.progresso}%`} nome="Progresso médio" desc="avanço das OSs"
               tip={<span>Média das fases das OSs, normalizada de 0 a 100%.</span>} />
@@ -298,13 +303,14 @@ function Kpi({ valor, nome, desc, tip, cor }: { valor: number | string; nome: st
   );
 }
 
-function TipStatus({ c }: { c: { andamento: number; aprovacao: number; execucao: number; encerrado: number } }) {
+function TipStatus({ c }: { c: { andamento: number; aprovacao: number; execucao: number; encerramento: number; concluido: number } }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <span>Em andamento: <strong>{c.andamento}</strong></span>
       <span>Aguardando aprovação: <strong>{c.aprovacao}</strong></span>
       <span>Em execução: <strong>{c.execucao}</strong></span>
-      <span>Encerrado: <strong>{c.encerrado}</strong></span>
+      <span>Em encerramento: <strong>{c.encerramento}</strong></span>
+      <span>Concluído: <strong>{c.concluido}</strong></span>
     </div>
   );
 }

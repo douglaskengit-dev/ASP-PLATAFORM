@@ -52,6 +52,10 @@ export function descreverAcaoFase(acao: string, faseDe: number, fasePara: number
       return `Reprovou — Ajustar (voltou à fase ${fasePara})`;
     case "assinar":
       return "Enviou a versão assinada do relatório";
+    case "encerrar":
+      return "Encerrou a OS";
+    case "reabrir":
+      return "Reabriu a OS (volta a aceitar alterações)";
     default:
       return `${acao}: fase ${faseDe} → ${fasePara}`;
   }
@@ -106,10 +110,10 @@ export function acoesDisponiveis(perfil: string | null | undefined, faseAtual: n
 /** Seções recolhíveis da página da inspeção. O id também é a âncora da URL
  *  (`/inspecoes/<id>#relatorios` abre e rola até a seção). */
 export type SecaoInspecao =
-  | "coletas" | "agendamentos" | "checklist" | "fotos" | "rdos" | "relatorios" | "arquivos" | "historico";
+  | "coletas" | "agendamentos" | "checklist" | "fotos" | "rdos" | "relatorios" | "entregas" | "arquivos" | "historico";
 
 export const SECOES_INSPECAO: SecaoInspecao[] =
-  ["coletas", "agendamentos", "checklist", "fotos", "rdos", "relatorios", "arquivos", "historico"];
+  ["coletas", "agendamentos", "checklist", "fotos", "rdos", "relatorios", "entregas", "arquivos", "historico"];
 
 /** Como a seção nasce: aberta, recolhida (só o resumo) ou oculta. */
 export type EstadoSecao = "aberta" | "recolhida" | "oculta";
@@ -118,26 +122,27 @@ const A = "aberta", R = "recolhida", H = "oculta";
 type LinhaSecoes = Record<SecaoInspecao, EstadoSecao>;
 const linha = (
   coletas: EstadoSecao, agendamentos: EstadoSecao, checklist: EstadoSecao, fotos: EstadoSecao,
-  rdos: EstadoSecao, relatorios: EstadoSecao, arquivos: EstadoSecao, historico: EstadoSecao,
-): LinhaSecoes => ({ coletas, agendamentos, checklist, fotos, rdos, relatorios, arquivos, historico });
+  rdos: EstadoSecao, relatorios: EstadoSecao, entregas: EstadoSecao, arquivos: EstadoSecao, historico: EstadoSecao,
+): LinhaSecoes => ({ coletas, agendamentos, checklist, fotos, rdos, relatorios, entregas, arquivos, historico });
 
 /**
  * Padrão de cada seção por fase: abre o que a fase pede, recolhe o resto.
  * Fotos e RDOs ficam ocultos no bloco de inspeção (2–5) — os dois são da
  * execução; o RDO (diário de operação) abre na fase 7, quando é preenchido.
+ * "Entregas ao cliente" só existe no Encerramento (fase 10), aberta.
  * Tabela aprovada pelo produto; mudar aqui muda para todo mundo.
  */
 export const SECOES_POR_FASE: Record<number, LinhaSecoes> = {
-  //          Coletas Agend. Checkl. Fotos RDOs Relat. Arquiv. Hist.
-  2:  linha(R, A, A, H, H, R, R, R),
-  3:  linha(A, R, A, H, H, R, R, R),
-  4:  linha(A, R, R, H, H, A, R, R),
-  5:  linha(A, R, R, H, H, A, R, R),
-  6:  linha(R, A, A, R, R, R, R, R),
-  7:  linha(R, R, A, A, A, R, R, R),
-  8:  linha(R, R, R, A, R, A, R, R),
-  9:  linha(R, R, R, R, R, A, R, R),
-  10: linha(R, R, R, R, R, A, A, A),
+  //          Coletas Agend. Checkl. Fotos RDOs Relat. Entreg. Arquiv. Hist.
+  2:  linha(R, A, A, H, H, R, H, R, R),
+  3:  linha(A, R, A, H, H, R, H, R, R),
+  4:  linha(A, R, R, H, H, A, H, R, R),
+  5:  linha(A, R, R, H, H, A, H, R, R),
+  6:  linha(R, A, A, R, R, R, H, R, R),
+  7:  linha(R, R, A, A, A, R, H, R, R),
+  8:  linha(R, R, R, A, R, A, H, R, R),
+  9:  linha(R, R, R, R, R, A, H, R, R),
+  10: linha(R, R, R, R, R, A, A, A, A),
 };
 
 /**

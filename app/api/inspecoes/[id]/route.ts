@@ -6,6 +6,8 @@ import { erroDoTanque, normalizarTanque } from "@/lib/asp/tanque";
 import { codigosDoCatalogo, conflitoAoRestaurarOS, ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
 import { normalizarEspacos, primeiroErro, ROTULOS_OS, temErros } from "@/lib/validacao";
 
+import { garantirOsAberta, projetoDaOS, recalcularConclusaoProjeto } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** PATCH: restaurar da lixeira ({ restaurar: true }), renomear a OS
@@ -20,6 +22,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   const body = await req.json();
+
+  // ⛔ OS encerrada: procedimento, tanque e identificação ficam só leitura.
+  if (typeof body.procedimento === "string" || body.tanque !== undefined || typeof body.identificacao === "string") {
+    const travada = await garantirOsAberta(params.id);
+    if (travada) return travada;
+  }
 
   if (typeof body.procedimento === "string") {
     if (!PERFIS_EDICAO.includes(profile.perfil)) {
@@ -105,6 +113,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     .update({ excluido_em: null, excluido_por: null, atualizado_em: new Date().toISOString() })
     .eq("id", params.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  // Fase 10: OS (aberta) de volta → o projeto deixa de estar concluído.
+  await recalcularConclusaoProjeto(await projetoDaOS(params.id));
   return NextResponse.json({ ok: true });
 }
 
@@ -114,9 +124,14 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir Ordens de Serviço." }, { status: 403 });
   const admin = getSupabaseAdmin();
+  // ⛔ OS encerrada não vai para a lixeira: reabra antes (Admin/Gerência).
+  const travada = await garantirOsAberta(params.id);
+  if (travada) return travada;
+  const projetoId = await projetoDaOS(params.id);
   if (req.nextUrl.searchParams.get("definitivo") === "1") {
     const { error } = await admin.from("gp_inspecoes").delete().eq("id", params.id);
     if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    await recalcularConclusaoProjeto(projetoId);
     return NextResponse.json({ ok: true, definitivo: true });
   }
   const { error } = await admin
@@ -124,6 +139,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     .update({ excluido_em: new Date().toISOString(), excluido_por: profile.id })
     .eq("id", params.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  // Fase 10: sem esta OS, as que sobraram podem estar todas encerradas.
+  await recalcularConclusaoProjeto(projetoId);
   return NextResponse.json({ ok: true, lixeira: true });
 }
 
@@ -159,8 +176,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   // fotos da execução mudaram (aviso "mudou depois do envio"). Melhor
   // esforço: sem as tabelas/colunas novas, a tela só perde os avisos.
   const rels = (relatorios.data || []) as any[];
-  const idsPessoas = Array.from(new Set(rels.flatMap((r) =>
-    [r.enviado_por, r.aprovado_por, r.avaliado_por, r.assinado_por]).filter(Boolean))) as string[];
+  const idsPessoas = Array.from(new Set([...rels.flatMap((r) =>
+    [r.enviado_por, r.aprovado_por, r.avaliado_por, r.assinado_por]), (inspecao as any)?.encerrada_por].filter(Boolean))) as string[];
   const admin = getSupabaseAdmin();
   const [pessoas, vistos, fotos] = await Promise.all([
     idsPessoas.length

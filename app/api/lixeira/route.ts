@@ -6,6 +6,8 @@ import { conflitoAoRestaurarOS } from "@/lib/asp/os-validacao-api";
 import { conflitoAoRestaurarColeta } from "@/lib/asp/coleta-api";
 import { prepararRestauracaoRelatorio } from "@/lib/asp/relatorio-api";
 
+import { garantirOsAberta, osDe, projetoDaOS, recalcularConclusaoProjeto } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Tabelas com lixeira (soft delete). O rótulo é o que aparece na tela. */
@@ -68,6 +70,11 @@ export async function PATCH(req: NextRequest) {
   if (!ehTipo(body?.tipo) || !body?.id) {
     return NextResponse.json({ erro: "Tipo ou id inválido." }, { status: 400 });
   }
+  // ⛔ Medição/relatório de OS encerrada: só consulta (reabra a OS antes).
+  if (body.tipo === "medicao" || body.tipo === "relatorio") {
+    const travada = await garantirOsAberta(await osDe(body.tipo === "medicao" ? "gp_coletas" : "gp_relatorios", body.id));
+    if (travada) return travada;
+  }
   // OS: restaurar não pode duplicar a identificação de uma OS ativa.
   if (body.tipo === "inspecao") {
     const conflito = await conflitoAoRestaurarOS(body.id);
@@ -98,6 +105,8 @@ export async function PATCH(req: NextRequest) {
       : { excluido_em: null, excluido_por: null, ...extra })
     .eq("id", body.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  // Fase 10: OS restaurada → recalcula a conclusão do projeto.
+  if (body.tipo === "inspecao") await recalcularConclusaoProjeto(await projetoDaOS(body.id));
   return NextResponse.json({ ok: true });
 }
 
@@ -112,7 +121,13 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!ehTipo(tipo) || !id) return NextResponse.json({ erro: "Tipo ou id inválido." }, { status: 400 });
 
+  if (tipo === "medicao" || tipo === "relatorio") {
+    const travada = await garantirOsAberta(await osDe(tipo === "medicao" ? "gp_coletas" : "gp_relatorios", id));
+    if (travada) return travada;
+  }
+  const projetoDaInspecao = tipo === "inspecao" ? await projetoDaOS(id) : null;
   const { error } = await getSupabaseAdmin().from(TABELAS[tipo].tabela).delete().eq("id", id);
+  if (!error && projetoDaInspecao) await recalcularConclusaoProjeto(projetoDaInspecao);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
