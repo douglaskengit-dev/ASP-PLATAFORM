@@ -6,13 +6,14 @@ import { DOCX_MIME, removerArquivos, uploadArquivo } from "@/lib/processos/arqui
 import { ehUuid, sha256 } from "@/lib/asp/coleta-api";
 import { ehViolacaoUnica } from "@/lib/asp/os-validacao-api";
 import {
-  apontarSubstituto, caminhoRelatorioValido, desfazerSubstituicao, examinarNoStorage, fotosDeRascunho, infoOSRelatorio,
-  inserirComVersao, limparFotosRascunho, marcarSubstituidos, paraRelatorioRef, PERFIS_RELATORIO, relatoriosDaOS,
-  validarSnapshotServidor,
+  apontarSubstituto, caminhoRelatorioValido, desfazerSubstituicao, examinarNoStorage, execucaoExigeLaudo, fotosDeRascunho,
+  infoOSRelatorio, inserirComVersao, limparFotosRascunho, limparLaudoAntigo, marcarSubstituidos, MSG_LAUDO_OBRIGATORIO,
+  paraRelatorioRef, PERFIS_RELATORIO, relatoriosDaOS, validarSnapshotServidor, verificarLaudoPdf,
 } from "@/lib/asp/relatorio-api";
 import {
   arquivoRelatorioRepetido, descreverRelatorio, erroTipoNaFase, examinarArquivoRelatorio, primeiroErro,
-  rascunhoDoTipo, RELATORIO_GERADO_MAX_BYTES, RELATORIO_MAX_BYTES, ROTULOS_RELATORIO, SnapshotRelatorio, temErros,
+  LaudoPdf, rascunhoDoTipo, RELATORIO_GERADO_MAX_BYTES, RELATORIO_MAX_BYTES, ROTULOS_RELATORIO, ROTULOS_RELATORIO_EXECUCAO,
+  SnapshotRelatorio, temErros,
 } from "@/lib/validacao";
 
 export const runtime = "nodejs";
@@ -26,6 +27,8 @@ interface Corpo {
   arquivoPath: string;
   /** Arquivo no próprio corpo (envio antigo / fila offline). */
   arquivo?: Uint8Array | null;
+  /** PDF do laudo (envio de fora do relatório de execução, Fase 8). */
+  laudoPdf?: LaudoPdf | null;
 }
 
 /** JSON (o normal: o arquivo já está no storage) ou multipart (legado). */
@@ -46,6 +49,10 @@ async function lerCorpo(req: Request): Promise<{ corpo?: Corpo; erro?: string }>
   if (typeof get.dados === "string" && get.dados.trim()) {
     try { dados = JSON.parse(get.dados); } catch { return { erro: "Os dados do formulário chegaram corrompidos. Gere o rascunho de novo." }; }
   } else if (get.dados && typeof get.dados === "object") dados = get.dados as SnapshotRelatorio;
+  let laudoPdf: LaudoPdf | null = null;
+  if (typeof get.laudoPdf === "string" && get.laudoPdf.trim()) {
+    try { laudoPdf = JSON.parse(get.laudoPdf); } catch { return { erro: "O laudo chegou corrompido. Anexe de novo." }; }
+  } else if (get.laudoPdf && typeof get.laudoPdf === "object") laudoPdf = get.laudoPdf as LaudoPdf;
   return {
     corpo: {
       id: typeof get.id === "string" ? get.id : req.headers.get("idempotency-key") || undefined,
@@ -55,6 +62,7 @@ async function lerCorpo(req: Request): Promise<{ corpo?: Corpo; erro?: string }>
       dados,
       arquivoPath: String(get.arquivoPath || ""),
       arquivo,
+      laudoPdf,
     },
   };
 }
@@ -149,9 +157,22 @@ export async function POST(req: NextRequest) {
     const r = await validarSnapshotServidor(dados, { info, rels: refs, tipo, profile, anterior: anterior?.dados });
     if (temErros(r)) {
       await descartar();
-      return NextResponse.json({ erro: primeiroErro(r, ROTULOS_RELATORIO), erros: r.erros, avisos: r.avisos }, { status: 400 });
+      return NextResponse.json({ erro: primeiroErro(r, { ...ROTULOS_RELATORIO, ...ROTULOS_RELATORIO_EXECUCAO }), erros: r.erros, avisos: r.avisos }, { status: 400 });
     }
     dados.versaoSnapshot = 2;
+  }
+
+  // Envio de fora do relatório de execução com laudo (Fase 8): o PDF do
+  // laudo é obrigatório e conferido no storage, como o próprio relatório.
+  let dadosExterno: Record<string, unknown> | null = null;
+  if (!ehRascunho && !dados && tipo === "execucao" && (corpo.laudoPdf || await execucaoExigeLaudo(info, tipo))) {
+    const lv = await verificarLaudoPdf(corpo.laudoPdf, { inspecaoId, rels: refs, profileId: profile.id });
+    const e = lv.erro || (lv.laudo ? null : MSG_LAUDO_OBRIGATORIO);
+    if (e) {
+      await descartar();
+      return NextResponse.json({ erro: e, erros: { laudoPdf: [e] } }, { status: 400 });
+    }
+    dadosExterno = { externo: true, laudoPdf: lv.laudo };
   }
 
   if (corpo.arquivo) {
@@ -177,6 +198,9 @@ export async function POST(req: NextRequest) {
         if (error) { await descartar(); return NextResponse.json({ erro: error.message }, { status: 500 }); }
         if (!data) continue;   // foi enviado/excluído no meio do caminho
         if (alvo.arquivo_path && alvo.arquivo_path !== caminho) await removerArquivos([alvo.arquivo_path]);
+        if (alvo.dados?.laudoPdf?.caminho && alvo.dados.laudoPdf.caminho !== dados?.laudoPdf?.caminho) {
+          await limparLaudoAntigo(inspecaoId, alvo.dados.laudoPdf.caminho);
+        }
         const novas = new Set(fotosDeRascunho(dados, inspecaoId));
         await limparFotosRascunho(inspecaoId, fotosDeRascunho(alvo.dados, inspecaoId).filter((c) => !novas.has(c)));
         return NextResponse.json({ ok: true, relatorio: data, atualizado: true });
@@ -201,6 +225,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await inserirComVersao(supabase, {
     id, inspecao_id: inspecaoId, tipo, arquivo_path: caminho, arquivo_hash: hash, status: "em_aprovacao",
     enviado_por: profile.id, enviado_em: new Date().toISOString(),
+    ...(dadosExterno ? { dados: dadosExterno } : {}),
   });
   if (error) {
     await desfazerSubstituicao(substituidos);

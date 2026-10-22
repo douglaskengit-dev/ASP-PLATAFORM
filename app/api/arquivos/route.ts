@@ -4,7 +4,8 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 export const runtime = "nodejs";
 
 /** Lista os documentos do novo fluxo agrupados por Projeto → Inspeção:
- * coletas (PDF do medidor) e relatórios versionados (inspeção/execução).
+ * coletas (PDF do medidor) e relatórios versionados (inspeção/execução),
+ * com o PDF do laudo do laboratório de cada relatório de execução (Fase 8).
  * RDOs são do projeto (um por dia, cobrindo uma ou mais inspeções) e vêm em
  * `rdos`, no nível do projeto. Alimenta a aba Arquivos e a seção "Arquivos
  * do projeto" da inspeção. Só retorna itens que têm arquivo anexado. */
@@ -22,7 +23,7 @@ export async function GET() {
       "id, codigo_projeto, pedido_compra, criado_em, cliente:gp_orgaos(id, razao_social)," +
         " inspecoes:gp_inspecoes(id, identificacao, fase," +
         " coletas:gp_coletas(id, tipo, pdf_path, criado_em)," +
-        " relatorios:gp_relatorios(id, tipo, versao, status, arquivo_path, assinado_path, enviado_em))"
+        " relatorios:gp_relatorios(id, tipo, versao, status, arquivo_path, assinado_path, enviado_em, laudo:dados->laudoPdf))"
     )
     .order("criado_em", { ascending: false });
 

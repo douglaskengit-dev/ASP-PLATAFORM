@@ -12,8 +12,14 @@
  * Gerência ou Coordenador); datas são campos de data (ISO, saem dd/mm/aaaa);
  * pessoas são escolhidas por usuário (id); as fotos são conferidas (formato,
  * tamanho, repetida, legenda, vaga) e salvas com o rascunho. Regras em
- * lib/validacao/relatorio.ts — a API repete as que bloqueiam. */
-import { useEffect, useMemo, useRef, useState } from "react";
+ * lib/validacao/relatorio.ts — a API repete as que bloqueiam.
+ *
+ * Fase 8 (relatório de execução): pH/cloro numéricos (pré-preenchidos da
+ * coleta de fotos, comparados com a coleta e os RDOs), laudo de laboratório
+ * conferido célula a célula (com os limites da Portaria 888/2021), PDF do
+ * laudo obrigatório para enviar para aprovação, data da operação × período ×
+ * RDOs e equipe × RDOs. Regras em lib/validacao/relatorioExecucao.ts. */
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
@@ -22,9 +28,10 @@ import {
   type DadosRelatorio, type ImagemRelatorio, type VagaImagem,
 } from "@/lib/asp/relatorio";
 import {
-  pendenciasColeta, planejarFotosNoRelatorio, valorDoSlot, numeroBr, cloroDoProcedimento,
+  pendenciasColeta, planejarFotosNoRelatorio, valorDoSlot, cloroDoProcedimento, fotosDoSlot, SECOES_FOTOS,
   type RegistroFotosExecucao,
 } from "@/lib/asp/fotos-execucao";
+import { enviarLaudoPdf, examinarLaudoLocal, type ArquivoOS } from "@/lib/asp/laudo-pdf";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { MATERIAIS_TANQUE } from "@/lib/asp/procedimentos";
 import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
@@ -33,6 +40,10 @@ import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
   atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
+  CAMPOS_PH_CLORO, COL_LIMITE, converterPhCloroLegado, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
+  preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
+  sugestaoConclusao, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
+  type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
 
 export type { SnapshotRelatorio } from "@/lib/validacao";
@@ -72,6 +83,10 @@ interface Props {
   podeEditarRevisao: boolean;
   /** Equipe do agendamento do mesmo tipo (ids) — já vem marcada. */
   equipeAgendada: string[];
+  /** Só no Relatório de Execução (Fase 8): RDOs que cobrem a OS (null =
+   *  carregando), período do agendamento de execução e os arquivos da OS que
+   *  o PDF do laudo não pode repetir. */
+  execucao?: { rdos: RdoResumo[] | null; periodo: Periodo | null; arquivosOS: ArquivoOS[] };
 }
 
 interface FotoTopico {
@@ -93,7 +108,17 @@ interface FotoTopico {
   coleta?: string;
   /** URL local da miniatura (só fotos da coleta). */
   previa?: string;
+  /** SHA-256 do arquivo escolhido antes da conversão (upload manual). */
+  hashOriginal?: string;
+  /** SHA-256 do original guardado na coleta de fotos (foto pré-carregada). */
+  hashColeta?: string;
 }
+
+/** Hashes que identificam a mesma imagem: o arquivo final, o original
+ *  escolhido e o original da coleta de fotos da execução. */
+type ComHashes = { hash: string; hashOriginal?: string; hashColeta?: string };
+const hashesDe = (f: ComHashes) => [f.hash, f.hashOriginal, f.hashColeta].filter((h): h is string => !!h);
+const mesmaImagem = (a: ComHashes, b: ComHashes) => hashesDe(a).some((h) => hashesDe(b).includes(h));
 
 /** Em que vaga cada foto do tópico cai — a MESMA regra do gerador: primeiro
  *  as que pediram posição (`vagaIndice`), depois as demais na ordem. */
@@ -137,7 +162,7 @@ const campoLeitura: React.CSSProperties = { ...campo, background: "var(--bg-suav
 
 export default function GerarRelatorio({
   onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo, coletaFotos,
-  inspecaoId, revisaoEsperada, codigoEsperado, podeEditarRevisao, equipeAgendada,
+  inspecaoId, revisaoEsperada, codigoEsperado, podeEditarRevisao, equipeAgendada, execucao,
 }: Props) {
   /** Valores automáticos de uma medição (já em metros). */
   const medicaoDe = (id: string) => camposDaMedicao(coletas.find((c) => c.id === id)?.dados) as Record<string, string>;
@@ -153,7 +178,14 @@ export default function GerarRelatorio({
       })
     : null));
   const salvo = inicio?.snapshot || null;
-  const [d, setD] = useState<Partial<DadosRelatorio>>(salvo ? { ...inicial, ...salvo.d } : inicial);
+  /** Rascunho antigo: pH/cloro eram texto livre ("0,5 mg/L") — viram número;
+   *  o que não dá para ler fica vazio, com aviso. */
+  const [legado] = useState(() => (salvo ? converterPhCloroLegado({ ...inicial, ...salvo.d }) : null));
+  const [d, setD] = useState<Partial<DadosRelatorio>>(legado ? legado.d : inicial);
+  /** PDF do laudo do laboratório (Fase 8): sobe ao escolher; vai no snapshot. */
+  const [laudoPdf, setLaudoPdf] = useState<LaudoPdf | null>(salvo?.laudoPdf || null);
+  const [enviandoLaudo, setEnviandoLaudo] = useState(false);
+  const [msgLaudo, setMsgLaudo] = useState<string | null>(null);
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
     salvo?.visiveis || Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
   );
@@ -274,6 +306,8 @@ export default function GerarRelatorio({
           arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao, caminho: f.caminho,
           legenda: f.legenda, topico: f.topico, ancora: f.ancora, vaga: f.vaga, vagaIndice: f.vagaIndice,
           fonte: f.fonte, coleta: f.coleta, previa: f.coleta ? URL.createObjectURL(prep.arquivo) : undefined,
+          hashOriginal: f.hashOriginal,
+          hashColeta: (f.caminho && hashColetaPorCaminho.get(f.caminho)) || f.hashColeta,
         };
       } catch {
         return nome;
@@ -442,6 +476,55 @@ export default function GerarRelatorio({
   /** Tópicos próprios do procedimento escolhido (definidos no Catálogo). */
   /** Formulário adaptado ao procedimento de limpeza robotizada. */
   const limpeza = ehLimpezaRobotizada(proc);
+  /** Fase 8: relatório de execução de procedimento com laudo — o PDF do
+   *  laudo é obrigatório para enviar para aprovação. */
+  const exigeLaudoPdf = !!execucao && procedimentoUsaLaudo(proc);
+  // Coluna "Limite" do laudo: os da Portaria 888/2021 nas células vazias,
+  // uma vez (editáveis; o documento sai com o que estiver preenchido).
+  const limitesAplicados = useRef(false);
+  useEffect(() => {
+    if (!limpeza || limitesAplicados.current) return;
+    limitesAplicados.current = true;
+    setD((v) => ({ ...v, laudoAntes: preencherLimitesPadrao(v.laudoAntes), laudoDepois: preencherLimitesPadrao(v.laudoDepois) }));
+  }, [limpeza]);
+  /** Parâmetros do laudo acima do limite (antes e depois). */
+  const foraLimite = useMemo(
+    () => [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)],
+    [d.laudoAntes, d.laudoDepois]
+  );
+  /** Acrescenta à Conclusão a frase de cada parâmetro fora do limite. */
+  function sugerirConclusao() {
+    setD((v) => {
+      const add = sugestaoConclusao(foraLimite, v.conclusao);
+      return add ? { ...v, conclusao: (v.conclusao || "") + add } : v;
+    });
+    if (!ativo(9)) setVisiveis((v) => ({ ...v, 9: true }));
+  }
+  /** Muda uma célula do laudo (a grade é sempre completa). */
+  function mudarCelula(chave: ChaveLaudo, i: number, j: number, valor: string) {
+    setD((v) => {
+      const g = gradeLaudo(v[chave] as string[][] | undefined);
+      g[i][j] = valor;
+      return { ...v, [chave]: g };
+    });
+  }
+  /** Escolheu o PDF do laudo: confere (PDF de verdade, 30 MB, não repetido
+   *  na OS) e já sobe ao storage — fica no rascunho ao salvar. */
+  async function escolherLaudo(f: File | undefined | null) {
+    if (!f) return;
+    setMsgLaudo(null);
+    setEnviandoLaudo(true);
+    try {
+      const ex = await examinarLaudoLocal(f, execucao?.arquivosOS || []);
+      if (ex.erro || !ex.hash) { setMsgLaudo(ex.erro || "Arquivo inválido."); return; }
+      if (laudoPdf?.hash === ex.hash) { setMsgLaudo("É o mesmo PDF que já está anexado."); return; }
+      setLaudoPdf(await enviarLaudoPdf(inspecaoId, f, ex.hash));
+    } catch (e) {
+      setMsgLaudo(e instanceof Error ? e.message : "Falha ao enviar o laudo.");
+    } finally {
+      setEnviandoLaudo(false);
+    }
+  }
   const extras: { titulo: string; apos?: number }[] =
     Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
 
@@ -473,6 +556,16 @@ export default function GerarRelatorio({
     return novas;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaNumerada, topicosModelo]);
+
+  /** SHA-256 do original de cada foto da coleta (por caminho) — é o que
+   *  reconhece a mesma foto anexada também à mão. */
+  const hashColetaPorCaminho = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const sec of SECOES_FOTOS) for (const sl of sec.slots) {
+      for (const f of fotosDoSlot(coletaFotos, sl.id)) if (f.hash) m.set(f.caminho, f.hash);
+    }
+    return m;
+  }, [coletaFotos]);
 
   /** Pendências da coleta de fotos da execução — aviso, nunca bloqueio. */
   const pendColeta = useMemo(() => (coletaFotos ? pendenciasColeta(coletaFotos) : []), [coletaFotos]);
@@ -508,11 +601,12 @@ export default function GerarRelatorio({
     });
 
     // pH e cloro medidos → marcadores [dado coletado] das legendas do modelo
-    // da limpeza robotizada. Não sobrescreve o que já foi digitado.
+    // da limpeza robotizada. Não sobrescreve o que já foi digitado. Só o
+    // número: a unidade do cloro (do procedimento) entra ao gerar.
     const medido = (id: string, exigido: boolean) => {
       const n = exigido ? valorDoSlot(reg, id) : null;
       if (n == null) return undefined;
-      return id.endsWith("_cloro") ? `${numeroBr(n)} ${unidadeCloro}` : numeroBr(n);
+      return textoNumeroBr(n);
     };
     setD((x) => ({
       ...x,
@@ -538,6 +632,7 @@ export default function GerarRelatorio({
           arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao, caminho: p.caminho,
           legenda: p.legenda, topico: p.topico, ancora: p.ancora,
           vaga: p.vaga, vagaIndice: p.vagaIndice, coleta: p.rotulo, previa: URL.createObjectURL(prep.arquivo),
+          hashColeta: hashColetaPorCaminho.get(p.caminho),
         };
       } catch {
         return `${p.rotulo}: não foi possível baixar (sem conexão?)`;
@@ -548,7 +643,7 @@ export default function GerarRelatorio({
       for (const f of lista) {
         if (typeof f === "string") continue;
         // a mesma imagem já anexada à mão (ou em outro item da coleta) não entra 2x
-        const igual = [...fotosRef.current, ...ok].find((x) => x.hash === f.hash);
+        const igual = [...fotosRef.current, ...ok].find((x) => mesmaImagem(x, f));
         if (igual) { problemas.push(`${f.coleta}: é a mesma imagem de “${igual.coleta || igual.arquivo.name}” — não entrou de novo`); continue; }
         ok.push(f);
       }
@@ -688,10 +783,10 @@ export default function GerarRelatorio({
       for (const f of fs) {
         const prep = await prepararImagemRelatorio(f, f.name);
         if ("erro" in prep) { erro(prep.erro); continue; }
-        const igual = [...fotosRef.current, ...novas].find((x) => x.hash === prep.hash);
+        const igual = [...fotosRef.current, ...novas].find((x) => mesmaImagem(x, prep));
         if (igual) { erro(`“${f.name}” é a mesma imagem de “${igual.coleta || igual.arquivo.name}” (${destinoDaFoto(igual)}) — não foi adicionada.`); continue; }
         if (prep.convertida) msgs.push({ m: `“${f.name}” convertida (${prep.convertida}).`, aviso: true });
-        novas.push({ ...base, arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao });
+        novas.push({ ...base, arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao, hashOriginal: prep.hashOriginal });
       }
       if (novas.length) setFotos((p) => [...p, ...novas]);
     } finally {
@@ -756,6 +851,13 @@ export default function GerarRelatorio({
           vagaIndice: f.vaga ? f.vagaIndice : undefined,
         });
       }
+      // Laudo: células como saem no documento ("ausente" → "Ausente").
+      const laudoDoc = (g?: string[][]) => (g ? gradeLaudo(g).map((l) => l.map(normalizarCelulaLaudo)) : undefined);
+      // O PDF do laudo é um arquivo à parte; o tópico Anexos (se o modelo
+      // tiver) só o cita.
+      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const anexosDoc = laudoPdf && execucao && !(d.anexos || "").includes(esc(laudoPdf.nome))
+        ? `${d.anexos || ""}<p>Laudo anexo: ${esc(laudoPdf.nome)}</p>` : d.anexos;
       // Pessoas: o documento leva o NOME do usuário escolhido (por id).
       const nomeDe = (k: PapelPessoa) => (pessoas[k] ? usuarios.find((u) => u.id === pessoas[k])?.nome : "") || d[k] || "";
       return gerarRelatorioDocx({
@@ -774,11 +876,14 @@ export default function GerarRelatorio({
         historico: d.historico, nivelAgua: d.nivelAgua,
         comprimento: d.comprimento, largura: d.largura,
         dataOperacao: isoParaBr(d.dataOperacao), horarios: d.horarios,
-        anexos: d.anexos,
-        cloroAntes: d.cloroAntes, cloroDepois: d.cloroDepois,
-        phAntes: d.phAntes, phDepois: d.phDepois,
+        anexos: anexosDoc,
+        // pH/cloro são números; o cloro sai com a unidade do procedimento.
+        cloroAntes: textoPhCloroDoc("cloroAntes", d.cloroAntes, unidadeCloro),
+        cloroDepois: textoPhCloroDoc("cloroDepois", d.cloroDepois, unidadeCloro),
+        phAntes: textoPhCloroDoc("phAntes", d.phAntes, unidadeCloro),
+        phDepois: textoPhCloroDoc("phDepois", d.phDepois, unidadeCloro),
         alturaSedimento: d.alturaSedimento,
-        laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois,
+        laudoAntes: laudoDoc(d.laudoAntes), laudoDepois: laudoDoc(d.laudoDepois),
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
@@ -814,6 +919,7 @@ export default function GerarRelatorio({
     const fotosSalvas: FotoSalva[] = fotos.map((f) => ({
       caminho: f.caminho, hash: f.hash, extensao: f.extensao, nome: f.arquivo.name, legenda: f.legenda,
       topico: f.topico, ancora: f.ancora, vaga: f.vaga, vagaIndice: f.vagaIndice, fonte: f.fonte, coleta: f.coleta,
+      hashOriginal: f.hashOriginal, hashColeta: f.hashColeta,
     }));
     const nomes: Partial<DadosRelatorio> = {};
     for (const k of PAPEIS_PESSOA) {
@@ -823,6 +929,7 @@ export default function GerarRelatorio({
     return {
       versaoSnapshot: 2, d: { ...d, ...nomes }, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras, textosTopico,
       pessoas, revisaoManual, medicaoBase, fotos: fotosSalvas,
+      ...(execucao ? { laudoPdf } : {}),
     };
   }
 
@@ -836,7 +943,8 @@ export default function GerarRelatorio({
   const coletaSel = coletas.find((c) => c.id === coletaId) || null;
   const hoje = hojeBrasil();
   // Regras (lib/validacao/relatorio.ts) — as mesmas que a API repete.
-  const r = validarRelatorio(montarSnapshot(), {
+  const snapAtual = montarSnapshot();
+  const rBase = validarRelatorio(snapAtual, {
     hoje,
     dataColeta: coletaSel?.data_coleta || null,
     revisaoEsperada, codigoEsperado, podeEditarRevisao,
@@ -848,7 +956,26 @@ export default function GerarRelatorio({
       return t ? `${t.numero}. ${t.titulo}` : `tópico ${n}`;
     },
   });
+  // Fase 8 — pH/cloro e laudo (todo relatório que os tem); no de execução,
+  // também coleta de fotos, RDOs, período, equipe e o PDF do laudo.
+  const rExec = validarRelatorioExecucao(snapAtual, {
+    inspecaoId, hoje, unidadeCloro, limiteCloro: cloroDoProcedimento(proc).limite, usaLaudo: exigeLaudoPdf,
+    coleta: execucao ? coletaFotos || null : null,
+    rdos: execucao?.rdos ?? undefined,
+    periodo: execucao?.periodo ?? null,
+    equipeRelatorio: execucao ? usuarios.filter((u) => equipeIds.includes(u.id)).map((u) => u.nome) : undefined,
+  });
+  const r = mesclar(rBase, rExec);
+  const rotulosResumo = { ...ROTULOS_RELATORIO, ...ROTULOS_RELATORIO_EXECUCAO };
   const [tentou, setTentou] = useState(false);
+
+  /** Mensagens de uma linha do laudo (células + a linha). */
+  function mensagensLinha(res: ResultadoValidacao, chave: ChaveLaudo, i: number) {
+    const pref = `${chave}.${i}`;
+    const pega = (m: Record<string, string[]>) =>
+      Object.entries(m).filter(([k]) => k === pref || k.startsWith(`${pref}.`)).flatMap(([, l]) => l);
+    return { erros: pega(res.erros), avisos: pega(res.avisos) };
+  }
 
   /** ⛔ impede gerar; fotos em tópico desmarcado pedem confirmação. */
   function validar(): boolean {
@@ -856,12 +983,16 @@ export default function GerarRelatorio({
     setTentou(true);
     if (restaurando) { setErro("Aguarde as fotos do rascunho terminarem de carregar."); return false; }
     if (processandoFotos) { setErro("Aguarde as fotos terminarem de ser processadas."); return false; }
+    if (enviandoLaudo) { setErro("Aguarde o PDF do laudo terminar de ser enviado."); return false; }
     if (temErros(r)) {
       setErro("Corrija os itens marcados com ⛔ (lista abaixo) para gerar o relatório.");
       return false;
     }
     const ocultas = r.avisos.fotosOcultas?.[0];
     if (ocultas && !confirm(`${ocultas}\n\nGerar assim mesmo?`)) return false;
+    // Fase 8: parâmetro do laudo fora do limite que a Conclusão não cita.
+    const naoCitados = r.avisos.conclusao?.[0];
+    if (naoCitados && !confirm(`${naoCitados}\n\nGerar assim mesmo?`)) return false;
     return true;
   }
 
@@ -1136,55 +1267,133 @@ export default function GerarRelatorio({
       {modalColetas && (
         <Modal titulo="Valores das coletas e do laudo" largo onFechar={() => setModalColetas(false)}>
           <p className="detalhe" style={{ marginTop: 0 }}>
-            Entram nas legendas das figuras de coleta do modelo.
+            Entram nas legendas das figuras de coleta e nas tabelas do laudo do modelo.
+            {coletaFotos ? " pH e cloro vêm da coleta de fotos da execução — pode corrigir, com aviso." : ""}
           </p>
           <div style={grade}>
-            <div><label style={rotulo}>Cloro livre — antes ({unidadeCloro})</label>
-              <input style={campo} value={d.cloroAntes || ""} onChange={set("cloroAntes")} /></div>
-            <div><label style={rotulo}>Cloro livre — depois ({unidadeCloro})</label>
-              <input style={campo} value={d.cloroDepois || ""} onChange={set("cloroDepois")} /></div>
-            <div><label style={rotulo}>pH — antes</label>
-              <input style={campo} value={d.phAntes || ""} onChange={set("phAntes")} /></div>
-            <div><label style={rotulo}>pH — depois</label>
-              <input style={campo} value={d.phDepois || ""} onChange={set("phDepois")} /></div>
+            {CAMPOS_PH_CLORO.map((k) => {
+              const cloro = k.startsWith("cloro");
+              const daColeta = coletaFotos ? valorDoSlot(coletaFotos, SLOT_PH_CLORO[k]) : null;
+              const atual = lerValorMedido(d[k]);
+              const invalido = !!r.erros[k]?.length;
+              return (
+                <div key={k}>
+                  <label style={rotulo} htmlFor={`campo-${k}`}>
+                    {ROTULOS_PH_CLORO[k]} <span className="detalhe">({cloro ? unidadeCloro : "0 a 14"})</span>
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input id={`campo-${k}`} style={{ ...campo, ...(invalido ? { borderColor: "#b3261e" } : {}) }}
+                      inputMode="decimal" aria-invalid={invalido} placeholder={cloro ? "ex.: 0,5" : "ex.: 7,2"}
+                      value={d[k] || ""} onChange={set(k)}
+                      onBlur={(e) => {
+                        const n = lerValorMedido(e.target.value);
+                        if (n !== null) setD((v) => ({ ...v, [k]: textoNumeroBr(n) }));
+                      }} />
+                    {cloro && <span className="detalhe" style={{ margin: 0, whiteSpace: "nowrap" }}>{unidadeCloro}</span>}
+                  </div>
+                  <MensagensCampo r={r} campo={k}>
+                    {daColeta != null && (atual === null || Math.abs(atual - daColeta) > 1e-9) && (
+                      <div className="val-sugestao">
+                        <button type="button" className="btn-dl btn-sec"
+                          onClick={() => setD((v) => ({ ...v, [k]: textoNumeroBr(daColeta) }))}>
+                          Usar valor da coleta ({textoNumeroBr(daColeta)}{cloro ? ` ${unidadeCloro}` : ""})
+                        </button>
+                      </div>
+                    )}
+                  </MensagensCampo>
+                </div>
+              );
+            })}
           </div>
-          {(["laudoAntes", "laudoDepois"] as const).map((chave) => (
-            <div key={chave} style={{ marginTop: 14 }}>
-              <strong style={{ fontSize: 13 }}>
-                {chave === "laudoAntes" ? "Laudo — antes da limpeza" : "Laudo — após a limpeza"}
-              </strong>
-              <div style={{ overflowX: "auto", marginTop: 6 }}>
-                <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
-                  <thead>
-                    <tr>
-                      <th style={celLaudo}>Parâmetro</th>
-                      {LAUDO_COLUNAS.map((c) => <th key={c} style={celLaudo}>{c}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {LAUDO_PARAMETROS.map((par, i) => (
-                      <tr key={par}>
-                        <td style={{ ...celLaudo, whiteSpace: "nowrap" }}>{par}</td>
-                        {LAUDO_COLUNAS.map((_, j) => (
-                          <td key={j} style={celLaudo}>
-                            <input style={{ ...campo, padding: "5px 7px", fontSize: 12.5, minWidth: 84 }}
-                              value={(d[chave] as string[][] | undefined)?.[i]?.[j] || ""}
-                              onChange={(e) => setD((v) => {
-                                const base = (v[chave] as string[][] | undefined) || [];
-                                const grade = LAUDO_PARAMETROS.map((_, li) =>
-                                  LAUDO_COLUNAS.map((__, cj) => base[li]?.[cj] || ""));
-                                grade[i][j] = e.target.value;
-                                return { ...v, [chave]: grade };
-                              })} />
-                          </td>
+          <p className="detalhe" style={{ margin: "12px 0 0" }}>
+            Laudo: número (vírgula decimal) ou <strong>&lt;LQ</strong>, <strong>ND</strong>, <strong>Ausente</strong>,{" "}
+            <strong>Presente</strong> — coliformes e E. coli (P/A) só com Ausente/Presente. A coluna Limite vem
+            preenchida com a {FONTE_PORTARIA_888} e pode ser corrigida; sai no documento como estiver.
+          </p>
+          {(["laudoAntes", "laudoDepois"] as const).map((chave) => {
+            const g = gradeLaudo(d[chave] as string[][] | undefined);
+            const foraAqui = new Set(foraLimite.filter((f) => f.chave === chave).map((f) => f.linha));
+            return (
+              <div key={chave} style={{ marginTop: 14 }}>
+                <strong style={{ fontSize: 13 }}>
+                  {chave === "laudoAntes" ? "Laudo — antes da limpeza" : "Laudo — após a limpeza"}
+                </strong>
+                <div style={{ overflowX: "auto", marginTop: 6 }}>
+                  <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+                    <thead>
+                      <tr>
+                        <th style={celLaudo}>Parâmetro</th>
+                        {LAUDO_COLUNAS.map((c, j) => (
+                          <th key={c} style={celLaudo}>
+                            {j === COL_LIMITE ? <>Limite <span className="detalhe">(Portaria 888/2021)</span></> : c}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {LAUDO_PARAMETROS.map((par, i) => {
+                        const fora = foraAqui.has(i);
+                        const msgs = mensagensLinha(r, chave, i);
+                        // linha fora do limite: fundo + borda + texto (não só cor)
+                        const fundo = fora ? { background: "rgba(179, 38, 30, 0.10)" } : {};
+                        return (
+                          <Fragment key={par}>
+                            <tr>
+                              <td style={{ ...celLaudo, ...fundo, whiteSpace: "nowrap", ...(fora ? { borderLeft: "4px solid #b3261e" } : {}) }}>
+                                {par}
+                                {fora && <span className="val-msg val-erro" style={{ display: "block", fontWeight: 700 }}>⚠ Fora do limite</span>}
+                              </td>
+                              {LAUDO_COLUNAS.map((col, j) => {
+                                const errCel = !!r.erros[`${chave}.${i}.${j}`]?.length;
+                                return (
+                                  <td key={j} style={{ ...celLaudo, ...fundo }}>
+                                    <input aria-label={`${par} — ${col}`} aria-invalid={errCel}
+                                      style={{ ...campo, padding: "5px 7px", fontSize: 12.5, minWidth: 84, ...(errCel ? { borderColor: "#b3261e", borderWidth: 2 } : {}) }}
+                                      value={g[i][j]}
+                                      onChange={(e) => mudarCelula(chave, i, j, e.target.value)}
+                                      onBlur={(e) => {
+                                        const n = normalizarCelulaLaudo(e.target.value);
+                                        if (n !== e.target.value) mudarCelula(chave, i, j, n);
+                                      }} />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                            {(msgs.erros.length > 0 || msgs.avisos.length > 0) && (
+                              <tr>
+                                <td colSpan={LAUDO_COLUNAS.length + 1} style={{ ...celLaudo, ...fundo, whiteSpace: "normal" }}>
+                                  <div className="val-campo" aria-live="polite">
+                                    {msgs.erros.map((m) => <p key={"e" + m} className="val-msg val-erro">⛔ {m}</p>)}
+                                    {msgs.avisos.map((m) => <p key={"a" + m} className="val-msg val-aviso">⚠️ {m}</p>)}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <MensagensCampo r={r} campo={chave} />
               </div>
+            );
+          })}
+
+          {foraLimite.length > 0 && (
+            <div className="val-resumo" role="status" style={{ marginTop: 12 }}>
+              <strong className="val-aviso">⚠️ {foraLimite.length} resultado(s) fora do limite</strong>
+              <ul>{foraLimite.map((f) => (
+                <li key={`${f.chave}-${f.linha}`}>
+                  {f.nome} — {f.chave === "laudoAntes" ? "antes" : "depois"}: {f.valor}{f.unidade ? ` ${f.unidade}` : ""} (limite {f.limite}{f.unidade ? ` ${f.unidade}` : ""})
+                </li>
+              ))}</ul>
+              <button type="button" className="btn-dl btn-sec" onClick={sugerirConclusao}>
+                ✍ Sugerir texto na conclusão
+              </button>
+              <MensagensCampo r={r} campo="conclusao" />
             </div>
-          ))}
+          )}
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
             <button className="btn-azul" onClick={() => setModalColetas(false)}>Pronto</button>
@@ -1240,10 +1449,10 @@ export default function GerarRelatorio({
           )}
         </div>
 
-        {inicio && inicio.mudancas.length > 0 && (
+        {((inicio?.mudancas.length || 0) + (legado?.avisos.length || 0)) > 0 && (
           <div className="val-resumo" role="status">
             <strong className="val-aviso">⚠️ O que mudou desde o rascunho (dados do cadastro/medição atualizados):</strong>
-            <ul>{inicio.mudancas.map((m, i) => <li key={i}>{m}</li>)}</ul>
+            <ul>{[...(inicio?.mudancas || []), ...(legado?.avisos || [])].map((m, i) => <li key={i}>{m}</li>)}</ul>
           </div>
         )}
         {restaurando && <p className="detalhe" style={{ margin: 0 }}>Carregando as fotos do rascunho…</p>}
@@ -1411,6 +1620,7 @@ export default function GerarRelatorio({
               ))}
             </div>
             <MensagensCampo r={r} campo="horarios" />
+            <MensagensCampo r={r} campo="rdos" />
           </div>
           )}
 
@@ -1480,6 +1690,7 @@ export default function GerarRelatorio({
             </div>
           )}
           {nomesEquipe && <p className="detalhe" style={{ margin: "6px 0 0" }}>No relatório: {nomesEquipe}</p>}
+          <MensagensCampo r={r} campo="equipe" />
         </> })}
 
         {Topico({ numero: 6, titulo: "Dados reservatório", children: <>
@@ -1630,11 +1841,49 @@ export default function GerarRelatorio({
               {BlocoVagas(num, max)}
             </div>
           ))}
+          {/* Fase 8: o PDF do laudo do laboratório é arquivo próprio (não
+              entra no .docx) e é exigido para enviar para aprovação. */}
+          {execucao && (
+            <div style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
+              <label style={rotulo} htmlFor="laudo-pdf">
+                PDF do laudo do laboratório{exigeLaudoPdf ? " *" : ""}{" "}
+                <span className="detalhe">— obrigatório para enviar para aprovação; o rascunho pode ser salvo sem ele</span>
+              </label>
+              {laudoPdf ? (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere", flex: "1 1 200px" }}>
+                    📎 {laudoPdf.nome}{laudoPdf.tamanho ? ` (${(laudoPdf.tamanho / 1048576).toFixed(1).replace(".", ",")} MB)` : ""}
+                  </span>
+                  <label className="btn-dl btn-sec" style={{ cursor: enviandoLaudo ? "wait" : "pointer" }}>
+                    Trocar
+                    <input type="file" accept="application/pdf,.pdf" hidden disabled={enviandoLaudo}
+                      onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
+                  </label>
+                  <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                    disabled={enviandoLaudo} onClick={() => { setLaudoPdf(null); setMsgLaudo(null); }}>Remover</button>
+                </div>
+              ) : (
+                <input id="laudo-pdf" type="file" accept="application/pdf,.pdf" disabled={enviandoLaudo}
+                  onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
+              )}
+              {enviandoLaudo && <span className="detalhe" style={{ display: "block" }}>Conferindo e enviando o laudo…</span>}
+              {msgLaudo && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgLaudo}</p>}
+              <MensagensCampo r={r} campo="laudoPdf" />
+            </div>
+          )}
         </div>
         )}
 
         {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
+          <MensagensCampo r={r} campo="conclusao">
+            {foraLimite.length > 0 && (
+              <div className="val-sugestao">
+                <button type="button" className="btn-dl btn-sec" onClick={sugerirConclusao}>✍ Sugerir texto na conclusão</button>
+                <span>{foraLimite.length} resultado(s) do laudo fora do limite</span>
+              </div>
+            )}
+          </MensagensCampo>
         </> })}
 
         {Topico({ numero: 10, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
@@ -1672,7 +1921,7 @@ export default function GerarRelatorio({
           )}
         </div>
 
-        <ResumoValidacao r={r} rotulos={ROTULOS_RELATORIO} mostrarErros={tentou || temErros(r)} />
+        <ResumoValidacao r={r} rotulos={rotulosResumo} mostrarErros={tentou || temErros(r)} />
         {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
         {pendColeta.length > 0 && (
           <p className="detalhe" style={{ margin: 0, color: "#c2410c", textAlign: "right" }}>
@@ -1681,10 +1930,10 @@ export default function GerarRelatorio({
         )}
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button className="btn-azul btn-sec" onClick={onFechar} disabled={gerando || enviando}>Cancelar</button>
-          <button className="btn-azul btn-sec" onClick={baixar} disabled={gerando || enviando || restaurando || processandoFotos}>
+          <button className="btn-azul btn-sec" onClick={baixar} disabled={gerando || enviando || restaurando || processandoFotos || enviandoLaudo}>
             {gerando ? "Gerando…" : "⬇ Só baixar (.docx)"}
           </button>
-          <button className="btn-azul" onClick={salvarEEnviar} disabled={gerando || enviando || restaurando || processandoFotos}>
+          <button className="btn-azul" onClick={salvarEEnviar} disabled={gerando || enviando || restaurando || processandoFotos || enviandoLaudo}>
             {enviando ? "Salvando…" : "💾 Salvar rascunho no card"}
           </button>
         </div>

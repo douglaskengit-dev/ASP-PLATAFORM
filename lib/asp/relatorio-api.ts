@@ -9,10 +9,12 @@ import { BUCKET } from "@/lib/processos/arquivos";
 import { ehUuid, sha256 } from "@/lib/asp/coleta-api";
 import { ehViolacaoUnica } from "@/lib/asp/os-validacao-api";
 import { podeEditarRevisao, type PerfilLike } from "@/lib/asp/permissoes";
+import { cloroDoProcedimento } from "@/lib/asp/fotos-execucao";
 import {
-  addErro, caminhoFotoValido, codigoRelatorio, examinarArquivoRelatorio, FormatoRelatorio, hojeBrasil, mesclar,
-  novoResultado, pastaFotosRascunho, planejarEnvio, RelatorioRef, ResultadoValidacao, revisaoDoTipo,
-  SnapshotRelatorio, validarRelatorio,
+  addErro, caminhoFotoValido, caminhoLaudoValido, codigoRelatorio, examinarArquivoRelatorio, FormatoRelatorio, hojeBrasil,
+  LaudoPdf, mesclar, MSG_LAUDO_OBRIGATORIO, novoResultado, pastaFotosRascunho, planejarEnvio, procedimentoUsaLaudo,
+  RELATORIO_MAX_BYTES, RelatorioRef, ResultadoValidacao, revisaoDoTipo, SnapshotRelatorio, validarRelatorio,
+  validarRelatorioExecucao,
 } from "@/lib/validacao";
 
 export const PERFIS_RELATORIO = ["admin", "operacoes", "gerencia"];
@@ -80,7 +82,8 @@ export async function examinarNoStorage(caminho: string, max: number): Promise<{
 /** Caminho de upload aceito para o relatório desta OS. */
 export function caminhoRelatorioValido(caminho: string, inspecaoId: string): boolean {
   return caminho.startsWith(`relatorios/${inspecaoId}/`) && !caminho.includes("..")
-    && !caminho.startsWith(pastaFotosRascunho(inspecaoId)) && /\.(pdf|docx)$/i.test(caminho);
+    && !caminho.startsWith(pastaFotosRascunho(inspecaoId)) && !caminho.startsWith(`relatorios/${inspecaoId}/laudo-`)
+    && /\.(pdf|docx)$/i.test(caminho);
 }
 
 const violouVersao = (e: any) => ehViolacaoUnica(e) && /versao/i.test(e?.message || "");
@@ -151,14 +154,94 @@ export async function limparFotosRascunho(inspecaoId: string, candidatas: string
   } catch { /* melhor esforço */ }
 }
 
+// ── Fase 8: relatório de execução ─────────────────────────────────────────────
+
+/** Linha do procedimento da OS no Catálogo (todas as colunas: as da Fase 7/8
+ *  podem não existir num banco sem a migration — aí valem os padrões). */
+export async function procedimentoDaOS(codigo: string): Promise<Record<string, any> | null> {
+  if (!codigo) return null;
+  const { data } = await getSupabaseAdmin().from("gp_procedimentos").select("*").eq("codigo", codigo).limit(1).maybeSingle();
+  return (data as any) || null;
+}
+
+/** O relatório de execução desta OS exige o PDF do laudo? */
+export async function execucaoExigeLaudo(info: InfoOSRelatorio, tipo: string): Promise<boolean> {
+  return tipo === "execucao" && procedimentoUsaLaudo(await procedimentoDaOS(info.cadastro.procedimento));
+}
+
+/** Arquivos desta OS que o laudo não pode repetir (SHA-256): relatórios
+ *  enviados, versões assinadas e PDFs anexados nas coletas. */
+async function arquivosDaOS(inspecaoId: string, rels: RelatorioRef[]): Promise<{ hash: string; rotulo: string }[]> {
+  const out: { hash: string; rotulo: string }[] = [];
+  for (const r of rels) {
+    const tipo = r.tipo === "execucao" ? "execução" : "inspeção";
+    if (r.arquivoHash) out.push({ hash: r.arquivoHash, rotulo: `o arquivo do relatório de ${tipo} v${r.versao}` });
+    if (r.assinadoHash) out.push({ hash: r.assinadoHash, rotulo: `a versão assinada do relatório de ${tipo} v${r.versao}` });
+  }
+  const { data } = await getSupabaseAdmin().from("gp_coletas").select("arquivo_hash, tipo")
+    .eq("inspecao_id", inspecaoId).is("excluido_em", null).not("arquivo_hash", "is", null);
+  for (const c of (data || []) as any[]) out.push({ hash: c.arquivo_hash, rotulo: c.tipo === "anexo" ? "um anexo das coletas" : "o PDF de uma medição" });
+  return out;
+}
+
+/** Confere o PDF do laudo NO STORAGE (como o arquivo do relatório): caminho
+ *  desta OS, existe, é PDF de verdade, até 30 MB, o SHA-256 bate com o
+ *  informado e não repete outro arquivo da OS. Devolve o laudo com hash,
+ *  tamanho e autoria conferidos. */
+export async function verificarLaudoPdf(
+  laudo: LaudoPdf | null | undefined, opcoes: { inspecaoId: string; rels: RelatorioRef[]; profileId: string | null; anterior?: LaudoPdf | null }
+): Promise<{ erro: string | null; laudo: LaudoPdf | null }> {
+  if (!laudo || typeof laudo !== "object" || !laudo.caminho) return { erro: null, laudo: null };
+  if (!caminhoLaudoValido(laudo.caminho, opcoes.inspecaoId)) return { erro: "PDF do laudo com caminho inválido para esta OS — anexe de novo.", laudo: null };
+  const ex = await examinarNoStorage(laudo.caminho, RELATORIO_MAX_BYTES);
+  if (ex.erro) return { erro: ex.naoExiste ? "O PDF do laudo não está no storage — anexe de novo." : `PDF do laudo: ${ex.erro}`, laudo: null };
+  if (ex.formato !== "pdf") return { erro: "O laudo tem de ser um PDF (o arquivo enviado não é).", laudo: null };
+  if (laudo.hash && laudo.hash.toLowerCase() !== ex.hash) return { erro: "O PDF do laudo no storage não confere com o anexado — anexe de novo.", laudo: null };
+  const igual = (await arquivosDaOS(opcoes.inspecaoId, opcoes.rels)).find((a) => a.hash === ex.hash);
+  if (igual) return { erro: `O PDF do laudo é o mesmo arquivo que ${igual.rotulo} desta OS.`, laudo: null };
+  const mesmo = opcoes.anterior?.caminho === laudo.caminho ? opcoes.anterior : null;
+  return {
+    erro: null,
+    laudo: {
+      caminho: laudo.caminho, hash: ex.hash as string, tamanho: ex.tamanho,
+      nome: String(laudo.nome || "laudo.pdf").slice(0, 200),
+      enviado_em: mesmo?.enviado_em || new Date().toISOString(),
+      enviado_por: mesmo?.enviado_por || opcoes.profileId,
+    },
+  };
+}
+
+/** Apaga um PDF de laudo trocado no rascunho, se nenhum relatório ATIVO da
+ *  OS (rascunho, enviado ou de fora) ainda o usa. Melhor esforço. */
+export async function limparLaudoAntigo(inspecaoId: string, caminho: string): Promise<void> {
+  if (!caminhoLaudoValido(caminho, inspecaoId)) return;
+  try {
+    const usado = (await relatoriosDaOS(inspecaoId)).some((r) => (r.dados as any)?.laudoPdf?.caminho === caminho);
+    if (!usado) await getSupabaseAdmin().storage.from(BUCKET).remove([caminho]);
+  } catch { /* melhor esforço */ }
+}
+
+/** Hash (do original) de cada foto da coleta de fotos da execução da OS,
+ *  por caminho — a API não confia no hash que o navegador mandou. */
+async function hashesColetaFotos(inspecaoId: string): Promise<Map<string, string>> {
+  const m = new Map<string, string>();
+  const { data } = await getSupabaseAdmin().from("gp_fotos_execucao").select("itens").eq("inspecao_id", inspecaoId).maybeSingle();
+  for (const v of Object.values(((data as any)?.itens || {}) as Record<string, any>)) {
+    for (const f of Array.isArray(v) ? v : [v]) if (f?.caminho && f?.hash) m.set(f.caminho, f.hash);
+  }
+  return m;
+}
+
 /** Valida no servidor o snapshot do formulário (relatório gerado): datas,
  *  revisão/código, cadastro, pessoas e fotos. `anterior` = o rascunho que
  *  está sendo atualizado (uma revisão digitada por quem pode continua valendo
  *  quando outro perfil salva de novo sem mexer nela). */
 export async function validarSnapshotServidor(
   s: SnapshotRelatorio, opcoes: {
-    info: InfoOSRelatorio; rels: RelatorioRef[]; tipo: string; profile: PerfilLike;
+    info: InfoOSRelatorio; rels: RelatorioRef[]; tipo: string; profile: PerfilLike & { id?: string | null };
     anterior?: SnapshotRelatorio | null;
+    /** Envio para aprovação (Fase 8: sem o PDF do laudo é ⛔). */
+    enviar?: boolean;
   }
 ): Promise<ResultadoValidacao> {
   const { info, rels, tipo, profile, anterior } = opcoes;
@@ -183,6 +266,28 @@ export async function validarSnapshotServidor(
   (s.fotos || []).forEach((f, i) => {
     if (!caminhoFotoValido(f?.caminho, info.id)) addErro(r, `fotos.${i}`, "Foto sem arquivo salvo nesta OS — gere o rascunho de novo.");
   });
+  // Fase 8 — relatório de execução: pH/cloro, laudo, PDF do laudo e as fotos
+  // da coleta (o hash do original vem do banco, não do navegador).
+  let rExec = novoResultado();
+  if (tipo === "execucao") {
+    const hashes = await hashesColetaFotos(info.id);
+    (s.fotos || []).forEach((f) => {
+      if (f && f.caminho?.startsWith(`fotos-execucao/${info.id}/`)) f.hashColeta = hashes.get(f.caminho) || undefined;
+    });
+    const proc = await procedimentoDaOS(info.cadastro.procedimento);
+    const cloro = cloroDoProcedimento(proc);
+    if (s.laudoPdf) {
+      const lv = await verificarLaudoPdf(s.laudoPdf, { inspecaoId: info.id, rels, profileId: profile.id || null, anterior: anterior?.laudoPdf });
+      if (lv.erro) addErro(r, "laudoPdf", lv.erro);
+      else s.laudoPdf = lv.laudo;
+    }
+    rExec = validarRelatorioExecucao(s, {
+      inspecaoId: info.id, hoje: hojeBrasil(), unidadeCloro: cloro.unidade, limiteCloro: cloro.limite,
+      usaLaudo: procedimentoUsaLaudo(proc), exigirLaudoPdf: !!opcoes.enviar,
+    });
+  } else if (s.laudoPdf) {
+    s.laudoPdf = null;   // laudo é só do relatório de execução
+  }
   const v = validarRelatorio(s, {
     hoje: hojeBrasil(),
     dataColeta,
@@ -191,8 +296,10 @@ export async function validarSnapshotServidor(
     podeEditarRevisao: podeEditarRevisao(profile) || manualAnterior,
     cadastro: info.cadastro,
   });
-  return mesclar(r, v);
+  return mesclar(r, v, rExec);
 }
+
+export { MSG_LAUDO_OBRIGATORIO };
 
 /** Restaurar um relatório da lixeira não pode criar ambiguidade: segundo
  *  rascunho do tipo, ou o mesmo arquivo de outro relatório ativo → erro.
