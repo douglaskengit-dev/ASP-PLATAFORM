@@ -1,8 +1,11 @@
 "use client";
 
-/** ASP — Detalhe do Projeto: informações + lista de inspeções (tanques/pontos).
- * Criar inspeção nasce na fase 2 (Agendamento). Ver COWORK-ASP.md §2. */
-import { useEffect, useState } from "react";
+/** ASP — Detalhe do Projeto: informações + lista de Ordens de Serviço (OS =
+ * gp_inspecoes, uma por tanque/ponto). A OS nasce na fase 2 (Agendamento).
+ * Regras da criação em lib/validacao/ordemServico.ts — as mesmas que a API
+ * repete: identificação única no projeto, procedimento obrigatório e tanque
+ * completo; OS de mesmo nome na lixeira oferece "Restaurar". Ver COWORK-ASP.md §2. */
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/app/components/Modal";
@@ -12,7 +15,11 @@ import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import FormularioTanque from "@/app/components/FormularioTanque";
 import FormularioProjeto from "@/app/components/FormularioProjeto";
 import Rdos from "@/app/components/Rdos";
-import { erroDoTanque, resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
+import { resumoTanque, TANQUE_FORM_VAZIO, type Tanque, type TanqueForm } from "@/lib/asp/tanque";
+import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
+import {
+  identificacaoRepetida, mesclar, novoResultado, ResultadoValidacao, ROTULOS_OS, temErros, validarOS,
+} from "@/lib/validacao";
 
 interface Cliente {
   id: string;
@@ -37,7 +44,7 @@ interface Inspecao {
   ferramenta_coleta: string;
   /** Cadastro do tanque: dimensões, capacidade e material. */
   tanque?: Tanque | null;
-  agendamentos?: { data_visita: string | null; hora: string | null; tipo: string }[];
+  agendamentos?: { data_visita: string | null; hora: string | null; tipo: string; a_definir?: boolean; substituido_em?: string | null }[];
   ultima_acao?: {
     acao: string; fase_de: number; fase_para: number;
     data_autenticacao: string | null; criado_em: string;
@@ -45,9 +52,12 @@ interface Inspecao {
   } | null;
 }
 
+/** Próxima visita entre os agendamentos ATIVOS (remarcados ficam de fora);
+ * sem nenhuma data, "data a definir" se houver um pendente. */
 function proximaData(ins: Inspecao): string | null {
-  const datas = (ins.agendamentos || []).filter((a) => a.data_visita).sort((a, b) => (a.data_visita! < b.data_visita! ? -1 : 1));
-  if (datas.length === 0) return null;
+  const ativos = (ins.agendamentos || []).filter((a) => !a.substituido_em);
+  const datas = ativos.filter((a) => a.data_visita).sort((a, b) => (a.data_visita! < b.data_visita! ? -1 : 1));
+  if (datas.length === 0) return ativos.some((a) => a.a_definir) ? "data a definir" : null;
   const hoje = new Date().toISOString().slice(0, 10);
   const futura = datas.find((a) => (a.data_visita || "") >= hoje) || datas[datas.length - 1];
   const d = new Date(`${futura.data_visita}T00:00:00`).toLocaleDateString("pt-BR");
@@ -76,6 +86,12 @@ export default function ProjetoDetalhePage() {
   const [tanque, setTanque] = useState<TanqueForm>({ ...TANQUE_FORM_VAZIO });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // Validação da nova OS: erro "obrigatório" só depois de mexer no campo ou
+  // tentar criar; o que a API devolveu fica até o usuário mudar algo.
+  const [tentou, setTentou] = useState(false);
+  const [tocados, setTocados] = useState<Set<string>>(new Set());
+  const [servidor, setServidor] = useState<ResultadoValidacao>(novoResultado());
+  const [restaurando, setRestaurando] = useState(false);
   // Edição do projeto
   const [modalEdit, setModalEdit] = useState(false);
 
@@ -148,17 +164,40 @@ export default function ProjetoDetalhePage() {
     }
   }
 
+  /** Abre o formulário da nova OS. A lixeira do projeto entra na checagem
+   *  (mesmo nome na lixeira → oferece restaurar em vez de criar outra). */
+  function abrirNovaOS() {
+    setErro(null);
+    setTentou(false);
+    setTocados(new Set());
+    setServidor(novoResultado());
+    fetch(`/api/inspecoes?projetoId=${id}&lixeira=1`).then((r) => (r.ok ? r.json() : {}))
+      .then((d: any) => setInspLixeira(d.inspecoes || [])).catch(() => {});
+    setModalAberto(true);
+  }
+
+  function mudarCampoOS(campo: "identificacao" | "procedimento" | "tanque") {
+    setTocados((t) => new Set(t).add(campo));
+    setServidor(novoResultado());
+  }
+
+  const resultadoOS = useMemo(() => {
+    const local = validarOS({ identificacao, procedimento, tanque }, {
+      ordens: [
+        ...inspecoes.map((i) => ({ id: i.id, identificacao: i.identificacao, tanque: i.tanque })),
+        ...inspLixeira.map((i) => ({ id: i.id, identificacao: i.identificacao, tanque: i.tanque, excluido: true })),
+      ],
+      procedimentos: procedimentos.length ? procedimentos.map((p) => p.codigo).filter(Boolean) : undefined,
+    });
+    return mesclar(local, servidor);
+  }, [identificacao, procedimento, tanque, inspecoes, inspLixeira, procedimentos, servidor]);
+  const mostrarOS = (campo: string) => tentou || tocados.has(campo);
+  const naLixeira = identificacaoRepetida(identificacao, { ordens: inspLixeira.map((i) => ({ ...i, excluido: true })) }, true);
+
   async function criarInspecao() {
     setErro(null);
-    if (!identificacao.trim()) {
-      setErro("Informe a identificação (ex.: Tanque TQ-01).");
-      return;
-    }
-    const problemaTanque = erroDoTanque(tanque);
-    if (problemaTanque) {
-      setErro(problemaTanque);
-      return;
-    }
+    setTentou(true);
+    if (temErros(resultadoOS)) return;
     setSalvando(true);
     try {
       const r = await fetch("/api/inspecoes", {
@@ -168,6 +207,7 @@ export default function ProjetoDetalhePage() {
       });
       const d = await r.json();
       if (!r.ok) {
+        if (d.erros) setServidor({ erros: d.erros, avisos: d.avisos || {} });
         setErro(d.erro || "Não foi possível criar a OS.");
         return;
       }
@@ -180,6 +220,21 @@ export default function ProjetoDetalhePage() {
       setErro("Falha de rede ao salvar.");
     } finally {
       setSalvando(false);
+    }
+  }
+
+  /** "Restaurar" a OS de mesmo nome que está na lixeira, no lugar de criar outra. */
+  async function restaurarEmVezDeCriar(iid: string) {
+    setRestaurando(true);
+    setErro(null);
+    try {
+      const r = await fetch(`/api/inspecoes/${iid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurar: true }) });
+      if (!r.ok) { setErro((await r.json().catch(() => ({}))).erro || "Falha ao restaurar."); return; }
+      setIdentificacao("");
+      setModalAberto(false);
+      carregar();
+    } finally {
+      setRestaurando(false);
     }
   }
 
@@ -240,7 +295,7 @@ export default function ProjetoDetalhePage() {
             </button>
           )}
           {!verLixeiraInsp && (
-            <button className="btn-azul" onClick={() => { setErro(null); setModalAberto(true); }}>+ Nova OS</button>
+            <button className="btn-azul" onClick={abrirNovaOS}>+ Nova OS</button>
           )}
         </div>
       </div>
@@ -331,26 +386,41 @@ export default function ProjetoDetalhePage() {
         <Modal titulo="Nova Ordem de Serviço (OS)" onFechar={() => setModalAberto(false)}>
           <div className="form-projeto" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Identificação</label>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Identificação *</label>
               <input
                 value={identificacao}
-                onChange={(e) => setIdentificacao(e.target.value)}
+                maxLength={160}
+                onChange={(e) => { setIdentificacao(e.target.value); mudarCampoOS("identificacao"); }}
                 placeholder="ex.: Tanque TQ-01"
                 autoFocus
+                className={mostrarOS("identificacao") && resultadoOS.erros.identificacao ? "val-invalido" : undefined}
                 onKeyDown={(e) => { if (e.key === "Enter") criarInspecao(); }}
               />
-              <small style={{ color: "var(--cinza)" }}>A OS começa na fase 2 (Agendamento). Coleta padrão: medidor de sedimento.</small>
+              <MensagensCampo r={resultadoOS} campo="identificacao" mostrarErros={mostrarOS("identificacao") || !!identificacao.trim()}>
+                {naLixeira && podeExcluir && !(resultadoOS.erros.identificacao || []).length && (
+                  <button type="button" className="val-acao" disabled={restaurando} onClick={() => restaurarEmVezDeCriar(naLixeira.id)}>
+                    {restaurando ? "Restaurando…" : `↩ Restaurar “${naLixeira.identificacao}”`}
+                  </button>
+                )}
+              </MensagensCampo>
+              <small style={{ color: "var(--cinza)" }}>
+                Única no projeto — “TQ-01”, “tq 01” e “TQ01” contam como a mesma. A OS começa na fase 2 (Agendamento).
+              </small>
             </div>
             <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Procedimento</label>
-              <select value={procedimento} onChange={(e) => setProcedimento(e.target.value)}>
-                <option value="">— definir depois —</option>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Procedimento *</label>
+              <select value={procedimento} onChange={(e) => { setProcedimento(e.target.value); mudarCampoOS("procedimento"); }}
+                className={mostrarOS("procedimento") && resultadoOS.erros.procedimento ? "val-invalido" : undefined}>
+                <option value="">— selecione —</option>
                 {procedimentos.map((p) => (
-                  <option key={p.id} value={p.codigo}>{p.codigo} — {p.nome}</option>
+                  <option key={p.id} value={p.codigo || ""} disabled={!p.codigo}>
+                    {p.codigo ? `${p.codigo} — ${p.nome}` : `${p.nome} (sem código — corrija no Catálogo)`}
+                  </option>
                 ))}
               </select>
+              <MensagensCampo r={resultadoOS} campo="procedimento" mostrarErros={mostrarOS("procedimento")} />
               <small style={{ color: "var(--cinza)" }}>
-                Define o formato do relatório (tópicos, seções e modelo). Pode ser alterado depois.
+                Define o formato do relatório (tópicos, seções e modelo). Pode ser trocado depois, na OS.
               </small>
             </div>
             {/* Tanque: cadastrado aqui uma vez e reaproveitado por todo
@@ -360,12 +430,15 @@ export default function ProjetoDetalhePage() {
               <p className="detalhe" style={{ margin: "2px 0 10px" }}>
                 Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta OS.
               </p>
-              <FormularioTanque valor={tanque} onChange={setTanque} desabilitado={salvando} />
+              <FormularioTanque valor={tanque} onChange={(t) => { setTanque(t); mudarCampoOS("tanque"); }} desabilitado={salvando} />
+              <MensagensCampo r={resultadoOS} campo="tanque" mostrarErros={tentou} />
             </div>
+            {/* Resumo só depois de tentar criar — antes, as mensagens ficam nos campos. */}
+            {tentou && <ResumoValidacao r={resultadoOS} rotulos={ROTULOS_OS} />}
             {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button className="btn-azul btn-sec" onClick={() => setModalAberto(false)} disabled={salvando}>Cancelar</button>
-              <button className="btn-azul" onClick={criarInspecao} disabled={salvando}>{salvando ? "Criando…" : "Criar OS"}</button>
+              <button className="btn-azul" onClick={criarInspecao} disabled={salvando || (tentou && temErros(resultadoOS))}>{salvando ? "Criando…" : "Criar OS"}</button>
             </div>
           </div>
         </Modal>

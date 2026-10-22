@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
+import { conflitoAoRestaurarOS } from "@/lib/asp/os-validacao-api";
 
 export const runtime = "nodejs";
 
@@ -64,6 +65,15 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   if (!ehTipo(body?.tipo) || !body?.id) {
     return NextResponse.json({ erro: "Tipo ou id inválido." }, { status: 400 });
+  }
+  // OS: restaurar não pode duplicar a identificação de uma OS ativa.
+  if (body.tipo === "inspecao") {
+    const conflito = await conflitoAoRestaurarOS(body.id);
+    if (conflito) {
+      return NextResponse.json({
+        erro: `Já existe a OS “${conflito.identificacao}” ativa no projeto. Renomeie-a antes de restaurar esta.`, conflito,
+      }, { status: 409 });
+    }
   }
   const { error } = await getSupabaseAdmin()
     .from(TABELAS[body.tipo].tabela)

@@ -21,6 +21,8 @@ export function emailAgendamentoHtml(d: {
   equipamentos?: string[];
   checklist?: { item: string; ok?: boolean }[];
   link: string;
+  /** Remarcação: a data anterior ("05/11/2026"), que aparece riscada. */
+  remarcadoDe?: string;
 }): string {
   const check = (d.checklist || []).map((c) => `${c.ok ? "✓" : "○"} ${c.item}`).join(" · ");
   return `<div style="background:#f4f6f8;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
@@ -33,8 +35,10 @@ export function emailAgendamentoHtml(d: {
     </tr>
     <tr>
       <td style="padding:24px">
-        <h1 style="margin:0 0 6px;color:#0f5cad;font-size:19px">📅 ${d.tipoLabel} agendada</h1>
-        <p style="margin:0 0 18px;color:#38434d;font-size:14px">${d.ident} está agendada para <strong>${d.quando}</strong>.</p>
+        <h1 style="margin:0 0 6px;color:#0f5cad;font-size:19px">📅 ${d.tipoLabel} ${d.remarcadoDe ? "remarcada" : "agendada"}</h1>
+        <p style="margin:0 0 18px;color:#38434d;font-size:14px">${d.remarcadoDe
+          ? `A OS ${d.ident} foi remarcada de <s>${d.remarcadoDe}</s> para <strong>${d.quando}</strong>. Desconsidere a data anterior (e remova-a da sua agenda).`
+          : `A OS ${d.ident} está agendada para <strong>${d.quando}</strong>.`}</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e4e9ee;border-bottom:1px solid #e4e9ee">
           ${linha("Cliente", d.cliente)}
           ${linha("Projeto", d.projeto)}

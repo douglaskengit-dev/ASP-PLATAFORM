@@ -10,6 +10,7 @@ import HoverCard from "@/app/components/HoverCard";
 import TituloPagina from "@/app/components/TituloPagina";
 import CalendarioAgenda from "@/app/components/CalendarioAgenda";
 import { tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
+import { hojeBrasil } from "@/lib/validacao";
 
 interface Cliente { id: string; razao_social: string }
 interface InspecaoResumo { id: string; fase: number }
@@ -39,10 +40,70 @@ const ROTULO_STATUS: Record<Exclude<Status, "">, string> = {
 
 const FILTROS_VAZIOS = { cliente: "", de: "", ate: "", status: "" as Status };
 
+/** Agendamento pendente ("data a definir"), como /api/agendamentos?aDefinir=1 devolve. */
+interface AgendamentoADefinir {
+  id: string;
+  tipo: string;
+  lembrar_em: string | null;
+  criado_em: string;
+  inspecao: {
+    id: string; identificacao: string;
+    projeto: { codigo_projeto: string | null; pedido_compra: string | null; cliente: { razao_social: string } | null } | null;
+  } | null;
+}
+
+/** Avisos "data a definir": OS sem data de visita. Com "lembrar em" vencido
+ *  ou de hoje, o aviso fica em destaque (atrasado / vence hoje). */
+function AvisosADefinir({ lista }: { lista: AgendamentoADefinir[] }) {
+  if (lista.length === 0) return null;
+  const hoje = hojeBrasil();
+  const peso = (a: AgendamentoADefinir) => (!a.lembrar_em ? 1 : a.lembrar_em <= hoje ? 0 : 2);
+  const ordenada = [...lista].sort((a, b) => peso(a) - peso(b) || (a.lembrar_em || "").localeCompare(b.lembrar_em || ""));
+  const vencidos = lista.filter((a) => a.lembrar_em && a.lembrar_em <= hoje).length;
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h2 style={{ marginTop: 0 }}>
+        ⏳ Agendamentos com data a definir ({lista.length})
+        {vencidos > 0 && <span className="alerta" style={{ fontSize: 14, marginLeft: 8 }}>{vencidos} para lembrar hoje ou atrasado{vencidos === 1 ? "" : "s"}</span>}
+      </h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {ordenada.map((a) => {
+          const p = a.inspecao?.projeto;
+          const estado = !a.lembrar_em ? null : a.lembrar_em < hoje ? "atrasado" : a.lembrar_em === hoje ? "vence hoje" : null;
+          const dataBr = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+          return (
+            <Link key={a.id} href={a.inspecao ? `/inspecoes/${a.inspecao.id}` : "#"} className="item item-col"
+              style={{ textDecoration: "none", color: "inherit", borderLeft: estado ? "3px solid #c2410c" : undefined }}>
+              <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <strong style={{ color: "var(--texto)" }}>
+                  OS {a.inspecao?.identificacao || "—"} · {a.tipo === "execucao" ? "execução" : "inspeção"}
+                </strong>
+                <span className={`detalhe${estado ? " alerta" : ""}`} style={{ margin: 0 }}>
+                  {a.lembrar_em ? `🔔 Lembrar em ${dataBr(a.lembrar_em)}${estado ? ` — ${estado}` : ""}` : "sem lembrete"}
+                </span>
+              </div>
+              <span className="detalhe" style={{ margin: "2px 0 0" }}>
+                {p?.codigo_projeto || p?.pedido_compra || "Projeto"}{p?.cliente?.razao_social ? ` · ${p.cliente.razao_social}` : ""}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [projetos, setProjetos] = useState<Projeto[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [f, setF] = useState(FILTROS_VAZIOS);
+  const [aDefinir, setADefinir] = useState<AgendamentoADefinir[]>([]);
+
+  // Agendamentos com "data a definir" — avisos pendentes (Fase 2).
+  useEffect(() => {
+    fetch("/api/agendamentos?aDefinir=1").then((r) => (r.ok ? r.json() : {}))
+      .then((d: any) => setADefinir(d.agendamentos || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/projetos")
@@ -185,6 +246,8 @@ export default function DashboardPage() {
                 renderPopover={(d) => <span><strong>{d.valor}</strong> projeto(s) de {d.rotulo}.</span>} />
             </div>
           </div>
+
+          <AvisosADefinir lista={aDefinir} />
 
           <div style={{ marginTop: 16 }}>
             <CalendarioAgenda />

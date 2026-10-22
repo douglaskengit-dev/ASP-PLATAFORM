@@ -25,12 +25,18 @@ import { dadosRelatorioDoTanque, erroDoTanque, resumoTanque, tanqueParaForm, TAN
 import AvisoCliente from "@/app/components/AvisoCliente";
 import Rdos from "@/app/components/Rdos";
 import { dataBr, numeroRdo, resumoRdos, type RegistroRdo } from "@/lib/asp/rdo";
+import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
+import {
+  agendamentosSubstituidos, ContextoAgendamento, dataCurta, hojeBrasil, mesclar, nomeDoCatalogo, normalizarEquipamento,
+  novoResultado, OSRef, ResultadoValidacao, ROTULOS_AGENDAMENTO, sugestaoCatalogo, temErros, validarAgendamento, validarOS,
+} from "@/lib/validacao";
 
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
   pedido_compra: string | null;
   endereco: string | null;
+  data_abertura?: string | null;
   cliente: { id?: string; razao_social: string } | null;
 }
 interface Inspecao {
@@ -63,6 +69,10 @@ interface Agendamento {
   id: string; tipo: string; data_visita: string | null; data_execucao: string | null; hora: string | null;
   equipe: MembroEquipe[]; equipamentos: string[]; checklist: { item: string; ok?: boolean }[];
   criado_em: string;
+  /** "Data a definir": pendente, sem data da visita. */
+  a_definir?: boolean; lembrar_em?: string | null;
+  /** Remarcado: saiu de cena (histórico); substituido_por = o que ficou no lugar. */
+  substituido_em?: string | null; substituido_por?: string | null;
 }
 interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null }
 /** Arquivo do projeto, classificado para exibição agrupada. */
@@ -183,6 +193,27 @@ export default function InspecaoDetalhePage() {
   const [agEquipInput, setAgEquipInput] = useState("");
   const [agChecklist, setAgChecklist] = useState<{ item: string; ok: boolean }[]>([]);
   const [agNovoItem, setAgNovoItem] = useState("");
+  /** Tipo do agendamento no modal: o da etapa (novo) ou o gravado (edição). */
+  const [agTipo, setAgTipo] = useState<"inspecao" | "execucao">("inspecao");
+  /** "Data a definir": agendamento pendente, sem data; "lembrar em" opcional. */
+  const [agADefinir, setAgADefinir] = useState(false);
+  const [agLembrar, setAgLembrar] = useState("");
+  /** Equipe como estava gravada (edição) — mantém o nome de quem ficou inativo. */
+  const [agEquipeGravada, setAgEquipeGravada] = useState<MembroEquipe[]>([]);
+  /** Data gravada do agendamento em edição (remarcação / registro antigo). */
+  const [agDataOriginal, setAgDataOriginal] = useState<string | null>(null);
+  /** Recusa imediata ao adicionar equipamento/item repetido. */
+  const [agMsgEquip, setAgMsgEquip] = useState<string | null>(null);
+  const [agMsgItem, setAgMsgItem] = useState<string | null>(null);
+  /** Contexto do banco (/api/agendamentos/verificar) para validar no modal. */
+  const [agCtx, setAgCtx] = useState<Partial<ContextoAgendamento>>({});
+  const [agTentou, setAgTentou] = useState(false);
+  const [agServidor, setAgServidor] = useState<ResultadoValidacao>(novoResultado());
+  /** Equipamentos do Catálogo — sugestões (datalist) e "seria …?". */
+  const [catalogoEquip, setCatalogoEquip] = useState<string[]>([]);
+  // Renomear: OSs do projeto para checar identificação repetida.
+  const [ordensProjeto, setOrdensProjeto] = useState<OSRef[]>([]);
+  const [servidorTitulo, setServidorTitulo] = useState<string | null>(null);
   const [salvandoAgenda, setSalvandoAgenda] = useState(false);
   /** Erro do modal de agendamento — mostrado dentro dele, não no card de
    *  ações, que fica escondido atrás do modal aberto. */
@@ -235,7 +266,10 @@ export default function InspecaoDetalhePage() {
       setNomeUsuarioAtual((p as any)?.nome_completo || data.user.email || "");
     });
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
-    fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => setProcedimentos(d.procedimentos || [])).catch(() => {});
+    fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
+      setProcedimentos(d.procedimentos || []);
+      setCatalogoEquip((d.equipamentos || []).map((e: any) => e.nome).filter(Boolean));
+    }).catch(() => {});
   }, [carregar]);
 
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
@@ -281,6 +315,11 @@ export default function InspecaoDetalhePage() {
     }).catch(() => {});
   }, [projetoId, relatorios, coletas, rdosInsp]);
 
+  // Agendamentos ATIVOS valem para tudo (resumo, relatório, conflitos); os
+  // remarcados (substituídos) só aparecem no histórico da seção.
+  const agAtivos = useMemo(() => agendamentos.filter((a) => !a.substituido_em), [agendamentos]);
+  const agRemarcados = useMemo(() => agendamentos.filter((a) => a.substituido_em), [agendamentos]);
+
   /** Pré-preenchimento do relatório: puxa o que o sistema já sabe — projeto,
    *  cliente, última medição salva (volume, altura, diâmetro) e a equipe do
    *  agendamento. O usuário revisa tudo no formulário antes de gerar. */
@@ -298,7 +337,7 @@ export default function InspecaoDetalhePage() {
     // A data de execução vem do agendamento do MESMO tipo do relatório:
     // até a fase 5 o relatório é de inspeção; a partir daí, de execução.
     const tipoRelatorio: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
-    const ag = agendamentos.find((a) => a.tipo === tipoRelatorio) || agendamentos[0];
+    const ag = agAtivos.find((a) => a.tipo === tipoRelatorio) || agAtivos[0];
     const dataServico = tipoRelatorio === "execucao"
       ? (ag?.data_execucao || ag?.data_visita)
       : (ag?.data_visita || ag?.data_execucao);
@@ -336,7 +375,7 @@ export default function InspecaoDetalhePage() {
       volumeMax: res?.volSedM3 != null ? num(res.volSedM3 * 1.05, 2) : "",
       equipe: (ag?.equipe || []).map((m) => m.nome).join(", "),
     };
-  }, [insp, coletas, agendamentos, relatorios, contatoCliente]);
+  }, [insp, coletas, agAtivos, relatorios, contatoCliente]);
   const bloco: "inspecao" | "execucao" = insp && insp.fase > 5 ? "execucao" : "inspecao";
   const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "");
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "");
@@ -491,10 +530,26 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  /** Renomeia a inspeção. */
+  /** Abre a edição do nome e busca as outras OSs do projeto: a identificação
+   *  segue única no projeto (mesma regra da criação). */
+  function abrirEdicaoTitulo() {
+    if (!insp) return;
+    setTituloNovo(insp.identificacao);
+    setServidorTitulo(null);
+    setEditandoTitulo(true);
+    if (insp.projeto?.id) {
+      fetch(`/api/inspecoes?projetoId=${insp.projeto.id}`).then((r) => (r.ok ? r.json() : {}))
+        .then((d: any) => setOrdensProjeto((d.inspecoes || []).map((o: any) => ({ id: o.id, identificacao: o.identificacao }))))
+        .catch(() => {});
+    }
+  }
+  const resultadoTitulo = validarOS({ identificacao: tituloNovo }, { ordens: ordensProjeto, excluirId: id, exigirProcedimento: false });
+
+  /** Renomeia a OS. */
   async function salvarTitulo() {
-    const titulo = tituloNovo.trim();
-    if (!titulo || titulo === insp?.identificacao) { setEditandoTitulo(false); return; }
+    const titulo = tituloNovo.replace(/\s+/g, " ").trim();
+    if (titulo === insp?.identificacao) { setEditandoTitulo(false); return; }
+    if (temErros(resultadoTitulo)) return;
     setSalvandoTitulo(true);
     setErro(null);
     try {
@@ -503,7 +558,7 @@ export default function InspecaoDetalhePage() {
         body: JSON.stringify({ identificacao: titulo }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setErro(data?.erro || "Falha ao renomear a OS."); return; }
+      if (!res.ok) { setServidorTitulo(data?.erro || "Falha ao renomear a OS."); return; }
       setEditandoTitulo(false);
       carregar();
     } catch {
@@ -775,52 +830,121 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  function abrirAgenda() {
-    setAgendaEditando(null);
-    setAgData(""); setAgHora(""); setAgDataExec("");
-    setAgEquipeIds([]); setAgEquipamentos([]); setAgEquipInput("");
-    setAgChecklist(CHECKLIST_PADRAO.map((item) => ({ item, ok: false })));
-    setAgNovoItem("");
+  /** Zera o que é comum ao abrir o modal (novo ou edição). */
+  function prepararModalAgenda() {
+    setAgEquipInput(""); setAgNovoItem("");
+    setAgMsgEquip(null); setAgMsgItem(null);
+    setAgTentou(false); setAgServidor(novoResultado()); setAgCtx({});
     setErroAgenda(null);
     setModalAgenda(true);
+  }
+
+  function abrirAgenda() {
+    setAgendaEditando(null);
+    setAgTipo(bloco);
+    setAgData(""); setAgHora(""); setAgDataExec("");
+    setAgADefinir(false); setAgLembrar(""); setAgDataOriginal(null);
+    setAgEquipeIds([]); setAgEquipeGravada([]); setAgEquipamentos([]);
+    setAgChecklist(CHECKLIST_PADRAO.map((item) => ({ item, ok: false })));
+    prepararModalAgenda();
   }
 
   function abrirAgendaEdicao(a: Agendamento) {
     setAgendaEditando(a.id);
+    setAgTipo(a.tipo === "execucao" ? "execucao" : "inspecao");
     setAgData(a.data_visita || ""); setAgHora(a.hora || ""); setAgDataExec(a.data_execucao || "");
+    setAgADefinir(!!a.a_definir); setAgLembrar(a.lembrar_em || ""); setAgDataOriginal(a.data_visita);
     setAgEquipeIds((a.equipe || []).map((m) => m.id));
+    setAgEquipeGravada(a.equipe || []);
     setAgEquipamentos(a.equipamentos || []);
-    setAgEquipInput("");
     setAgChecklist((a.checklist || []).map((c) => ({ item: c.item, ok: !!c.ok })));
-    setAgNovoItem("");
-    setErroAgenda(null);
-    setModalAgenda(true);
+    prepararModalAgenda();
   }
 
   async function removerAgenda(a: Agendamento) {
-    if (!confirm("Excluir este agendamento?")) return;
+    if (!confirm(a.substituido_em ? "Apagar este registro do histórico de remarcações?" : "Excluir este agendamento?")) return;
     const r = await fetch(`/api/agendamentos/${a.id}`, { method: "DELETE" });
     if (!r.ok) { const d = await r.json(); setErro(d.erro || "Falha ao excluir."); return; }
     carregar();
   }
 
+  // Contexto do banco para o modal: agendamentos ativos desta OS e os de
+  // outras OSs na data escolhida. Debounce e descarte de resposta fora de ordem.
+  const seqVerif = useRef(0);
+  const dataVerif = agADefinir ? "" : agData;
+  useEffect(() => {
+    if (!modalAgenda) return;
+    const n = ++seqVerif.current;
+    const t = setTimeout(() => {
+      fetch(`/api/agendamentos/verificar?${new URLSearchParams({ inspecaoId: id, data: dataVerif })}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d && n === seqVerif.current) setAgCtx(d); })
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [modalAgenda, id, dataVerif]);
+
+  /** Equipe escolhida: usuários ativos e, na edição, quem já estava gravado
+   *  (mesmo inativo — aí vira erro para tirar, em vez de sumir calado). */
+  const agEquipe = useMemo(() => agEquipeIds.map((uid) => {
+    const u = usuarios.find((x) => x.id === uid);
+    return u ? { id: u.id, nome: u.nome } : agEquipeGravada.find((m) => m.id === uid) || { id: uid, nome: "usuário" };
+  }), [agEquipeIds, usuarios, agEquipeGravada]);
+
+  const dadosAgenda = {
+    tipo: agTipo, aDefinir: agADefinir, dataVisita: agADefinir ? "" : agData, hora: agHora,
+    dataExecucao: agDataExec, lembrarEm: agADefinir ? agLembrar : "",
+    equipe: agEquipe, equipamentos: agEquipamentos, checklist: agChecklist,
+  };
+  const ctxAgenda: ContextoAgendamento = {
+    hoje: agCtx.hoje || hojeBrasil(),
+    inspecaoId: id,
+    dataAbertura: agCtx.dataAbertura ?? insp?.projeto?.data_abertura ?? null,
+    local: agCtx.local,
+    original: agendaEditando ? { id: agendaEditando, data_visita: agDataOriginal } : null,
+    // Sem resposta do servidor ainda, vale o que a página já tem.
+    daOS: agCtx.daOS || agAtivos.map((a) => ({ ...a, inspecao_id: id })),
+    noDia: (agCtx.noDia || []).filter((a) => !dataVerif || a.data_visita === dataVerif),
+    usuariosAtivos: usuarios.length ? usuarios.map((u) => u.id) : undefined,
+    catalogo: agCtx.catalogo || catalogoEquip,
+  };
+  const resultadoAgenda = mesclar(validarAgendamento(dadosAgenda, ctxAgenda), agServidor);
+  const substituidosAgenda = agendamentosSubstituidos(dadosAgenda, ctxAgenda);
+
+  /** Qualquer mudança no modal invalida a resposta anterior da API. */
+  function mexeuAgenda() {
+    setAgServidor(novoResultado());
+    setErroAgenda(null);
+  }
+
   async function salvarAgenda() {
     setErroAgenda(null);
-    if (!agData) { setErroAgenda("Informe a data da visita."); return; }
+    setAgTentou(true);
+    if (temErros(resultadoAgenda)) return;
     setSalvandoAgenda(true);
     try {
-      const equipe = usuarios.filter((u) => agEquipeIds.includes(u.id)).map((u) => ({ id: u.id, nome: u.nome }));
-      const payload = { dataVisita: agData, dataExecucao: agDataExec || undefined, hora: agHora || undefined, equipe, equipamentos: agEquipamentos, checklist: agChecklist };
+      const payload = {
+        aDefinir: agADefinir,
+        dataVisita: agADefinir ? null : agData,
+        lembrarEm: agADefinir ? agLembrar || null : null,
+        dataExecucao: agDataExec || null,
+        hora: agADefinir ? null : agHora || null,
+        equipe: agEquipe, equipamentos: agEquipamentos, checklist: agChecklist,
+      };
       const res = await enviarJson(
         agendaEditando ? `/api/agendamentos/${agendaEditando}` : "/api/agendamentos",
         agendaEditando ? "PATCH" : "POST",
-        agendaEditando ? payload : { inspecaoId: id, tipo: bloco, ...payload },
+        agendaEditando ? payload : { inspecaoId: id, tipo: agTipo, ...payload },
         "Agendamento"
       );
-      if (!res.queued && !res.ok) { setErroAgenda(res.data?.erro || "Falha ao salvar o agendamento."); return; }
+      if (!res.queued && !res.ok) {
+        if (res.data?.erros) setAgServidor({ erros: res.data.erros, avisos: res.data.avisos || {} });
+        setErroAgenda(res.data?.erro || "Falha ao salvar o agendamento.");
+        return;
+      }
       setModalAgenda(false);
       setAgendaEditando(null);
-      if (res.queued) alert("Sem conexão — agendamento salvo offline e enviado ao reconectar.");
+      if (res.queued) alert("Sem conexão — agendamento salvo offline e enviado ao reconectar (as regras são conferidas ao enviar).");
       else carregar();
     } finally {
       setSalvandoAgenda(false);
@@ -829,11 +953,34 @@ export default function InspecaoDetalhePage() {
 
   function toggleEquipe(uid: string) {
     setAgEquipeIds((prev) => prev.includes(uid) ? prev.filter((x) => x !== uid) : [...prev, uid]);
+    mexeuAgenda();
   }
+  /** Adiciona o equipamento com o nome do Catálogo (se for o mesmo item) e
+   *  recusa repetido — "detector de gases" = "Detector de Gases". */
   function addEquipamento() {
-    const v = agEquipInput.trim();
-    if (v && !agEquipamentos.includes(v)) setAgEquipamentos((p) => [...p, v]);
+    const v = agEquipInput.replace(/\s+/g, " ").trim();
+    if (!v) return;
+    const nome = nomeDoCatalogo(v, ctxAgenda.catalogo);
+    const igual = agEquipamentos.find((e) => normalizarEquipamento(e) === normalizarEquipamento(nome));
+    if (igual) { setAgMsgEquip(`“${igual}” já está na lista.`); return; }
+    setAgEquipamentos((p) => [...p, nome]);
     setAgEquipInput("");
+    setAgMsgEquip(null);
+    mexeuAgenda();
+  }
+  function trocarEquipamento(de: string, para: string) {
+    setAgEquipamentos((p) => p.map((e) => (e === de ? para : e)));
+    mexeuAgenda();
+  }
+  function addItemChecklist() {
+    const v = agNovoItem.replace(/\s+/g, " ").trim();
+    if (!v) return;
+    const igual = agChecklist.find((c) => normalizarEquipamento(c.item) === normalizarEquipamento(v));
+    if (igual) { setAgMsgItem(`“${igual.item}” já está no checklist.`); return; }
+    setAgChecklist((p) => [...p, { item: v, ok: false }]);
+    setAgNovoItem("");
+    setAgMsgItem(null);
+    mexeuAgenda();
   }
 
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
@@ -863,9 +1010,10 @@ export default function InspecaoDetalhePage() {
   /** "12/11 09:00" do agendamento mais recente da etapa; execução sem
    *  agendamento próprio mostra a data prevista, se houver. */
   const quandoAgenda = (tipo: "inspecao" | "execucao") => {
-    const a = agendamentos.find((x) => x.tipo === tipo);
+    const a = agAtivos.find((x) => x.tipo === tipo);
     if (a?.data_visita) return `${formatarData(a.data_visita).slice(0, 5)}${a.hora ? ` ${a.hora.slice(0, 5)}` : ""}`;
-    const prevista = tipo === "execucao" && agendamentos.find((x) => x.data_execucao)?.data_execucao;
+    if (a?.a_definir) return "a definir";
+    const prevista = tipo === "execucao" && agAtivos.find((x) => x.data_execucao)?.data_execucao;
     return prevista ? `${formatarData(prevista).slice(0, 5)} (prevista)` : "—";
   };
   const resumoAgendamentos = `Inspeção ${quandoAgenda("inspecao")} · Execução ${quandoAgenda("execucao")}`;
@@ -905,7 +1053,9 @@ export default function InspecaoDetalhePage() {
             {editandoTitulo ? (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <input autoFocus value={tituloNovo} maxLength={160} disabled={salvandoTitulo}
-                  onChange={(e) => setTituloNovo(e.target.value)}
+                  aria-label="Identificação da OS"
+                  className={temErros(resultadoTitulo) ? "val-invalido" : undefined}
+                  onChange={(e) => { setTituloNovo(e.target.value); setServidorTitulo(null); }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") salvarTitulo();
                     if (e.key === "Escape") setEditandoTitulo(false);
@@ -913,18 +1063,21 @@ export default function InspecaoDetalhePage() {
                   style={{ flex: "1 1 220px", minWidth: 0, padding: "8px 10px", borderRadius: 8,
                     border: "1px solid var(--borda)", background: "var(--bg-card)",
                     color: "var(--texto)", fontSize: 18, fontWeight: 700 }} />
-                <button className="btn-dl" disabled={salvandoTitulo} onClick={salvarTitulo}>
+                <button className="btn-dl" disabled={salvandoTitulo || temErros(resultadoTitulo)} onClick={salvarTitulo}>
                   {salvandoTitulo ? "Salvando…" : "Salvar"}
                 </button>
                 <button className="btn-dl btn-sec" disabled={salvandoTitulo}
                   onClick={() => setEditandoTitulo(false)}>Cancelar</button>
+                <div style={{ flexBasis: "100%" }}>
+                  <MensagensCampo r={resultadoTitulo} campo="identificacao" />
+                  {servidorTitulo && <p className="val-msg val-erro">⛔ {servidorTitulo}</p>}
+                </div>
               </div>
             ) : (
               <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span>{insp.identificacao}</span>
                 {podeRenomear && (
-                  <button className="fu-icone-btn" title="Renomear a OS"
-                    onClick={() => { setTituloNovo(insp.identificacao); setEditandoTitulo(true); }}>✎</button>
+                  <button className="fu-icone-btn" title="Renomear a OS" onClick={abrirEdicaoTitulo}>✎</button>
                 )}
               </h2>
             )}
@@ -942,7 +1095,9 @@ export default function InspecaoDetalhePage() {
                   onChange={(e) => salvarProcedimento(e.target.value)}
                   style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--borda)",
                     background: "var(--bg-card)", color: "var(--texto)", fontSize: 13, maxWidth: 320 }}>
-                  <option value="">— não definido —</option>
+                  {/* Procedimento é obrigatório: "não definido" só aparece em
+                      OS antiga sem procedimento, e não pode ser escolhido. */}
+                  {!insp.procedimento && <option value="" disabled>— não definido (escolha um) —</option>}
                   {/* Procedimento sem código não pode ser escolhido: o valor
                       vazio se confunde com "não definido" e nada seria salvo. */}
                   {procedimentos.map((p) => (
@@ -1126,19 +1281,26 @@ export default function InspecaoDetalhePage() {
           )}
         </SecaoRecolhivel>
 
-        <SecaoRecolhivel id="agendamentos" titulo={`Agendamentos (${agendamentos.length})`}
+        <SecaoRecolhivel id="agendamentos" titulo={`Agendamentos (${agAtivos.length})`}
           aberta={secoes.aberta("agendamentos")} onAlternar={() => secoes.alternar("agendamentos")}
           resumo={resumoAgendamentos}
-          acoesCabecalho={podeAgenda && <button className="btn-azul" onClick={abrirAgenda}>+ Agendar ({bloco})</button>}>
-          {agendamentos.length === 0 ? (
+          acoesCabecalho={podeAgenda && <button className="btn-azul" onClick={abrirAgenda}>+ Agendar ({rotuloEtapa(bloco)})</button>}>
+          {agAtivos.length === 0 ? (
             <p className="vazio" style={{ margin: "8px 0 0" }}>Nenhum agendamento.</p>
           ) : (
-            agendamentos.map((a) => (
-              <div key={a.id} style={{ borderLeft: "3px solid var(--primaria)", paddingLeft: 12, marginTop: 10 }}>
+            agAtivos.map((a) => (
+              <div key={a.id} style={{ borderLeft: `3px solid ${a.a_definir ? "#c2410c" : "var(--primaria)"}`, paddingLeft: 12, marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                   <div style={{ color: "var(--texto)", fontWeight: 700 }}>
-                    📅 {a.data_visita ? formatarData(a.data_visita) : "sem data"}{a.hora ? ` às ${a.hora}` : ""}
-                    <span className="detalhe" style={{ margin: "0 0 0 8px", textTransform: "capitalize", fontWeight: 400 }}>({a.tipo})</span>
+                    📅 {a.data_visita ? formatarData(a.data_visita) : a.a_definir ? "Data a definir" : "sem data"}{a.hora ? ` às ${a.hora}` : ""}
+                    <span className="detalhe" style={{ margin: "0 0 0 8px", fontWeight: 400 }}>({rotuloEtapa(a.tipo)})</span>
+                    {a.a_definir && (
+                      <span className={`detalhe${a.lembrar_em && a.lembrar_em <= hojeBrasil() ? " alerta" : ""}`} style={{ margin: 0, display: "block", fontWeight: 400 }}>
+                        {a.lembrar_em
+                          ? `🔔 Lembrar em ${formatarData(a.lembrar_em)}${a.lembrar_em < hojeBrasil() ? " — atrasado" : a.lembrar_em === hojeBrasil() ? " — hoje" : ""}`
+                          : "Pendente — edite para definir a data."}
+                      </span>
+                    )}
                   </div>
                   {podeAgenda && (
                     <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -1157,6 +1319,30 @@ export default function InspecaoDetalhePage() {
                 )}
               </div>
             ))
+          )}
+          {/* Remarcações: a data antiga não some — fica aqui, recolhida. */}
+          {agRemarcados.length > 0 && (
+            <details style={{ marginTop: 12 }}>
+              <summary className="detalhe" style={{ margin: 0, cursor: "pointer" }}>
+                Histórico de remarcações ({agRemarcados.length})
+              </summary>
+              {agRemarcados.map((a) => {
+                const novo = agendamentos.find((x) => x.id === a.substituido_por);
+                const de = a.data_visita ? dataCurta(a.data_visita) : "data a definir";
+                const para = novo?.data_visita ? dataCurta(novo.data_visita) : novo?.a_definir ? "data a definir" : "—";
+                return (
+                  <div key={a.id} className="detalhe" style={{ display: "flex", justifyContent: "space-between", gap: 8, margin: "6px 0 0", paddingLeft: 12, borderLeft: "3px solid var(--borda)" }}>
+                    <span>
+                      ↪ Remarcado de <s>{de}</s> para <strong>{para}</strong> ({rotuloEtapa(a.tipo)})
+                      {a.substituido_em ? ` · em ${formatar(a.substituido_em)}` : ""}
+                    </span>
+                    {podeAgenda && (
+                      <button className="fu-icone-btn lixeira" title="Apagar do histórico" onClick={() => removerAgenda(a)}>🗑</button>
+                    )}
+                  </div>
+                );
+              })}
+            </details>
           )}
         </SecaoRecolhivel>
       </div>
@@ -1481,29 +1667,55 @@ export default function InspecaoDetalhePage() {
         </Modal>
       )}
 
-      {/* Modal: agendamento com checklist extensível */}
+      {/* Modal: agendamento com checklist extensível. Regras em
+          lib/validacao/agendamento.ts (a API repete): ⛔ nos campos bloqueia
+          salvar; ⚠️ só alerta. O resumo aparece junto do botão. */}
       {modalAgenda && (
-        <Modal titulo={agendaEditando ? `Editar agendamento (${bloco})` : `Agendar ${bloco}`} onFechar={() => { setModalAgenda(false); setAgendaEditando(null); }}>
+        <Modal titulo={agendaEditando ? `Editar agendamento (${rotuloEtapa(agTipo)})` : `Agendar ${rotuloEtapa(agTipo)}`} onFechar={() => { setModalAgenda(false); setAgendaEditando(null); }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44, fontSize: 14, color: "var(--texto)", cursor: "pointer" }}>
+              <input type="checkbox" checked={agADefinir} style={{ width: 18, height: 18 }}
+                onChange={(e) => { setAgADefinir(e.target.checked); mexeuAgenda(); }} />
+              <span><strong>Data a definir</strong> — agendar sem data (fica como pendência no Dashboard e avisa Comercial/Gerência).</span>
+            </label>
+            {agADefinir ? (
               <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita *</label>
-                <input type="date" style={{ ...inputStyle, borderColor: erroAgenda && !agData ? "#dc2626" : "var(--borda)" }} value={agData} onChange={(e) => setAgData(e.target.value)} />
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Lembrar em</label>
+                <input type="date" style={inputStyle} value={agLembrar} min={ctxAgenda.hoje}
+                  onChange={(e) => { setAgLembrar(e.target.value); mexeuAgenda(); }} />
+                <MensagensCampo r={resultadoAgenda} campo="lembrarEm" />
+                <small style={{ color: "var(--cinza)" }}>Opcional — nesse dia o aviso fica em destaque no Dashboard.</small>
+                {/* Sem campo de data: a remarcação (substitui o atual) aparece aqui. */}
+                <MensagensCampo r={resultadoAgenda} campo="dataVisita" />
               </div>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Hora</label>
-                <input type="time" style={inputStyle} value={agHora} onChange={(e) => setAgHora(e.target.value)} />
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da visita *</label>
+                  <input type="date" min={agendaEditando && agDataOriginal && agDataOriginal < ctxAgenda.hoje ? undefined : ctxAgenda.hoje}
+                    className={(agTentou || !!agData) && resultadoAgenda.erros.dataVisita ? "val-invalido" : undefined}
+                    style={inputStyle} value={agData} onChange={(e) => { setAgData(e.target.value); mexeuAgenda(); }} />
+                  <MensagensCampo r={resultadoAgenda} campo="dataVisita" mostrarErros={agTentou || !!agData} />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Hora</label>
+                  <input type="time" style={inputStyle} value={agHora} onChange={(e) => { setAgHora(e.target.value); mexeuAgenda(); }} />
+                  <MensagensCampo r={resultadoAgenda} campo="hora" />
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data prevista de execução</label>
-              <input type="date" style={inputStyle} value={agDataExec} onChange={(e) => setAgDataExec(e.target.value)} />
+              <input type="date" min={!agADefinir && agData ? agData : undefined}
+                className={resultadoAgenda.erros.dataExecucao ? "val-invalido" : undefined}
+                style={inputStyle} value={agDataExec} onChange={(e) => { setAgDataExec(e.target.value); mexeuAgenda(); }} />
+              <MensagensCampo r={resultadoAgenda} campo="dataExecucao" />
               <small style={{ color: "var(--cinza)" }}>Opcional — quando já se sabe a data prevista da execução.</small>
             </div>
 
             <div>
-              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 6 }}>Equipe (usuários notificados)</label>
+              <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 6 }}>Equipe (usuários notificados){agADefinir ? "" : " *"}</label>
               {usuarios.length === 0 ? (
                 <p className="detalhe" style={{ margin: 0 }}>Nenhum usuário disponível.</p>
               ) : (
@@ -1511,7 +1723,7 @@ export default function InspecaoDetalhePage() {
                   {usuarios.map((u) => {
                     const sel = agEquipeIds.includes(u.id);
                     return (
-                      <button type="button" key={u.id} onClick={() => toggleEquipe(u.id)}
+                      <button type="button" key={u.id} onClick={() => toggleEquipe(u.id)} aria-pressed={sel}
                         style={{ padding: "5px 10px", borderRadius: 20, fontSize: 13, cursor: "pointer",
                           border: `1px solid ${sel ? "var(--primaria)" : "var(--borda)"}`,
                           background: sel ? "var(--primaria)" : "transparent", color: sel ? "#fff" : "var(--texto)" }}>
@@ -1519,28 +1731,52 @@ export default function InspecaoDetalhePage() {
                       </button>
                     );
                   })}
+                  {/* Gravados que ficaram inativos: aparecem para poder tirar. */}
+                  {agEquipe.filter((m) => !usuarios.some((u) => u.id === m.id)).map((m) => (
+                    <button type="button" key={m.id} onClick={() => toggleEquipe(m.id)} title="Usuário inativo — clique para tirar"
+                      style={{ padding: "5px 10px", borderRadius: 20, fontSize: 13, cursor: "pointer", border: "1px solid #b3261e", background: "transparent", color: "#b3261e" }}>
+                      ✕ {m.nome} (inativo)
+                    </button>
+                  ))}
                 </div>
               )}
+              <MensagensCampo r={resultadoAgenda} campo="equipe" mostrarErros={agTentou || agEquipeIds.length > 0} />
             </div>
 
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Equipamentos</label>
               <div style={{ display: "flex", gap: 8 }}>
-                <input style={inputStyle} value={agEquipInput} onChange={(e) => setAgEquipInput(e.target.value)}
+                <input style={inputStyle} value={agEquipInput} list="catalogo-equipamentos"
+                  onChange={(e) => { setAgEquipInput(e.target.value); setAgMsgEquip(null); }}
                   placeholder="ex.: Detector de gases" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEquipamento(); } }} />
+                <datalist id="catalogo-equipamentos">
+                  {ctxAgenda.catalogo?.map((n) => <option key={n} value={n} />)}
+                </datalist>
                 <button type="button" className="btn-azul btn-sec" onClick={addEquipamento}>+ Add</button>
               </div>
+              {agMsgEquip && <p className="val-msg val-erro" style={{ marginTop: 4 }}>⛔ {agMsgEquip}</p>}
               {agEquipamentos.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                   {agEquipamentos.map((eq, i) => (
                     <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 20, background: "var(--bg-suave)", border: "1px solid var(--borda)", fontSize: 13 }}>
                       {eq}
-                      <button type="button" onClick={() => setAgEquipamentos((p) => p.filter((_, idx) => idx !== i))}
+                      <button type="button" aria-label={`Remover ${eq}`} onClick={() => { setAgEquipamentos((p) => p.filter((_, idx) => idx !== i)); mexeuAgenda(); }}
                         style={{ background: "none", border: "none", cursor: "pointer", color: "var(--cinza)", padding: 0, lineHeight: 1 }}>✕</button>
                     </span>
                   ))}
                 </div>
               )}
+              <MensagensCampo r={resultadoAgenda} campo="equipamentos">
+                {/* Fora do Catálogo, mas parecido com um item dele: um clique troca. */}
+                {agEquipamentos.map((eq) => {
+                  const s = sugestaoCatalogo(eq, ctxAgenda.catalogo);
+                  return s ? (
+                    <button key={eq} type="button" className="val-acao" onClick={() => trocarEquipamento(eq, s)}>
+                      Usar “{s}” no lugar de “{eq}”
+                    </button>
+                  ) : null;
+                })}
+              </MensagensCampo>
             </div>
             <div>
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 6 }}>Checklist</label>
@@ -1551,21 +1787,27 @@ export default function InspecaoDetalhePage() {
                       onChange={(e) => setAgChecklist((prev) => prev.map((x, idx) => idx === i ? { ...x, ok: e.target.checked } : x))} />
                     <span style={{ flex: 1 }}>{c.item}</span>
                     <button type="button" className="fu-icone-btn" title="Remover item"
-                      onClick={() => setAgChecklist((prev) => prev.filter((_, idx) => idx !== i))}>✕</button>
+                      onClick={() => { setAgChecklist((prev) => prev.filter((_, idx) => idx !== i)); mexeuAgenda(); }}>✕</button>
                   </label>
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <input style={inputStyle} value={agNovoItem} onChange={(e) => setAgNovoItem(e.target.value)}
+                <input style={inputStyle} value={agNovoItem} onChange={(e) => { setAgNovoItem(e.target.value); setAgMsgItem(null); }}
                   placeholder="adicionar item ao checklist"
-                  onKeyDown={(e) => { if (e.key === "Enter" && agNovoItem.trim()) { setAgChecklist((p) => [...p, { item: agNovoItem.trim(), ok: false }]); setAgNovoItem(""); } }} />
-                <button type="button" className="btn-azul btn-sec" onClick={() => { if (agNovoItem.trim()) { setAgChecklist((p) => [...p, { item: agNovoItem.trim(), ok: false }]); setAgNovoItem(""); } }}>+ Item</button>
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addItemChecklist(); } }} />
+                <button type="button" className="btn-azul btn-sec" onClick={addItemChecklist}>+ Item</button>
               </div>
+              {agMsgItem && <p className="val-msg val-erro" style={{ marginTop: 4 }}>⛔ {agMsgItem}</p>}
+              <MensagensCampo r={resultadoAgenda} campo="checklist" />
             </div>
+            {/* Resumo só depois de tentar salvar — antes, as mensagens ficam nos campos. */}
+            {agTentou && <ResumoValidacao r={resultadoAgenda} rotulos={ROTULOS_AGENDAMENTO} />}
             {erroAgenda && <p className="erro-texto" style={{ margin: 0 }}>{erroAgenda}</p>}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button className="btn-azul btn-sec" onClick={() => setModalAgenda(false)} disabled={salvandoAgenda}>Cancelar</button>
-              <button className="btn-azul" onClick={salvarAgenda} disabled={salvandoAgenda}>{salvandoAgenda ? "Salvando…" : "Salvar agendamento"}</button>
+              <button className="btn-azul" onClick={salvarAgenda} disabled={salvandoAgenda || (agTentou && temErros(resultadoAgenda))}>
+                {salvandoAgenda ? "Salvando…" : substituidosAgenda.length > 0 || (agendaEditando && agDataOriginal && !agADefinir && agData !== agDataOriginal) ? "Remarcar" : "Salvar agendamento"}
+              </button>
             </div>
           </div>
         </Modal>
@@ -1627,4 +1869,8 @@ function rotuloStatus(s: string) {
 }
 function corStatus(s: string) {
   return { em_aprovacao: "#c2410c", aprovado: "#16a34a", ajustar: "#dc2626", assinado: "#7c3aed" }[s] || "var(--texto-suave)";
+}
+/** Etapa do agendamento por extenso ("inspecao" → "inspeção"). */
+function rotuloEtapa(t: string) {
+  return t === "execucao" ? "execução" : "inspeção";
 }
