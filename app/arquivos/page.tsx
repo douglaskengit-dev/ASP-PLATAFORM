@@ -31,7 +31,7 @@ function fmt(iso?: string | null) {
   return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 function rotuloStatus(s: string) {
-  return { rascunho: "Rascunho", em_aprovacao: "Em aprovação", aprovado: "Aprovado", ajustar: "Ajustar", assinado: "Assinado" }[s] || s;
+  return { rascunho: "Rascunho", em_aprovacao: "Em aprovação", aprovado: "Aprovado", ajustar: "Ajustar", assinado: "Assinado", substituido: "Substituído" }[s] || s;
 }
 
 const inp: React.CSSProperties = {

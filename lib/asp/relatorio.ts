@@ -78,7 +78,9 @@ export interface DadosRelatorio {
   tag?: string;
   area?: string;
   material?: string;
-  capacidadeNominal?: string;   // dado de placa (tópico 2, manual)
+  /** Rótulo "Capacidade Nominal" do tópico 2. O formulário tem um campo só
+   *  de capacidade (`capacidadeTanque`) e manda o mesmo valor nos dois. */
+  capacidadeNominal?: string;
   alturaTanque?: string;
   diametro?: string;
   observacoesTanque?: string;
@@ -163,18 +165,20 @@ export interface DadosRelatorio {
  *  garantindo que os dois caminhos produzam exatamente os mesmos valores. */
 export function camposDaMedicao(medicao: any): Partial<DadosRelatorio> {
   if (!medicao || typeof medicao !== "object") return {};
-  const un = medicao.unit === "cm" ? "cm" : "m";
+  // O relatório usa uma unidade só (metro): leituras em cm são convertidas.
+  const k = medicao.unit === "cm" ? 0.01 : 1;
   const num = (v: any, casas = 2) =>
-    v == null || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
+    v == null || v === "" || isNaN(Number(v)) ? "" : Number(v).toFixed(casas).replace(".", ",");
+  const m = (v: any) => (v && !isNaN(Number(v)) ? `${num(Number(v) * k)} m` : "");
   const res = medicao.resultado;
   // Em tanque nao circular a dimensao principal e o COMPRIMENTO e existe
   // largura - caso dos reservatorios de limpeza (POP 001).
   const circular = (medicao.formato || "circulo") === "circulo";
   return {
-    alturaTanque: medicao.height ? `${num(medicao.height)} ${un}` : "",
-    diametro: circular && medicao.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
-    comprimento: !circular && medicao.dimValue ? `${num(medicao.dimValue)} ${un}` : "",
-    largura: medicao.largura ? `${num(medicao.largura)} ${un}` : "",
+    alturaTanque: m(medicao.height),
+    diametro: circular ? m(medicao.dimValue) : "",
+    comprimento: !circular ? m(medicao.dimValue) : "",
+    largura: m(medicao.largura),
     capacidadeTanque: res?.volTankM3 ? `${num(res.volTankM3)} m³` : "",
     volumeSedimento: res?.volSedM3 != null ? `${num(res.volSedM3, 3)} m³` : "",
     volumeMin: res?.volSedM3 != null ? num(res.volSedM3 * 0.95, 2) : "",

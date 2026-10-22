@@ -1,46 +1,69 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { getProfileAtual } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { BUCKET } from "@/lib/processos/arquivos";
+import { infoOSRelatorio, PERFIS_RELATORIO } from "@/lib/asp/relatorio-api";
+import { erroTipoNaFase, pastaFotosRascunho } from "@/lib/validacao";
 
 export const runtime = "nodejs";
-
-const PERFIS_ENVIO = ["admin", "operacoes", "gerencia"];
 
 /** Gera uma URL assinada para o navegador enviar o arquivo DIRETO ao storage.
  *
  *  Funções serverless da Vercel recusam corpos acima de ~4,5 MB, e relatórios
  *  com fotos passam disso facilmente. Com a URL assinada o arquivo não trafega
  *  pela função: o navegador fala direto com o storage, e a API só registra o
- *  caminho depois. */
+ *  caminho depois — e confere o arquivo lá (formato, tamanho, SHA-256).
+ *
+ *  Dois usos:
+ *   · relatório  { inspecaoId, tipo, ext } → relatorios/<OS>/<tipo>-<uuid>.<ext>
+ *     O caminho NÃO leva a versão: ela só é decidida no registro (POST
+ *     /api/relatorios), então nome e versão nunca divergem.
+ *   · foto de rascunho { inspecaoId, foto: { hash, ext } } →
+ *     relatorios/<OS>/rascunho-fotos/<sha256>.<ext>. Mesmo conteúdo = mesmo
+ *     caminho: se já existe, responde { existe: true } e não sobe de novo. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS_ENVIO.includes(profile.perfil)) {
+  if (!PERFIS_RELATORIO.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Envio de relatório é responsabilidade de Operações." }, { status: 403 });
   }
 
   const b = await req.json().catch(() => ({}));
   const inspecaoId = String(b?.inspecaoId || "");
-  const tipo = b?.tipo === "execucao" ? "execucao" : "inspecao";
+  const info = await infoOSRelatorio(inspecaoId);
+  if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
+  const storage = getSupabaseAdmin().storage.from(BUCKET);
+
+  if (b?.foto) {
+    const hash = String(b.foto.hash || "").toLowerCase();
+    const ext = b.foto.ext === "png" ? "png" : b.foto.ext === "jpg" || b.foto.ext === "jpeg" ? "jpg" : "";
+    if (!/^[0-9a-f]{64}$/.test(hash) || !ext) {
+      return NextResponse.json({ erro: "Foto inválida (só PNG ou JPEG)." }, { status: 400 });
+    }
+    const nome = `${hash}.${ext}`;
+    const pasta = pastaFotosRascunho(inspecaoId);
+    const { data: lista } = await storage.list(pasta.replace(/\/$/, ""), { search: nome, limit: 1 });
+    if ((lista || []).some((o: any) => o.name === nome)) {
+      return NextResponse.json({ ok: true, existe: true, caminho: pasta + nome });
+    }
+    const { data, error } = await storage.createSignedUploadUrl(pasta + nome, { upsert: true });
+    if (error || !data) return NextResponse.json({ erro: error?.message || "Falha ao preparar o envio da foto." }, { status: 500 });
+    return NextResponse.json({ ok: true, caminho: pasta + nome, token: data.token });
+  }
+
+  const tipo = b?.tipo === "execucao" ? "execucao" : b?.tipo === "inspecao" ? "inspecao" : "";
+  const erroTipo = erroTipoNaFase(tipo, info.fase);
+  if (erroTipo) return NextResponse.json({ erro: erroTipo }, { status: 400 });
   const ext = String(b?.ext || "").toLowerCase();
-  if (!inspecaoId) return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   if (ext !== "pdf" && ext !== "docx") {
     return NextResponse.json({ erro: "Envie o relatório em PDF ou DOCX." }, { status: 400 });
   }
 
-  // Próxima versão deste bloco, para o caminho não colidir.
-  const { data: ultima } = await getSupabaseRouteClient()
-    .from("gp_relatorios").select("versao")
-    .eq("inspecao_id", inspecaoId).eq("tipo", tipo)
-    .order("versao", { ascending: false }).limit(1).maybeSingle();
-  const versao = (ultima?.versao || 0) + 1;
-  const caminho = `relatorios/${inspecaoId}/${tipo}-v${versao}-${Date.now()}.${ext}`;
-
-  const { data, error } = await getSupabaseAdmin()
-    .storage.from(BUCKET).createSignedUploadUrl(caminho);
+  const caminho = `relatorios/${inspecaoId}/${tipo}-${randomUUID()}.${ext}`;
+  const { data, error } = await storage.createSignedUploadUrl(caminho);
   if (error || !data) {
     return NextResponse.json({ erro: error?.message || "Falha ao preparar o envio." }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, caminho, token: data.token, versao });
+  return NextResponse.json({ ok: true, caminho, token: data.token });
 }

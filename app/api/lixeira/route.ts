@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { conflitoAoRestaurarOS } from "@/lib/asp/os-validacao-api";
 import { conflitoAoRestaurarColeta } from "@/lib/asp/coleta-api";
+import { prepararRestauracaoRelatorio } from "@/lib/asp/relatorio-api";
 
 export const runtime = "nodejs";
 
@@ -82,11 +83,19 @@ export async function PATCH(req: NextRequest) {
     const conflito = await conflitoAoRestaurarColeta(body.id);
     if (conflito) return NextResponse.json({ erro: conflito }, { status: 409 });
   }
+  // Relatório: sem segundo rascunho do tipo nem arquivo repetido; versão
+  // já usada por outro volta com a próxima livre.
+  let extra: Record<string, unknown> = {};
+  if (body.tipo === "relatorio") {
+    const prep = await prepararRestauracaoRelatorio(body.id);
+    if (prep.erro) return NextResponse.json({ erro: prep.erro }, { status: 409 });
+    if (prep.versao) extra = { versao: prep.versao };
+  }
   const { error } = await getSupabaseAdmin()
     .from(TABELAS[body.tipo].tabela)
     .update(body.tipo === "medicao"
       ? { excluido_em: null, excluido_por: null, aprovada_em: null, aprovada_por: null }
-      : { excluido_em: null, excluido_por: null })
+      : { excluido_em: null, excluido_por: null, ...extra })
     .eq("id", body.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

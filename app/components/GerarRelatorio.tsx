@@ -5,7 +5,14 @@
  * A tela é organizada por tópico: cada um tem uma caixa de seleção e, logo
  * abaixo, os campos daquele tópico e o envio de fotos correspondente. Ao
  * desmarcar, a seção sai do documento e os números seguintes são reajustados.
- * A capa é o tópico 0 e também pode ser omitida. */
+ * A capa é o tópico 0 e também pode ser omitida.
+ *
+ * Fase 4 (validação): cliente, TAG, endereço e procedimento vêm do cadastro
+ * (só leitura); revisão e código são calculados (editáveis só por Admin,
+ * Gerência ou Coordenador); datas são campos de data (ISO, saem dd/mm/aaaa);
+ * pessoas são escolhidas por usuário (id); as fotos são conferidas (formato,
+ * tamanho, repetida, legenda, vaga) e salvas com o rascunho. Regras em
+ * lib/validacao/relatorio.ts — a API repete as que bloqueiam. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
@@ -20,8 +27,21 @@ import {
 } from "@/lib/asp/fotos-execucao";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { MATERIAIS_TANQUE } from "@/lib/asp/procedimentos";
+import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
+import {
+  atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
+  validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
+} from "@/lib/validacao";
 
-export interface ColetaOpcao { id: string; criado_em: string; dados: any; aprovada_em?: string | null }
+export type { SnapshotRelatorio } from "@/lib/validacao";
+
+export interface ColetaOpcao {
+  id: string; criado_em: string; dados: any; aprovada_em?: string | null;
+  /** Dia da coleta (AAAA-MM-DD): a data do relatório não pode ser antes. */
+  data_coleta?: string | null;
+}
 
 export interface UsuarioRelatorio { id: string; nome: string; perfil: string; funcao: string | null }
 
@@ -36,28 +56,33 @@ interface Props {
   /** Anexa o .docx ao card como RASCUNHO (o envio é um passo à parte).
    *  O snapshot é gravado junto para o rascunho poder ser reaberto e editado. */
   onSalvar: (blob: Blob, snapshot: SnapshotRelatorio) => Promise<void>;
-  /** Snapshot de um rascunho salvo — reabre o formulário como estava.
-   *  As fotos não são restauradas (só o arquivo final as contém). */
+  /** Snapshot de um rascunho salvo — reabre o formulário como estava, com
+   *  as fotos (salvas no storage junto com o rascunho) e os dados do banco
+   *  atualizados ("O que mudou desde o rascunho"). */
   estadoSalvo?: SnapshotRelatorio | null;
   /** Coleta de fotos da execução — só no Relatório de Execução. As fotos
    *  entram já posicionadas e as pendências viram aviso (nunca bloqueio). */
   coletaFotos?: RegistroFotosExecucao | null;
-}
-
-/** Tudo que o formulário precisa para ser reconstruído depois. */
-export interface SnapshotRelatorio {
-  d: Partial<DadosRelatorio>;
-  subs8?: { titulo: string }[];
-  textosExtras?: Record<number, string>;
-  textosTopico?: Record<number, string>;
-  visiveis: Record<number, boolean>;
-  equipeIds: string[];
-  equipIds: string[];
-  coletaId: string;
+  /** OS — as fotos do rascunho ficam em relatorios/<OS>/rascunho-fotos/. */
+  inspecaoId: string;
+  /** Revisão (reprovações do mesmo tipo) e código da capa, calculados. */
+  revisaoEsperada: number;
+  codigoEsperado: string;
+  /** Admin, Gerência ou Coordenador: podem corrigir revisão/código à mão. */
+  podeEditarRevisao: boolean;
+  /** Equipe do agendamento do mesmo tipo (ids) — já vem marcada. */
+  equipeAgendada: string[];
 }
 
 interface FotoTopico {
+  /** Arquivo final (PNG/JPEG — WebP/GIF/HEIC já convertidos). */
   arquivo: File; legenda: string; topico: number; ancora?: string;
+  /** SHA-256 do arquivo: a mesma foto não entra duas vezes. */
+  hash: string;
+  extensao: "png" | "jpeg";
+  /** Onde está no storage: rascunho-fotos/<hash> (depois de salvar) ou a
+   *  foto original da coleta da execução. */
+  caminho?: string;
   /** Ocupa uma vaga do modelo — legenda e fonte vêm do próprio .docx. */
   vaga?: boolean;
   /** Crédito da imagem — sai como "Fonte: …" abaixo da legenda. */
@@ -96,6 +121,10 @@ const grade: React.CSSProperties = {
 };
 
 const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
+/** O que o seletor de fotos aceita: PNG/JPEG entram direto; WebP, GIF, BMP
+ *  e HEIC são convertidos (HEIC só se o navegador abrir). */
+const ACEITA_FOTO = "image/png,image/jpeg,image/webp,image/gif,image/bmp,image/heic,image/heif,.heic,.heif";
+const campoLeitura: React.CSSProperties = { ...campo, background: "var(--bg-suave)", color: "var(--texto-suave)", cursor: "not-allowed" };
 
 /** O procedimento de limpeza robotizada tem blocos que não existem nos demais
  *  (valores de coleta, horários da operação e figuras em vagas fixas do
@@ -106,22 +135,53 @@ const TODOS_TOPICOS = [TOPICO_CAPA, ...TOPICOS_PADRAO];
  *  também precisa dele: os números do modelo do POP 001 não significam o
  *  mesmo que os de TOPICOS_PADRAO. */
 
-export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo, coletaFotos }: Props) {
-  const [d, setD] = useState<Partial<DadosRelatorio>>(
-    estadoSalvo?.d ? { ...inicial, ...estadoSalvo.d } : inicial
-  );
+export default function GerarRelatorio({
+  onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo, coletaFotos,
+  inspecaoId, revisaoEsperada, codigoEsperado, podeEditarRevisao, equipeAgendada,
+}: Props) {
+  /** Valores automáticos de uma medição (já em metros). */
+  const medicaoDe = (id: string) => camposDaMedicao(coletas.find((c) => c.id === id)?.dados) as Record<string, string>;
+  // Por padrão usa a medição APROVADA; se não houver, a mais recente.
+  const coletaPadrao = (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || "";
+  /** Rascunho reaberto: os dados que vêm do banco (cadastro, revisão,
+   *  medição) são atualizados e o que mudou é listado. Uma vez, ao abrir. */
+  const [inicio] = useState(() => (estadoSalvo?.d
+    ? atualizarRascunho(estadoSalvo, {
+        d: inicial, coletasIds: coletas.map((c) => c.id),
+        coletaAprovadaId: coletas.find((c) => c.aprovada_em)?.id || null,
+        coletaPadraoId: coletaPadrao || null, medicaoDe,
+      })
+    : null));
+  const salvo = inicio?.snapshot || null;
+  const [d, setD] = useState<Partial<DadosRelatorio>>(salvo ? { ...inicial, ...salvo.d } : inicial);
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
-    estadoSalvo?.visiveis || Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
+    salvo?.visiveis || Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
   );
-  const [equipeIds, setEquipeIds] = useState<string[]>(estadoSalvo?.equipeIds || []);
-  const [equipIds, setEquipIds] = useState<string[]>(estadoSalvo?.equipIds || []);
-  // Subtópicos do tópico 8 (8.1, 8.2 …) — título livre, fotos próprias.
-  const [subs8, setSubs8] = useState<{ titulo: string }[]>(estadoSalvo?.subs8 || []);
+  // A equipe do agendamento já vem MARCADA na tela — nada entra no
+  // documento sem estar visível aqui.
+  const [equipeIds, setEquipeIds] = useState<string[]>(salvo?.equipeIds || equipeAgendada);
+  const [equipIds, setEquipIds] = useState<string[]>(salvo?.equipIds || []);
+  // Subtópicos do tópico 8 (8.1, 8.2 …) — título obrigatório, fotos próprias.
+  const [subs8, setSubs8] = useState<{ titulo: string }[]>(salvo?.subs8 || []);
+  /** Quem preparou/checou/aprovou… por id de usuário (o nome vai em `d`). */
+  const [pessoas, setPessoas] = useState<Partial<Record<PapelPessoa, string>>>(() => {
+    if (salvo?.pessoas) return salvo.pessoas;
+    // Rascunho antigo guardava só o NOME: acha o usuário por ele.
+    const out: Partial<Record<PapelPessoa, string>> = {};
+    for (const k of PAPEIS_PESSOA) {
+      const nome = (salvo?.d as any)?.[k];
+      const u = nome ? usuarios.find((x) => x.nome === nome) : null;
+      if (u) out[k] = u.id;
+    }
+    return out;
+  });
+  /** Revisão/código digitados à mão (só quem pode) — não são recalculados. */
+  const [revisaoManual, setRevisaoManual] = useState(!!salvo?.revisaoManual);
   // Modal de valores medidos em campo (POP 001): alimentam as legendas das
   // figuras de coleta. Fica em modal por ser digitação pontual de 4 números.
   const [modalColetas, setModalColetas] = useState(false);
   // Texto das seções extras do procedimento, por índice. O título é do Catálogo.
-  const [textosExtras, setTextosExtras] = useState<Record<number, string>>(estadoSalvo?.textosExtras || {});
+  const [textosExtras, setTextosExtras] = useState<Record<number, string>>(salvo?.textosExtras || {});
   /** Tópicos do modelo do procedimento escolhido. Vazio = modelo padrão. */
   const [topicosModelo, setTopicosModelo] = useState<{ numero: number; titulo: string }[]>([]);
   /** Vagas de imagem do modelo (marcador [imagem] + legenda já escrita no
@@ -130,7 +190,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
    *  sempre. */
   const [vagasModelo, setVagasModelo] = useState<VagaImagem[]>([]);
   /** Texto das seções do modelo que não têm campos próprios, por número. */
-  const [textosTopico, setTextosTopico] = useState<Record<number, string>>(estadoSalvo?.textosTopico || {});
+  const [textosTopico, setTextosTopico] = useState<Record<number, string>>(salvo?.textosTopico || {});
   /** Diagnóstico do modelo em uso. Sem isso, uma falha de leitura fica
    *  indistinguível de "procedimento sem modelo próprio": a tela não muda. */
   const [infoModelo, setInfoModelo] = useState<string>("carregando modelo…");
@@ -141,10 +201,18 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   fotosRef.current = fotos;
   // miniaturas das fotos da coleta: libera a memória ao fechar o formulário
   useEffect(() => () => fotosRef.current.forEach((f) => f.previa && URL.revokeObjectURL(f.previa)), []);
-  // Por padrão usa a medição APROVADA; se não houver, a mais recente.
-  const [coletaId, setColetaId] = useState<string>(
-    estadoSalvo?.coletaId || (coletas.find((c) => c.aprovada_em) || coletas[0])?.id || ""
+  const [coletaId, setColetaId] = useState<string>(salvo ? salvo.coletaId : coletaPadrao);
+  /** Valores automáticos da medição escolhida quando ela foi aplicada — o
+   *  rascunho guarda, e reabrir só troca o que a MEDIÇÃO mudou depois. */
+  const [medicaoBase, setMedicaoBase] = useState<Record<string, string>>(
+    () => salvo?.medicaoBase || (coletaPadrao ? medicaoDe(coletaPadrao) : {})
   );
+  /** Fotos do rascunho sendo baixadas de volta; as que não voltaram. */
+  const [restaurando, setRestaurando] = useState(!!salvo?.fotos?.length);
+  const [fotosPerdidas, setFotosPerdidas] = useState<string[]>([]);
+  /** Fotos recusadas na escolha (formato, tamanho, repetida), por bloco. */
+  const [msgFotos, setMsgFotos] = useState<{ chave: string; msgs: { m: string; aviso?: boolean }[] } | null>(null);
+  const [processandoFotos, setProcessandoFotos] = useState(false);
   // Catálogo (procedimentos e equipamentos) vem do banco — aba Catálogo.
   const [PROCEDIMENTOS, setProcedimentos] = useState<any[]>([]);
   const [EQUIPAMENTOS, setEquipamentos] = useState<any[]>([]);
@@ -162,21 +230,62 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const [erro, setErro] = useState<string | null>(null);
 
   /** Revisão e código do projeto compõem o campo "Relatório" da capa,
-   *  no formato do modelo: "37/MG/26 Rev1". */
+   *  no formato do modelo: "37/MG/26 Rev1". Só quem pode edita (o campo
+   *  fica travado para os demais e a API recusa valor mudado). */
   function mudarRevisao(valor: string) {
+    if (!podeEditarRevisao) return;
+    setRevisaoManual(true);
     setD((v) => {
       const base = v.codigoProjeto || "";
       return { ...v, revisao: valor, relatorioCodigo: base ? `${base} Rev${valor}` : v.relatorioCodigo };
     });
   }
 
+  /** Volume de sedimento editado: a faixa de ±5% acompanha (derivada). */
+  function mudarVolume(valor: string) {
+    setD((v) => ({ ...v, volumeSedimento: valor, ...faixaVolume(valor) }));
+  }
+
   /** Ao trocar a medição, os campos automáticos são recalculados a partir
    *  DAQUELA coleta — o resto do formulário é preservado. */
   function trocarColeta(id: string) {
     setColetaId(id);
-    const c = coletas.find((x) => x.id === id);
-    if (c) setD((v) => ({ ...v, ...camposDaMedicao(c.dados) }));
+    const auto = medicaoDe(id);
+    setMedicaoBase(auto);
+    setD((v) => ({ ...v, ...auto, ...faixaVolume(auto.volumeSedimento) }));
   }
+
+  /** Restaura as fotos do rascunho (salvas no storage junto com ele). */
+  useEffect(() => {
+    const lista = salvo?.fotos || [];
+    if (!lista.length) return;
+    let vivo = true;
+    Promise.all(lista.map(async (f): Promise<FotoTopico | string> => {
+      const nome = f.coleta || f.nome;
+      try {
+        const url = f.caminho?.startsWith("fotos-execucao/")
+          ? `/api/inspecoes/${inspecaoId}/fotos?caminho=${encodeURIComponent(f.caminho)}`
+          : `/api/relatorios/foto?inspecaoId=${encodeURIComponent(inspecaoId)}&caminho=${encodeURIComponent(f.caminho || "")}`;
+        const r = await fetch(url);
+        if (!r.ok) return nome;
+        const prep = await prepararImagemRelatorio(await r.blob(), f.nome);
+        if ("erro" in prep) return nome;
+        return {
+          arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao, caminho: f.caminho,
+          legenda: f.legenda, topico: f.topico, ancora: f.ancora, vaga: f.vaga, vagaIndice: f.vagaIndice,
+          fonte: f.fonte, coleta: f.coleta, previa: f.coleta ? URL.createObjectURL(prep.arquivo) : undefined,
+        };
+      } catch {
+        return nome;
+      }
+    })).then((res) => {
+      if (!vivo) return;
+      setFotos((p) => [...res.filter((x): x is FotoTopico => typeof x !== "string"), ...p]);
+      setFotosPerdidas(res.filter((x): x is string => typeof x === "string"));
+      setRestaurando(false);
+    });
+    return () => { vivo = false; };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k: keyof DadosRelatorio) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -376,6 +485,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   useEffect(() => {
     if (coletaCarregada.current || !coletaFotos?.inspecao_id || !catalogoPronto) return;
     if (modeloLido === null || modeloLido !== (caminhoModelo || "")) return;
+    // Rascunho reaberto: espera as fotos salvas voltarem — as da coleta que
+    // já estão nele (mesmo arquivo de origem) não entram de novo.
+    if (restaurando) return;
     coletaCarregada.current = true;
     const reg = coletaFotos;
 
@@ -406,33 +518,47 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
       cloroDepois: x.cloroDepois || medido("agua_depois_cloro", reg.agua_depois) || x.cloroDepois,
     }));
 
-    if (plano.length === 0) return;
-    setInfoColeta(`Baixando ${plano.length} foto(s) da coleta…`);
+    const novos = plano.filter((p) => !fotosRef.current.some((f) => f.caminho === p.caminho));
+    if (novos.length === 0) return;
+    setInfoColeta(`Baixando ${novos.length} foto(s) da coleta…`);
     const base = `/api/inspecoes/${reg.inspecao_id}/fotos?caminho=`;
-    Promise.all(plano.map(async (p): Promise<FotoTopico | null> => {
+    Promise.all(novos.map(async (p): Promise<FotoTopico | string> => {
       try {
         const r = await fetch(base + encodeURIComponent(p.caminho));
-        if (!r.ok) return null;
+        if (!r.ok) return `${p.rotulo}: não foi possível baixar (sem conexão?)`;
         const blob = await r.blob();
         const ext = p.caminho.toLowerCase().endsWith(".png") ? "png" : "jpg";
-        const arquivo = new File([blob], `${p.slotId}.${ext}`, { type: blob.type || `image/${ext === "png" ? "png" : "jpeg"}` });
+        const prep = await prepararImagemRelatorio(blob, `${p.slotId}.${ext}`);
+        if ("erro" in prep) return `${p.rotulo}: ${prep.erro}`;
         return {
-          arquivo, legenda: p.legenda, topico: p.topico, ancora: p.ancora,
-          vaga: p.vaga, vagaIndice: p.vagaIndice, coleta: p.rotulo, previa: URL.createObjectURL(arquivo),
+          arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao, caminho: p.caminho,
+          legenda: p.legenda, topico: p.topico, ancora: p.ancora,
+          vaga: p.vaga, vagaIndice: p.vagaIndice, coleta: p.rotulo, previa: URL.createObjectURL(prep.arquivo),
         };
       } catch {
-        return null;
+        return `${p.rotulo}: não foi possível baixar (sem conexão?)`;
       }
     })).then((lista) => {
-      const ok = lista.filter((f): f is FotoTopico => !!f);
+      const problemas = lista.filter((x): x is string => typeof x === "string");
+      const ok: FotoTopico[] = [];
+      for (const f of lista) {
+        if (typeof f === "string") continue;
+        // a mesma imagem já anexada à mão (ou em outro item da coleta) não entra 2x
+        const igual = [...fotosRef.current, ...ok].find((x) => x.hash === f.hash);
+        if (igual) { problemas.push(`${f.coleta}: é a mesma imagem de “${igual.coleta || igual.arquivo.name}” — não entrou de novo`); continue; }
+        ok.push(f);
+      }
       setFotos((p) => [...ok, ...p]);
-      const falhas = plano.length - ok.length;
-      setInfoColeta(falhas > 0 ? `${falhas} foto(s) da coleta não puderam ser baixadas (sem conexão?).` : null);
+      setInfoColeta(problemas.length ? `Fotos da coleta que não entraram: ${problemas.join("; ")}.` : null);
     });
-  }, [coletaFotos, catalogoPronto, modeloLido, caminhoModelo]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [coletaFotos, catalogoPronto, modeloLido, caminhoModelo, restaurando]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Onde a foto sai, em texto: "9. Coletas das amostras · vaga 3". */
   function destinoDaFoto(f: FotoTopico): string {
+    if (f.topico === TOPICO_EXTRAS) {
+      const i = Number(/^extra-(\d+)$/.exec(f.ancora || "")?.[1]);
+      return `seção “${extras[i]?.titulo || `extra ${i + 1}`}” do procedimento`;
+    }
     const t = TOPICOS_EM_USO.find((x) => x.numero === f.topico);
     const nome = t ? `${t.numero}. ${t.titulo}` : `Tópico ${f.topico}`;
     const onde = f.ancora ? ` · ${f.ancora}` : f.vaga ? "" : " · fim da seção";
@@ -500,9 +626,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                   </select>
                 )}
                 {!f.vaga && (
-                  <input style={campo} placeholder="Legenda" value={f.legenda}
+                  <input style={campo} placeholder="Legenda *" value={f.legenda}
                     onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
                 )}
+                <MensagensCampo r={r} campo={`fotos.${i}`} />
               </div>
               <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                 onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
@@ -538,10 +665,47 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
   const nomesEquipe = listaEquipe.join(", ");        // prévia na tela
   const equipeDoc = listaEquipe.join("\n");          // documento: um por linha
 
-  function addFotos(lista: FileList | null, topico: number, restam = 20, legendaPadrao = "") {
-    const fs = Array.from(lista || []).slice(0, Math.max(0, restam));
+  /** Anexa fotos escolhidas: confere formato (PNG/JPEG; WebP/GIF/HEIC
+   *  convertidos quando possível), tamanho (10 MB) e se a MESMA imagem já
+   *  está no relatório. As recusadas aparecem logo abaixo do campo (`chave`). */
+  async function adicionarArquivos(
+    lista: FileList | null, restam: number, chave: string,
+    base: Omit<FotoTopico, "arquivo" | "hash" | "extensao">,
+  ) {
+    const escolhidos = Array.from(lista || []);
+    const fs = escolhidos.slice(0, Math.max(0, restam));
     if (fs.length === 0) return;
-    setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: legendaPadrao, topico }))]);
+    setProcessandoFotos(true);
+    const msgs: { m: string; aviso?: boolean }[] = [];
+    const erro = (m: string) => msgs.push({ m });
+    if (escolhidos.length > fs.length) msgs.push({ m: `${escolhidos.length - fs.length} foto(s) além do limite deste bloco foram ignoradas.`, aviso: true });
+    try {
+      const novas: FotoTopico[] = [];
+      for (const f of fs) {
+        const prep = await prepararImagemRelatorio(f, f.name);
+        if ("erro" in prep) { erro(prep.erro); continue; }
+        const igual = [...fotosRef.current, ...novas].find((x) => x.hash === prep.hash);
+        if (igual) { erro(`“${f.name}” é a mesma imagem de “${igual.coleta || igual.arquivo.name}” (${destinoDaFoto(igual)}) — não foi adicionada.`); continue; }
+        if (prep.convertida) msgs.push({ m: `“${f.name}” convertida (${prep.convertida}).`, aviso: true });
+        novas.push({ ...base, arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao });
+      }
+      if (novas.length) setFotos((p) => [...p, ...novas]);
+    } finally {
+      setProcessandoFotos(false);
+      setMsgFotos(msgs.length ? { chave, msgs } : null);
+    }
+  }
+
+  /** Mensagens da última escolha de fotos, se foram neste bloco. */
+  function MsgFotos(chave: string) {
+    if (msgFotos?.chave !== chave) return null;
+    return (
+      <div className="val-campo" aria-live="polite">
+        {msgFotos.msgs.map(({ m, aviso }) => (
+          <p key={m} className={`val-msg ${aviso ? "val-aviso" : "val-erro"}`}>{aviso ? "⚠️" : "⛔"} {m}</p>
+        ))}
+      </div>
+    );
   }
 
   /** Baixa a primeira foto do equipamento no Catálogo para embutir na ficha.
@@ -577,32 +741,35 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
       const imgs: ImagemRelatorio[] = [];
       for (const f of fotos) {
-        if (!ativo(f.topico)) continue;               // tópico oculto: ignora a foto
-        const ext = f.arquivo.type.includes("png") || f.arquivo.name.toLowerCase().endsWith(".png") ? "png" : "jpeg";
+        if (!ativo(f.topico)) continue;               // tópico oculto: não sai (avisado antes de gerar)
         imgs.push({
           dados: await f.arquivo.arrayBuffer(),
-          extensao: ext as "png" | "jpeg",
-          legenda: f.legenda || f.arquivo.name.replace(/\.[^.]+$/, ""),
+          extensao: f.extensao,                       // conferida pelos bytes (PNG/JPEG)
+          legenda: f.legenda.trim(),                  // obrigatória — sem cair no nome do arquivo
           topico: f.topico, ancora: f.ancora || ancoraDaSecaoNova.get(f.topico),
           fonte: f.fonte?.trim() || undefined,
           vaga: f.vaga,
           vagaIndice: f.vaga ? f.vagaIndice : undefined,
         });
       }
+      // Pessoas: o documento leva o NOME do usuário escolhido (por id).
+      const nomeDe = (k: PapelPessoa) => (pessoas[k] ? usuarios.find((u) => u.id === pessoas[k])?.nome : "") || d[k] || "";
       return gerarRelatorioDocx({
         titulo: d.titulo || "", cliente: d.cliente || "", endereco: d.endereco || "",
-        revisao: d.revisao, statusRevisao: d.statusRevisao, dataRevisao: d.dataRevisao,
-        preparadoPor: d.preparadoPor, checadoPor: d.checadoPor, aprovadoPor: d.aprovadoPor,
+        revisao: d.revisao, statusRevisao: d.statusRevisao, dataRevisao: isoParaBr(d.dataRevisao),
+        preparadoPor: nomeDe("preparadoPor"), checadoPor: nomeDe("checadoPor"), aprovadoPor: nomeDe("aprovadoPor"),
         relatorioCodigo: d.relatorioCodigo, procedimento: d.procedimento,
         unidade: d.unidade, contato: d.contato,
-        dataExecucao: d.dataExecucao, dataRelatorio: d.dataRelatorio,
+        dataExecucao: isoParaBr(d.dataExecucao), dataRelatorio: isoParaBr(d.dataRelatorio),
         tag: d.tag, area: d.area, material: d.material,
-        capacidadeNominal: d.capacidadeNominal, alturaTanque: d.alturaTanque, diametro: d.diametro,
+        // Capacidade é um campo só: alimenta "Capacidade Nominal:" (tópico 2)
+        // e a célula "Capacidade" do quadro do tópico 6.
+        capacidadeNominal: d.capacidadeTanque, alturaTanque: d.alturaTanque, diametro: d.diametro,
         observacoesTanque: d.observacoesTanque,
-        revisadoPorCapa: d.revisadoPorCapa,
+        revisadoPorCapa: nomeDe("revisadoPorCapa"),
         historico: d.historico, nivelAgua: d.nivelAgua,
         comprimento: d.comprimento, largura: d.largura,
-        dataOperacao: d.dataOperacao, horarios: d.horarios,
+        dataOperacao: isoParaBr(d.dataOperacao), horarios: d.horarios,
         anexos: d.anexos,
         cloroAntes: d.cloroAntes, cloroDepois: d.cloroDepois,
         phAntes: d.phAntes, phDepois: d.phDepois,
@@ -611,7 +778,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
-        equipe: equipeDoc || d.equipe,
+        // Só quem está marcado na tela — nunca uma equipe "escondida".
+        equipe: equipeDoc,
         equipamentosFicha: fichasComFoto,
         volumeSedimento: d.volumeSedimento,
         fotosInternas: d.fotosInternas, conclusao: d.conclusao, recomendacoes: d.recomendacoes,
@@ -631,16 +799,92 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         templateUrl: proc?.template_path
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,
-        elaboradoPor: d.elaboradoPor, revisadoPor: d.revisadoPor,
+        elaboradoPor: nomeDe("elaboradoPor"), revisadoPor: nomeDe("revisadoPor"),
         topicos: TOPICOS_EM_USO.map((t) => ({ ...t, visivel: ativo(t.numero) })),
         imagens: imgs,
       });
   }
 
+  /** O formulário como snapshot (é o que o rascunho grava e a API confere). */
+  function montarSnapshot(): SnapshotRelatorio {
+    const fotosSalvas: FotoSalva[] = fotos.map((f) => ({
+      caminho: f.caminho, hash: f.hash, extensao: f.extensao, nome: f.arquivo.name, legenda: f.legenda,
+      topico: f.topico, ancora: f.ancora, vaga: f.vaga, vagaIndice: f.vagaIndice, fonte: f.fonte, coleta: f.coleta,
+    }));
+    const nomes: Partial<DadosRelatorio> = {};
+    for (const k of PAPEIS_PESSOA) {
+      const u = pessoas[k] ? usuarios.find((x) => x.id === pessoas[k]) : null;
+      (nomes as any)[k] = u?.nome || "";
+    }
+    return {
+      versaoSnapshot: 2, d: { ...d, ...nomes }, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras, textosTopico,
+      pessoas, revisaoManual, medicaoBase, fotos: fotosSalvas,
+    };
+  }
+
+  /** Vagas de imagem do modelo por tópico (limite de fotos em vaga). */
+  const vagasPorTopico = useMemo(() => {
+    const m: Record<number, number> = {};
+    vagasModelo.forEach((v) => { m[v.topico] = (m[v.topico] || 0) + 1; });
+    return m;
+  }, [vagasModelo]);
+
+  const coletaSel = coletas.find((c) => c.id === coletaId) || null;
+  const hoje = hojeBrasil();
+  // Regras (lib/validacao/relatorio.ts) — as mesmas que a API repete.
+  const r = validarRelatorio(montarSnapshot(), {
+    hoje,
+    dataColeta: coletaSel?.data_coleta || null,
+    revisaoEsperada, codigoEsperado, podeEditarRevisao,
+    medicaoAuto: coletaSel ? medicaoDe(coletaSel.id) : undefined,
+    vagasPorTopico,
+    nomeTopico: (n) => {
+      if (n === TOPICO_EXTRAS) return "seções do procedimento";
+      const t = TOPICOS_EM_USO.find((x) => x.numero === n);
+      return t ? `${t.numero}. ${t.titulo}` : `tópico ${n}`;
+    },
+  });
+  const [tentou, setTentou] = useState(false);
+
+  /** ⛔ impede gerar; fotos em tópico desmarcado pedem confirmação. */
   function validar(): boolean {
     setErro(null);
-    if (ativo(0) && !d.titulo?.trim()) { setErro("Informe o título do relatório (capa)."); return false; }
+    setTentou(true);
+    if (restaurando) { setErro("Aguarde as fotos do rascunho terminarem de carregar."); return false; }
+    if (processandoFotos) { setErro("Aguarde as fotos terminarem de ser processadas."); return false; }
+    if (temErros(r)) {
+      setErro("Corrija os itens marcados com ⛔ (lista abaixo) para gerar o relatório.");
+      return false;
+    }
+    const ocultas = r.avisos.fotosOcultas?.[0];
+    if (ocultas && !confirm(`${ocultas}\n\nGerar assim mesmo?`)) return false;
     return true;
+  }
+
+  /** Sobe ao storage as fotos que ainda não estão lá (rascunho-fotos/<hash>):
+   *  é o que permite reabrir o rascunho com elas. Mesmo conteúdo = mesmo
+   *  caminho, então reenviar não duplica. */
+  async function salvarFotos(): Promise<FotoTopico[]> {
+    const supabase = getSupabaseBrowserClient();
+    const atualizadas: FotoTopico[] = [];
+    for (const f of fotos) {
+      if (f.caminho) { atualizadas.push(f); continue; }
+      const ext = f.extensao === "png" ? "png" : "jpg";
+      const res = await fetch("/api/relatorios/upload-url", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inspecaoId, foto: { hash: f.hash, ext } }),
+      });
+      const dados = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(dados?.erro || "Falha ao preparar o envio das fotos.");
+      if (!dados.existe) {
+        const up = await supabase.storage.from("gp-arquivos").uploadToSignedUrl(dados.caminho, dados.token, f.arquivo);
+        if (up.error) throw new Error(`Falha ao salvar a foto “${f.arquivo.name}”: ${up.error.message}`);
+      }
+      atualizadas.push({ ...f, caminho: dados.caminho });
+    }
+    setFotos(atualizadas);
+    fotosRef.current = atualizadas;
+    return atualizadas;
   }
 
   /** Só baixa o arquivo, sem registrar na inspeção. */
@@ -667,7 +911,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     setEnviando(true);
     try {
       const blob = await montarBlob();
-      await onSalvar(blob, { d, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras, textosTopico });
+      const comCaminho = await salvarFotos();
+      const snap = montarSnapshot();
+      snap.fotos = (snap.fotos || []).map((f, i) => ({ ...f, caminho: comCaminho[i]?.caminho }));
+      await onSalvar(blob, snap);
       onFechar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao enviar o relatório.");
@@ -691,14 +938,14 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     return (
       <div style={{ marginTop: 6 }}>
         {!cheio && (
-          <input type="file" accept="image/png,image/jpeg" multiple={max > 1}
+          <input type="file" accept={ACEITA_FOTO} multiple={max > 1} disabled={processandoFotos}
             onChange={(e) => {
-              const fs = Array.from(e.target.files || []).slice(0, max - minhas.length);
-              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: legendaPadrao, topico, ancora }))]);
+              adicionarArquivos(e.target.files, max - minhas.length, `a-${ancora}`, { legenda: legendaPadrao, topico, ancora });
               e.target.value = "";
             }} />
         )}
         {cheio && <span className="detalhe">Limite de {max} foto(s) atingido.</span>}
+        {MsgFotos(`a-${ancora}`)}
         {minhas.map(({ f, i }) => LinhaFoto(f, i))}
       </div>
     );
@@ -710,13 +957,14 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     return (
       <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginTop: 6, alignItems: "center" }}>
         <span className="detalhe" style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.arquivo.name}</span>
-        <input style={campo} placeholder="Legenda" value={f.legenda}
+        <input style={campo} placeholder="Legenda *" value={f.legenda} aria-invalid={!!r.erros[`fotos.${i}`]}
           onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
         <input style={campo} list="sug-fonte-figura" placeholder="Fonte (padrão: ASP)"
           value={f.fonte ?? ""}
           onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, fonte: e.target.value } : x))} />
         <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
           onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
+        <div style={{ gridColumn: "1 / -1" }}><MensagensCampo r={r} campo={`fotos.${i}`} /></div>
       </div>
     );
   }
@@ -728,21 +976,24 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
     return (
       <div style={{ marginTop: 6 }}>
         {minhas.length < max && (
-          <input type="file" accept="image/png,image/jpeg" multiple
+          <input type="file" accept={ACEITA_FOTO} multiple disabled={processandoFotos}
             onChange={(e) => {
-              const fs = Array.from(e.target.files || []).slice(0, max - minhas.length);
-              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: "", topico, vaga: true }))]);
+              adicionarArquivos(e.target.files, max - minhas.length, `v-${topico}`, { legenda: "", topico, vaga: true });
               e.target.value = "";
             }} />
         )}
         <span className="detalhe" style={{ display: "block" }}>{minhas.length} de {max} vaga(s)</span>
+        {MsgFotos(`v-${topico}`)}
         {distribuirVagas(minhas, Math.max(max, minhas.length)).map((x, ordem) => x && (
-          <div key={x.i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-            <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {ordem + 1}. {x.f.coleta || x.f.arquivo.name}
-            </span>
-            <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-              onClick={() => setFotos((p) => p.filter((_, k) => k !== x.i))}>Remover</button>
+          <div key={x.i} style={{ marginTop: 4 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {ordem + 1}. {x.f.coleta || x.f.arquivo.name}
+              </span>
+              <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                onClick={() => setFotos((p) => p.filter((_, k) => k !== x.i))}>Remover</button>
+            </div>
+            <MensagensCampo r={r} campo={`fotos.${x.i}`} />
           </div>
         ))}
       </div>
@@ -766,21 +1017,21 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           Fotos das vagas deste tópico <span className="detalhe">— a legenda de cada uma já vem do modelo</span>
         </label>
         {minhas.length < max && (
-          <input type="file" accept="image/png,image/jpeg" multiple
+          <input type="file" accept={ACEITA_FOTO} multiple disabled={processandoFotos}
             onChange={(e) => {
-              const fs = Array.from(e.target.files || []).slice(0, max - minhas.length);
-              setFotos((p) => [...p, ...fs.map((f) => ({ arquivo: f, legenda: "", topico: numero, vaga: true }))]);
+              adicionarArquivos(e.target.files, max - minhas.length, `v-${numero}`, { legenda: "", topico: numero, vaga: true });
               e.target.value = "";
             }} />
         )}
         <span className="detalhe" style={{ display: "block", marginTop: 4 }}>{minhas.length} de {max} vaga(s)</span>
+        {MsgFotos(`v-${numero}`)}
         {/* Vagas preenchidas na ordem em que as fotos são anexadas — mesma
             ordem em que o gerador as consome no documento. A legenda ajuda a
             saber qual foto vai em qual vaga antes de anexar. */}
         {distribuirVagas(minhas, vagas.length).map((anexo, i) => {
           const v = vagas[i];
           return (
-            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
               <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {i + 1}. {v.legenda || "(sem legenda no modelo)"}
                 {anexo && ` — ${anexo.f.coleta || anexo.f.arquivo.name}`}
@@ -789,6 +1040,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                 <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
                   onClick={() => setFotos((p) => p.filter((_, k) => k !== anexo.i))}>Remover</button>
               )}
+              {anexo && <MensagensCampo r={r} campo={`fotos.${anexo.i}`} />}
             </div>
           );
         })}
@@ -808,9 +1060,33 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           {max ? <span className="detalhe"> — até {max}</span> : null}
         </label>
         {cheio ? <span className="detalhe">Limite de {limite} foto(s) atingido.</span> : (
-        <input type="file" accept="image/png,image/jpeg" multiple
-          onChange={(e) => { addFotos(e.target.files, topico, limite - minhas.length, legendaPadrao); e.target.value = ""; }} />)}
+        <input type="file" accept={ACEITA_FOTO} multiple disabled={processandoFotos}
+          onChange={(e) => {
+            adicionarArquivos(e.target.files, limite - minhas.length, `t-${topico}`, { legenda: legendaPadrao || "", topico });
+            e.target.value = "";
+          }} />)}
+        {MsgFotos(`t-${topico}`)}
         {minhas.map(({ f, i }) => LinhaFoto(f, i))}
+      </div>
+    );
+  }
+
+  /** Escolha de pessoa por USUÁRIO (id) — o nome sai no documento. Quem já
+   *  estava escolhido continua na lista mesmo se mudou de área. */
+  function SelectPessoa(chave: PapelPessoa, label: string, lista: UsuarioRelatorio[]) {
+    const atual = pessoas[chave];
+    const opcoes = atual && !lista.some((u) => u.id === atual) ? [...lista, ...usuarios.filter((u) => u.id === atual)] : lista;
+    const nomeAntigo = !atual ? (salvo?.d as any)?.[chave] : "";
+    return (
+      <div key={chave}>
+        <label style={rotulo}>{label}</label>
+        <select style={campo} value={atual || ""}
+          onChange={(e) => setPessoas((p) => ({ ...p, [chave]: e.target.value || undefined }))}>
+          <option value="">—</option>
+          {opcoes.map((u) => <option key={u.id} value={u.id}>{u.nome}{u.funcao ? ` · ${u.funcao}` : ""}</option>)}
+        </select>
+        {nomeAntigo && <span className="detalhe">No rascunho: “{nomeAntigo}” — escolha o usuário de novo.</span>}
+        <MensagensCampo r={r} campo={chave} />
       </div>
     );
   }
@@ -946,7 +1222,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <select style={campo} value={coletaId} onChange={(e) => trocarColeta(e.target.value)}>
               {coletas.map((c, i) => (
                 <option key={c.id} value={c.id}>
-                  {c.aprovada_em ? "✓ " : ""}Medição {coletas.length - i} — {new Date(c.criado_em).toLocaleString("pt-BR")}
+                  {c.aprovada_em ? "✓ " : ""}Medição {coletas.length - i} — {c.data_coleta ? isoParaBr(c.data_coleta) : new Date(c.criado_em).toLocaleString("pt-BR")}
                   {c.dados?.resultado?.volSedM3 != null ? ` · ${Number(c.dados.resultado.volSedM3).toFixed(3).replace(".", ",")} m³` : ""}
                 </option>
               ))}
@@ -960,27 +1236,51 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           )}
         </div>
 
+        {inicio && inicio.mudancas.length > 0 && (
+          <div className="val-resumo" role="status">
+            <strong className="val-aviso">⚠️ O que mudou desde o rascunho (dados do cadastro/medição atualizados):</strong>
+            <ul>{inicio.mudancas.map((m, i) => <li key={i}>{m}</li>)}</ul>
+          </div>
+        )}
+        {restaurando && <p className="detalhe" style={{ margin: 0 }}>Carregando as fotos do rascunho…</p>}
+        {fotosPerdidas.length > 0 && (
+          <p className="val-msg val-aviso" style={{ margin: 0 }}>
+            ⚠️ {fotosPerdidas.length} foto(s) do rascunho não puderam ser recuperadas: {fotosPerdidas.join(", ")}. Anexe de novo se precisar.
+          </p>
+        )}
+
         {PainelColeta()}
 
         {Topico({ numero: 0, titulo: TOPICO_CAPA.titulo, children: <>
           <div style={grade}>
             <div><label style={rotulo}>Título do relatório *</label>
-              <input style={campo} value={d.titulo || ""} onChange={set("titulo")} placeholder="ex.: Batimetria — Tanque TQ-01" /></div>
-            <div><label style={rotulo}>Cliente <span className="detalhe">(automático)</span></label>
-              <input style={campo} value={d.cliente || ""} onChange={set("cliente")} /></div>
-            <div><label style={rotulo}>Endereço</label>
-              <input style={campo} value={d.endereco || ""} onChange={set("endereco")} /></div>
-            <div><label style={rotulo}>Data do relatório</label>
-              <input style={campo} value={d.dataRelatorio || ""} onChange={set("dataRelatorio")} placeholder="dd/mm/aaaa" /></div>
+              <input style={campo} value={d.titulo || ""} onChange={set("titulo")} placeholder="ex.: Batimetria — Tanque TQ-01" />
+              <MensagensCampo r={r} campo="titulo" /></div>
+            <div><label style={rotulo}>Cliente <span className="detalhe">(cadastro)</span></label>
+              <input style={campoLeitura} value={d.cliente || ""} readOnly placeholder="sem cliente no projeto" /></div>
+            <div><label style={rotulo}>Endereço <span className="detalhe">(cadastro do projeto)</span></label>
+              <input style={campoLeitura} value={d.endereco || ""} readOnly placeholder="sem endereço no projeto" /></div>
+            <div><label style={rotulo}>Data do relatório *</label>
+              <input style={campo} type="date" max={hoje} value={d.dataRelatorio || ""} onChange={set("dataRelatorio")} />
+              <MensagensCampo r={r} campo="dataRelatorio" /></div>
           </div>
+          <p className="detalhe" style={{ margin: 0 }}>
+            Cliente, endereço, TAG e procedimento vêm do cadastro (só leitura aqui). Para mudar, edite o cadastro do
+            projeto/OS e reabra este formulário.
+          </p>
 
           <strong style={{ fontSize: 12.5, marginTop: 4 }}>Controle de revisão</strong>
           <div style={grade}>
             <div>
-              <label style={rotulo}>Revisão <span className="detalhe">(automática)</span></label>
-              <input style={{ ...campo, fontWeight: 700 }} value={d.revisao || ""}
+              <label style={rotulo}>Revisão <span className="detalhe">({podeEditarRevisao ? "calculada — você pode corrigir" : "automática"})</span></label>
+              <input style={podeEditarRevisao ? { ...campo, fontWeight: 700 } : { ...campoLeitura, fontWeight: 700 }}
+                value={d.revisao || ""} readOnly={!podeEditarRevisao} inputMode="numeric"
                 onChange={(e) => mudarRevisao(e.target.value)} />
-              <span className="detalhe">Incrementa a cada reprovação registrada nesta OS e compõe o campo Relatório.</span>
+              <span className="detalhe">
+                Reprovações (“Ajustar”) deste tipo de relatório nesta OS: Rev{revisaoEsperada}. Compõe o campo Relatório.
+                {!podeEditarRevisao && " Só Admin, Gerência ou Coordenador corrigem à mão."}
+              </span>
+              <MensagensCampo r={r} campo="revisao" />
             </div>
             <div>
               <label style={rotulo}>Status</label>
@@ -989,43 +1289,37 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                 <option value="">—</option>
                 {["A", "B", "C", "D", "E"].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
+              <MensagensCampo r={r} campo="statusRevisao" />
             </div>
-            <div><label style={rotulo}>Data (dd/mm/aaaa)</label>
-              <input style={campo} value={d.dataRevisao || ""} onChange={set("dataRevisao")} placeholder="dd/mm/aaaa" /></div>
+            <div><label style={rotulo}>Data da revisão</label>
+              <input style={campo} type="date" value={d.dataRevisao || ""} onChange={set("dataRevisao")} />
+              <MensagensCampo r={r} campo="dataRevisao" /></div>
           </div>
           <div style={grade}>
-            {([
-              ["preparadoPor", "Preparado por"],
-              ["checadoPor", "Checado por"],
-              // Coluna do quadro da capa que existe no modelo do POP 001. Sai
-              // do documento quando o modelo nao tem essa coluna.
-              ["revisadoPorCapa", "Revisado por"],
-              ["aprovadoPor", "Aprovado por"],
-            ] as const).map(([chave, label]) => (
-              <div key={chave}>
-                <label style={rotulo}>{label}</label>
-                <select style={campo} value={(d as any)[chave] || ""}
-                  onChange={(e) => setD((v) => ({ ...v, [chave]: e.target.value }))}>
-                  <option value="">—</option>
-                  {operacoes.map((u) => (
-                    <option key={u.id} value={u.nome}>{u.nome}{u.funcao ? ` · ${u.funcao}` : ""}</option>
-                  ))}
-                </select>
-              </div>
-            ))}
+            {SelectPessoa("preparadoPor", "Preparado por", operacoes)}
+            {SelectPessoa("checadoPor", "Checado por", operacoes)}
+            {/* Coluna do quadro da capa que existe no modelo do POP 001. Sai
+                do documento quando o modelo não tem essa coluna. */}
+            {SelectPessoa("revisadoPorCapa", "Revisado por", operacoes)}
+            {SelectPessoa("aprovadoPor", "Aprovado por", operacoes)}
           </div>
           <div style={grade}>
-            <div><label style={rotulo}>Relatório <span className="detalhe">(automático — código do projeto)</span></label>
-              <input style={campo} value={d.relatorioCodigo || ""} onChange={set("relatorioCodigo")} /></div>
+            <div><label style={rotulo}>Relatório <span className="detalhe">(automático — código do projeto + revisão)</span></label>
+              <input style={podeEditarRevisao ? campo : campoLeitura} value={d.relatorioCodigo || ""} readOnly={!podeEditarRevisao}
+                onChange={(e) => {
+                  if (!podeEditarRevisao) return;
+                  setRevisaoManual(true);
+                  setD((v) => ({ ...v, relatorioCodigo: e.target.value }));
+                }} />
+              <MensagensCampo r={r} campo="relatorioCodigo" /></div>
             <div>
-              <label style={rotulo}>Procedimento</label>
-              <input style={campo} list="lista-procedimentos" value={d.procedimento || ""}
-                onChange={set("procedimento")} placeholder="ex.: PR-BAT-001" />
-              <datalist id="lista-procedimentos">
-                {PROCEDIMENTOS.map((p: any) => <option key={p.codigo} value={p.codigo}>{p.nome}</option>)}
-              </datalist>
+              <label style={rotulo}>Procedimento <span className="detalhe">(cadastro da OS)</span></label>
+              <input style={campoLeitura} readOnly placeholder="sem procedimento no cadastro da OS"
+                value={d.procedimento ? `${d.procedimento}${proc ? ` — ${proc.nome}` : ""}` : ""} />
               <span className="detalhe">
-                {proc ? `${proc.nome} — sugere método e equipamentos nos tópicos 3 e 4.` : "Digite o código; o cadastro em banco ainda será mapeado."}
+                {proc ? "Sugere método e equipamentos nos tópicos 3 e 4. Para trocar, edite o cadastro da OS."
+                  : d.procedimento ? (catalogoPronto ? "Procedimento não encontrado no Catálogo — o relatório usa o modelo padrão." : "Carregando o Catálogo…")
+                  : "Escolha o procedimento no cadastro da OS para usar o modelo dele."}
               </span>
             </div>
           </div>
@@ -1038,8 +1332,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
         {Topico({ numero: 1, titulo: "Identificação do local", children: <>
           <div style={grade}>
-            <div><label style={rotulo}>Cliente <span className="detalhe">(automático)</span></label>
-              <input style={campo} value={d.cliente || ""} onChange={set("cliente")} /></div>
+            <div><label style={rotulo}>Cliente <span className="detalhe">(cadastro — o mesmo da capa)</span></label>
+              <input style={campoLeitura} value={d.cliente || ""} readOnly /></div>
             <div><label style={rotulo}>Unidade</label>
               <input style={campo} value={d.unidade || ""} onChange={set("unidade")} /></div>
             <div><label style={rotulo}>Contato <span className="detalhe">(cadastro do cliente)</span></label>
@@ -1049,17 +1343,19 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           <div style={grade}>
             <div>
               <label style={rotulo}>Execução <span className="detalhe">(automático — agendamento)</span></label>
-              <input style={campo} value={d.dataExecucao || ""} onChange={set("dataExecucao")} placeholder="dd/mm/aaaa" />
+              <input style={campo} type="date" value={d.dataExecucao || ""} onChange={set("dataExecucao")} />
               <span className="detalhe">Data do serviço, tirada do agendamento do mesmo tipo do relatório (inspeção até a fase 5; execução a partir da 6).</span>
+              <MensagensCampo r={r} campo="dataExecucao" />
             </div>
-            <div><label style={rotulo}>Relatório <span className="detalhe">(automático — código do projeto)</span></label>
-              <input style={campo} value={d.relatorioCodigo || ""} onChange={set("relatorioCodigo")} /></div>
+            <div><label style={rotulo}>Relatório <span className="detalhe">(o mesmo da capa)</span></label>
+              <input style={campoLeitura} value={d.relatorioCodigo || ""} readOnly /></div>
           </div>
         </> })}
 
         {Topico({ numero: 2, titulo: "Identificação do tanque", children: <>
           <div style={grade}>
-            <div><label style={rotulo}>TAG</label><input style={campo} value={d.tag || ""} onChange={set("tag")} /></div>
+            <div><label style={rotulo}>TAG <span className="detalhe">(identificação da OS)</span></label>
+              <input style={campoLeitura} value={d.tag || ""} readOnly /></div>
             <div><label style={rotulo}>Área</label><input style={campo} value={d.area || ""} onChange={set("area")} /></div>
             <div>
               <label style={rotulo}>Material</label>
@@ -1069,19 +1365,24 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                 {MATERIAIS_TANQUE.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
-            <div><label style={rotulo}>Capacidade nominal</label>
-              <input style={campo} value={d.capacidadeNominal || ""} onChange={set("capacidadeNominal")} placeholder="ex.: 1.500 m³" /></div>
-            <div><label style={rotulo}>Altura do tanque</label><input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} /></div>
-            <div><label style={rotulo}>Diâmetro</label><input style={campo} value={d.diametro || ""} onChange={set("diametro")} /></div>
+            <div><label style={rotulo}>Capacidade <span className="detalhe">(medição; sem ela, cadastro)</span></label>
+              <input style={campo} value={d.capacidadeTanque || ""} onChange={set("capacidadeTanque")} placeholder="ex.: 1.500,00 m³" />
+              <MensagensCampo r={r} campo="capacidadeTanque" /></div>
+            <div><label style={rotulo}>Altura do tanque</label><input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} placeholder="ex.: 8,00 m" />
+              <MensagensCampo r={r} campo="alturaTanque" /></div>
+            <div><label style={rotulo}>Diâmetro</label><input style={campo} value={d.diametro || ""} onChange={set("diametro")} placeholder="ex.: 10,00 m" />
+              <MensagensCampo r={r} campo="diametro" /></div>
           </div>
           <div style={grade}>
             <div><label style={rotulo}>Histórico</label>
               <input style={campo} value={d.historico || ""} onChange={set("historico")}
                 placeholder="ex.: última limpeza em 03/2025" /></div>
             <div><label style={rotulo}>Comprimento <span className="detalhe">(medição)</span></label>
-              <input style={campo} value={d.comprimento || ""} onChange={set("comprimento")} /></div>
+              <input style={campo} value={d.comprimento || ""} onChange={set("comprimento")} placeholder="em metros" />
+              <MensagensCampo r={r} campo="comprimento" /></div>
             <div><label style={rotulo}>Largura <span className="detalhe">(medição)</span></label>
-              <input style={campo} value={d.largura || ""} onChange={set("largura")} /></div>
+              <input style={campo} value={d.largura || ""} onChange={set("largura")} placeholder="em metros" />
+              <MensagensCampo r={r} campo="largura" /></div>
           </div>
 
           {/* Horários da operação: alimentam o texto padrão de Observações do
@@ -1091,8 +1392,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <strong style={{ fontSize: 12.5 }}>Horários da operação <span className="detalhe">(texto padrão do procedimento)</span></strong>
             <div style={{ ...grade, marginTop: 6 }}>
               <div><label style={rotulo}>Data</label>
-                <input style={campo} value={d.dataOperacao || ""} onChange={set("dataOperacao")}
-                  placeholder="dd/mm/aaaa" /></div>
+                <input style={campo} type="date" value={d.dataOperacao || ""} onChange={set("dataOperacao")} />
+                <MensagensCampo r={r} campo="dataOperacao" /></div>
               {["Chegada ao site", "Início da limpeza", "Conclusão", "Saída do site"].map((rot, i) => (
                 <div key={i}>
                   <label style={rotulo}>{rot}</label>
@@ -1105,6 +1406,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                 </div>
               ))}
             </div>
+            <MensagensCampo r={r} campo="horarios" />
           </div>
           )}
 
@@ -1157,6 +1459,9 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
 
         {Topico({ numero: 5, titulo: "Equipe de trabalho", children: <>
           <label style={rotulo}>Envolvidos — selecione entre os usuários cadastrados</label>
+          {equipeAgendada.length > 0 && (
+            <span className="detalhe">A equipe do agendamento já vem marcada — sai no relatório exatamente quem estiver marcado aqui.</span>
+          )}
           {usuarios.length === 0 ? (
             <p className="vazio" style={{ margin: 0 }}>Nenhum usuário disponível.</p>
           ) : (
@@ -1178,12 +1483,15 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>Equipamento <span className="detalhe">(tipo/uso do tanque)</span></label>
               <input style={campo} value={d.equipamentoTanque || ""} onChange={set("equipamentoTanque")}
                 placeholder="ex.: Tanque de combate a incêndio" /></div>
-            <div><label style={rotulo}>Altura <span className="detalhe">(automático)</span></label>
-              <input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} /></div>
-            <div><label style={rotulo}>Diâmetro <span className="detalhe">(automático)</span></label>
-              <input style={campo} value={d.diametro || ""} onChange={set("diametro")} /></div>
-            <div><label style={rotulo}>Capacidade <span className="detalhe">(automático — volume do tanque)</span></label>
-              <input style={campo} value={d.capacidadeTanque || ""} onChange={set("capacidadeTanque")} /></div>
+            <div><label style={rotulo}>Altura <span className="detalhe">(o mesmo do tópico 2)</span></label>
+              <input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} />
+              <MensagensCampo r={r} campo="alturaTanque" /></div>
+            <div><label style={rotulo}>Diâmetro <span className="detalhe">(o mesmo do tópico 2)</span></label>
+              <input style={campo} value={d.diametro || ""} onChange={set("diametro")} />
+              <MensagensCampo r={r} campo="diametro" /></div>
+            <div><label style={rotulo}>Capacidade <span className="detalhe">(a mesma do tópico 2)</span></label>
+              <input style={campo} value={d.capacidadeTanque || ""} onChange={set("capacidadeTanque")} />
+              <MensagensCampo r={r} campo="capacidadeTanque" /></div>
           </div>
 
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
@@ -1203,11 +1511,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         {Topico({ numero: 7, titulo: "Batimetria", children: <>
           <div style={grade}>
             <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(automático — medição)</span></label>
-              <input style={campo} value={d.volumeSedimento || ""} onChange={set("volumeSedimento")} placeholder="ex.: 12,480 m³" /></div>
-            <div><label style={rotulo}>Mínimo (−5%)</label>
-              <input style={campo} value={d.volumeMin || ""} onChange={set("volumeMin")} /></div>
-            <div><label style={rotulo}>Máximo (+5%)</label>
-              <input style={campo} value={d.volumeMax || ""} onChange={set("volumeMax")} /></div>
+              <input style={campo} value={d.volumeSedimento || ""} onChange={(e) => mudarVolume(e.target.value)} placeholder="ex.: 12,480 m³" />
+              <MensagensCampo r={r} campo="volumeSedimento" /></div>
+            <div><label style={rotulo}>Mínimo (−5%) <span className="detalhe">(calculado)</span></label>
+              <input style={campoLeitura} value={d.volumeMin || ""} readOnly /></div>
+            <div><label style={rotulo}>Máximo (+5%) <span className="detalhe">(calculado)</span></label>
+              <input style={campoLeitura} value={d.volumeMax || ""} readOnly /></div>
           </div>
           <p className="detalhe" style={{ margin: 0 }}>
             O texto do modelo já traz os dois parágrafos; o volume e a faixa de ±5% são substituídos
@@ -1233,7 +1542,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               <div key={i} style={{ marginTop: 10, padding: 10, border: "1px solid var(--borda)", borderRadius: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>8.{i + 1}</strong>
-                  <input style={{ ...campo, flex: 1, minWidth: 160 }} placeholder="Título do subtópico (ex.: Teto)"
+                  <input style={{ ...campo, flex: 1, minWidth: 160 }} placeholder="Título do subtópico * (ex.: Teto)"
                     value={st.titulo}
                     onChange={(e) => setSubs8((p) => p.map((x, k) => k === i ? { titulo: e.target.value } : x))} />
                   <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
@@ -1247,6 +1556,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                       setSubs8((p) => p.filter((_, k) => k !== i));
                     }}>Remover</button>
                 </div>
+                <MensagensCampo r={r} campo={`subs8.${i}`} />
                 {BlocoFotosAncora({ ancora: `sub8-${i}`, legendaPadrao: st.titulo || "Inspeção visual interna", max: 10, topico: 8 })}
               </div>
             ))}
@@ -1265,7 +1575,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
                 <strong style={{ fontSize: 12.5 }}>{t.titulo || `Seção ${i + 1}`}</strong>
                 <EditorTexto valor={textosExtras[i] || ""} altura={100}
                   onChange={(v) => setTextosExtras((p) => ({ ...p, [i]: v }))} />
-                {BlocoFotosAncora({ ancora: `extra-${i}`, legendaPadrao: t.titulo || "", max: 10, topico: 9 })}
+                {BlocoFotosAncora({ ancora: `extra-${i}`, legendaPadrao: t.titulo || "", max: 10, topico: TOPICO_EXTRAS })}
               </div>
             ))}
           </div>
@@ -1301,7 +1611,8 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
             <div><label style={rotulo}>Altura de sedimento <span className="detalhe">(medição)</span></label>
               <input style={campo} value={d.alturaSedimento || ""} onChange={set("alturaSedimento")} /></div>
             <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(medição)</span></label>
-              <input style={campo} value={d.volumeSedimento || ""} onChange={set("volumeSedimento")} /></div>
+              <input style={campo} value={d.volumeSedimento || ""} onChange={(e) => mudarVolume(e.target.value)} />
+              <MensagensCampo r={r} campo="volumeSedimento" /></div>
           </div>
           {([
             [8, "Análise Físico Química e Laboratorial — 4 fotos", 4],
@@ -1349,32 +1660,15 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
           <div style={{ ...grade, marginTop: 8 }}>
-            <div>
-              <label style={rotulo}>Relatório elaborado por <span className="detalhe">(Operações)</span></label>
-              <select style={campo} value={d.elaboradoPor || ""}
-                onChange={(e) => setD((v) => ({ ...v, elaboradoPor: e.target.value }))}>
-                <option value="">—</option>
-                {operacoes.map((u) => (
-                  <option key={u.id} value={u.nome}>{u.nome}{u.funcao ? ` · ${u.funcao}` : ""}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={rotulo}>Relatório revisado por <span className="detalhe">(Gerência)</span></label>
-              <select style={campo} value={d.revisadoPor || ""}
-                onChange={(e) => setD((v) => ({ ...v, revisadoPor: e.target.value }))}>
-                <option value="">—</option>
-                {gerencia.map((u) => (
-                  <option key={u.id} value={u.nome}>{u.nome}{u.funcao ? ` · ${u.funcao}` : ""}</option>
-                ))}
-              </select>
-            </div>
+            {SelectPessoa("elaboradoPor", "Relatório elaborado por (Operações)", operacoes)}
+            {SelectPessoa("revisadoPor", "Relatório revisado por (Gerência)", gerencia)}
           </div>
           {gerencia.length === 0 && (
             <p className="detalhe" style={{ margin: "6px 0 0" }}>Nenhum usuário de Gerência cadastrado.</p>
           )}
         </div>
 
+        <ResumoValidacao r={r} rotulos={ROTULOS_RELATORIO} mostrarErros={tentou || temErros(r)} />
         {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
         {pendColeta.length > 0 && (
           <p className="detalhe" style={{ margin: 0, color: "#c2410c", textAlign: "right" }}>
@@ -1383,10 +1677,10 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         )}
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button className="btn-azul btn-sec" onClick={onFechar} disabled={gerando || enviando}>Cancelar</button>
-          <button className="btn-azul btn-sec" onClick={baixar} disabled={gerando || enviando}>
+          <button className="btn-azul btn-sec" onClick={baixar} disabled={gerando || enviando || restaurando || processandoFotos}>
             {gerando ? "Gerando…" : "⬇ Só baixar (.docx)"}
           </button>
-          <button className="btn-azul" onClick={salvarEEnviar} disabled={gerando || enviando}>
+          <button className="btn-azul" onClick={salvarEEnviar} disabled={gerando || enviando || restaurando || processandoFotos}>
             {enviando ? "Salvando…" : "💾 Salvar rascunho no card"}
           </button>
         </div>

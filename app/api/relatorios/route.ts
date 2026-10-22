@@ -1,121 +1,216 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
-import { uploadArquivo, DOCX_MIME } from "@/lib/processos/arquivos";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-
-const BUCKET = "gp-arquivos";
+import { DOCX_MIME, removerArquivos, uploadArquivo } from "@/lib/processos/arquivos";
+import { ehUuid, sha256 } from "@/lib/asp/coleta-api";
+import { ehViolacaoUnica } from "@/lib/asp/os-validacao-api";
+import {
+  apontarSubstituto, caminhoRelatorioValido, desfazerSubstituicao, examinarNoStorage, fotosDeRascunho, infoOSRelatorio,
+  inserirComVersao, limparFotosRascunho, marcarSubstituidos, paraRelatorioRef, PERFIS_RELATORIO, relatoriosDaOS,
+  validarSnapshotServidor,
+} from "@/lib/asp/relatorio-api";
+import {
+  arquivoRelatorioRepetido, descreverRelatorio, erroTipoNaFase, examinarArquivoRelatorio, primeiroErro,
+  rascunhoDoTipo, RELATORIO_GERADO_MAX_BYTES, RELATORIO_MAX_BYTES, ROTULOS_RELATORIO, SnapshotRelatorio, temErros,
+} from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-const PERFIS_ENVIO = ["admin", "operacoes", "gerencia"];
+interface Corpo {
+  id?: string;
+  inspecaoId: string;
+  tipo: string;
+  rascunho: boolean;
+  dados: SnapshotRelatorio | null;
+  arquivoPath: string;
+  /** Arquivo no próprio corpo (envio antigo / fila offline). */
+  arquivo?: Uint8Array | null;
+}
 
-/** Envia (faz upload de) um relatório de inspeção/execução. Cada envio é uma
- * NOVA versão (nova linha) — preserva o histórico de envios (COWORK-ASP §2.3).
- * Entra como 'em_aprovacao' e coloca a inspeção nesse status para a fila da
- * Gerência (fases 5/9). Upload manual de PDF/DOCX. */
+/** JSON (o normal: o arquivo já está no storage) ou multipart (legado). */
+async function lerCorpo(req: Request): Promise<{ corpo?: Corpo; erro?: string }> {
+  const ct = req.headers.get("content-type") || "";
+  const get: Record<string, unknown> = {};
+  let arquivo: Uint8Array | null = null;
+  if (ct.includes("multipart/form-data")) {
+    let form: FormData;
+    try { form = await req.formData(); } catch { return { erro: "Envio inválido (formulário corrompido)." }; }
+    form.forEach((v, k) => { if (typeof v === "string") get[k] = v; });
+    const f = form.get("arquivo");
+    if (f instanceof Blob && f.size > 0) arquivo = new Uint8Array(await f.arrayBuffer());
+  } else {
+    try { Object.assign(get, await req.json()); } catch { return { erro: "Envio inválido (JSON corrompido)." }; }
+  }
+  let dados: SnapshotRelatorio | null = null;
+  if (typeof get.dados === "string" && get.dados.trim()) {
+    try { dados = JSON.parse(get.dados); } catch { return { erro: "Os dados do formulário chegaram corrompidos. Gere o rascunho de novo." }; }
+  } else if (get.dados && typeof get.dados === "object") dados = get.dados as SnapshotRelatorio;
+  return {
+    corpo: {
+      id: typeof get.id === "string" ? get.id : req.headers.get("idempotency-key") || undefined,
+      inspecaoId: String(get.inspecaoId || ""),
+      tipo: String(get.tipo || ""),
+      rascunho: get.rascunho === true || get.rascunho === "1",
+      dados,
+      arquivoPath: String(get.arquivoPath || ""),
+      arquivo,
+    },
+  };
+}
+
+/** Registra um relatório da OS (Fase 4) — rascunho gerado no sistema ou
+ *  arquivo enviado de fora, que já entra em aprovação.
+ *
+ *   · A VERSÃO é calculada aqui, no insert (maior + 1; o índice único
+ *     recusa colisão e o cálculo é refeito) — nunca no navegador.
+ *   · Um rascunho por OS/tipo: gerar de novo ATUALIZA o rascunho existente.
+ *   · Envio com outra versão em aprovação: a anterior vira 'substituido'.
+ *   · O tipo segue a fase da OS; o arquivo é conferido NO STORAGE (existe,
+ *     é desta OS, PDF/DOCX de verdade, tamanho) e o mesmo arquivo (SHA-256)
+ *     não entra duas vezes na OS.
+ *   · Idempotente: o `id` (ou Idempotency-Key) da fila offline/duplo clique
+ *     devolve o registro já criado em vez de duplicar. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
-  if (!PERFIS_ENVIO.includes(profile.perfil)) {
+  if (!PERFIS_RELATORIO.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Envio de relatório é responsabilidade de Operações." }, { status: 403 });
   }
 
-  const form = await req.formData();
-  const inspecaoId = String(form.get("inspecaoId") || "");
-  const tipo = String(form.get("tipo") || "") === "execucao" ? "execucao" : "inspecao";
-  // Rascunho: fica anexado ao card sem ir para a fila da Gerência. O envio
-  // para aprovação é um segundo passo, explícito (PATCH .../enviar).
-  const ehRascunho = String(form.get("rascunho") || "") === "1";
-  // Snapshot do formulário — permite reabrir o rascunho para edição.
-  let dadosForm: any = null;
-  try { const raw = String(form.get("dados") || ""); if (raw) dadosForm = JSON.parse(raw); } catch {}
-  // Editar rascunho: salva EM CIMA do registro existente (mesma versão),
-  // trocando o arquivo — em vez de empilhar uma versão nova a cada salvamento.
-  const substituirId = String(form.get("substituirId") || "");
-  const f = form.get("arquivo");
-  // Arquivo já enviado direto ao storage (URL assinada) — a função só registra.
-  const arquivoPath = String(form.get("arquivoPath") || "");
-  const nomeInformado = String(form.get("nomeArquivo") || "");
+  const { corpo, erro } = await lerCorpo(req);
+  if (!corpo) return NextResponse.json({ erro }, { status: 400 });
+  const { inspecaoId, rascunho: ehRascunho, dados } = corpo;
+  if (!inspecaoId) return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
+  if (corpo.id && !ehUuid(corpo.id)) return NextResponse.json({ erro: "Identificador do envio inválido." }, { status: 400 });
+  const id = corpo.id || randomUUID();
 
-  if (!inspecaoId) {
-    return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
-  }
-  if (!arquivoPath && (!(f instanceof Blob) || !(f as File).name)) {
-    return NextResponse.json({ erro: "Envie o relatório no campo 'arquivo'." }, { status: 400 });
-  }
-  const arquivo = f as File;
-  const nomeLower = (arquivoPath || nomeInformado || arquivo?.name || "").toLowerCase();
-  const ehPdf = nomeLower.endsWith(".pdf");
-  const ehDocx = nomeLower.endsWith(".docx");
-  if (!ehPdf && !ehDocx) {
-    return NextResponse.json({ erro: "Envie o relatório em PDF ou DOCX." }, { status: 400 });
+  const admin = getSupabaseAdmin();
+  // Reenvio (fila offline, duplo clique): já registrado → devolve o mesmo.
+  const { data: existente } = await admin.from("gp_relatorios").select("*").eq("id", id).maybeSingle();
+  if (existente) {
+    if (existente.inspecao_id !== inspecaoId) return NextResponse.json({ erro: "Identificador já usado em outra OS." }, { status: 409 });
+    return NextResponse.json({ ok: true, relatorio: existente, repetido: true });
   }
 
-  const supabase = getSupabaseRouteClient();
+  const info = await infoOSRelatorio(inspecaoId);
+  if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
+  const tipo = corpo.tipo;
+  const erroTipo = erroTipoNaFase(tipo, info.fase);
+  if (erroTipo) return NextResponse.json({ erro: erroTipo }, { status: 400 });
+  if (ehRascunho && !dados) return NextResponse.json({ erro: "Rascunho sem os dados do formulário." }, { status: 400 });
 
-  // Próxima versão para este bloco (inspeção/execução) desta inspeção.
-  const { data: ultima } = await supabase
-    .from("gp_relatorios")
-    .select("versao")
-    .eq("inspecao_id", inspecaoId)
-    .eq("tipo", tipo)
-    .order("versao", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const versao = (ultima?.versao || 0) + 1;
+  // Arquivo: conferido pelos bytes, no storage (ou no corpo, no legado).
+  const max = dados ? RELATORIO_GERADO_MAX_BYTES : RELATORIO_MAX_BYTES;
+  let caminho = corpo.arquivoPath;
+  let hash: string | null;
+  let formato: "pdf" | "docx" | null;
+  let enviadoAgora = false;   // subimos aqui: apagar se o registro falhar
+  if (corpo.arquivo) {
+    const ex = await examinarArquivoRelatorio(corpo.arquivo, { max });
+    if (ex.erro) return NextResponse.json({ erro: ex.erro, erros: { arquivo: [ex.erro] } }, { status: 400 });
+    formato = ex.formato;
+    hash = sha256(corpo.arquivo);
+    caminho = `relatorios/${inspecaoId}/${tipo}-${randomUUID()}.${formato}`;
+  } else {
+    if (!caminho) return NextResponse.json({ erro: "Envie o arquivo do relatório." }, { status: 400 });
+    if (!caminhoRelatorioValido(caminho, inspecaoId)) {
+      return NextResponse.json({ erro: "Caminho do arquivo inválido para esta OS." }, { status: 400 });
+    }
+    const ex = await examinarNoStorage(caminho, max);
+    if (ex.erro) {
+      if (!ex.naoExiste) await removerArquivos([caminho]);
+      return NextResponse.json({ erro: ex.erro, erros: { arquivo: [ex.erro] } }, { status: 400 });
+    }
+    hash = ex.hash; formato = ex.formato;
+    if (!caminho.toLowerCase().endsWith(`.${formato}`)) {
+      await removerArquivos([caminho]);
+      const e = `O conteúdo é ${formato?.toUpperCase()}, mas o nome diz outra coisa. Renomeie o arquivo com a extensão certa.`;
+      return NextResponse.json({ erro: e, erros: { arquivo: [e] } }, { status: 400 });
+    }
+  }
+  const descartar = async () => { if (corpo.arquivo ? enviadoAgora : true) await removerArquivos([caminho]); };
 
-  const ext = ehPdf ? "pdf" : "docx";
-  let caminho = arquivoPath;
-  if (!caminho) {
-    caminho = `relatorios/${inspecaoId}/${tipo}-v${versao}.${ext}`;
+  const linhas = await relatoriosDaOS(inspecaoId);
+  const refs = linhas.map(paraRelatorioRef);
+  const rascunhoAtual = ehRascunho ? rascunhoDoTipo(refs, tipo) : null;
+  const anterior = rascunhoAtual ? linhas.find((l) => l.id === rascunhoAtual.id) || null : null;
+
+  const igual = arquivoRelatorioRepetido(hash, refs, rascunhoAtual?.id);
+  if (igual) {
+    await descartar();
+    const e = `Este mesmo arquivo já foi enviado nesta OS (${descreverRelatorio(igual)}).`;
+    return NextResponse.json({ erro: e, erros: { arquivo: [e] } }, { status: 409 });
+  }
+
+  if (dados) {
+    const r = await validarSnapshotServidor(dados, { info, rels: refs, tipo, profile, anterior: anterior?.dados });
+    if (temErros(r)) {
+      await descartar();
+      return NextResponse.json({ erro: primeiroErro(r, ROTULOS_RELATORIO), erros: r.erros, avisos: r.avisos }, { status: 400 });
+    }
+    dados.versaoSnapshot = 2;
+  }
+
+  if (corpo.arquivo) {
     try {
-      await uploadArquivo(caminho, Buffer.from(await arquivo.arrayBuffer()), ehPdf ? "application/pdf" : DOCX_MIME);
+      await uploadArquivo(caminho, corpo.arquivo, formato === "pdf" ? "application/pdf" : DOCX_MIME);
+      enviadoAgora = true;
     } catch (e) {
       return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar o arquivo." }, { status: 500 });
     }
   }
 
-  if (substituirId && ehRascunho) {
-    const { data: alvo } = await supabase
-      .from("gp_relatorios").select("id, status, arquivo_path")
-      .eq("id", substituirId).eq("inspecao_id", inspecaoId).maybeSingle();
-    if (alvo && alvo.status === "rascunho") {
-      const { data: atualizado, error: eUp } = await supabase
-        .from("gp_relatorios")
-        .update({ arquivo_path: caminho, ...(dadosForm ? { dados: dadosForm } : {}) })
-        .eq("id", alvo.id).select("*").single();
-      if (eUp) return NextResponse.json({ erro: eUp.message }, { status: 500 });
-      // arquivo antigo sai do storage (o novo tem outro nome, não colide)
-      if (alvo.arquivo_path && alvo.arquivo_path !== caminho) {
-        await getSupabaseAdmin().storage.from(BUCKET).remove([alvo.arquivo_path]).catch(() => {});
+  const supabase = getSupabaseRouteClient();
+
+  // ── Rascunho: um por OS/tipo — atualiza o existente ───────────────────────
+  if (ehRascunho) {
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      const alvo = tentativa === 0 ? anterior
+        : (await relatoriosDaOS(inspecaoId)).find((l) => l.tipo === tipo && l.status === "rascunho") || null;
+      if (alvo) {
+        const { data, error } = await supabase.from("gp_relatorios")
+          .update({ arquivo_path: caminho, arquivo_hash: hash, dados, atualizado_em: new Date().toISOString() })
+          .eq("id", alvo.id).eq("status", "rascunho").select("*").maybeSingle();
+        if (error) { await descartar(); return NextResponse.json({ erro: error.message }, { status: 500 }); }
+        if (!data) continue;   // foi enviado/excluído no meio do caminho
+        if (alvo.arquivo_path && alvo.arquivo_path !== caminho) await removerArquivos([alvo.arquivo_path]);
+        const novas = new Set(fotosDeRascunho(dados, inspecaoId));
+        await limparFotosRascunho(inspecaoId, fotosDeRascunho(alvo.dados, inspecaoId).filter((c) => !novas.has(c)));
+        return NextResponse.json({ ok: true, relatorio: data, atualizado: true });
       }
-      return NextResponse.json({ ok: true, relatorio: atualizado, substituido: true });
+      const { data, error } = await inserirComVersao(supabase, {
+        id, inspecao_id: inspecaoId, tipo, arquivo_path: caminho, arquivo_hash: hash, status: "rascunho", dados,
+        enviado_por: profile.id, enviado_em: null,
+      });
+      if (!error) return NextResponse.json({ ok: true, relatorio: data });
+      // Corrida: outro rascunho do tipo nasceu agora → atualiza ele.
+      if (ehViolacaoUnica(error) && /rascunho/i.test(error.message || "")) continue;
+      await descartar();
+      if (ehViolacaoUnica(error)) return NextResponse.json({ erro: "Este arquivo acabou de ser enviado nesta OS por outro envio. Recarregue a página." }, { status: 409 });
+      return NextResponse.json({ erro: error.message }, { status: 500 });
     }
-    // rascunho sumiu ou já foi enviado: cai no fluxo normal e cria versão nova
+    await descartar();
+    return NextResponse.json({ erro: "O rascunho mudou enquanto salvava. Recarregue a página e tente de novo." }, { status: 409 });
   }
 
-  const { data, error } = await supabase
-    .from("gp_relatorios")
-    .insert({
-      inspecao_id: inspecaoId,
-      tipo,
-      versao,
-      arquivo_path: caminho,
-      status: ehRascunho ? "rascunho" : "em_aprovacao",
-      ...(dadosForm ? { dados: dadosForm } : {}),
-      enviado_por: profile.id,
-      enviado_em: ehRascunho ? null : new Date().toISOString(),
-    })
-    .select("*")
-    .single();
-  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-
-  if (!ehRascunho) {
-    const colStatus = tipo === "inspecao" ? "status_relatorio_inspecao" : "status_relatorio_execucao";
-    await supabase.from("gp_inspecoes").update({ [colStatus]: "em_aprovacao" }).eq("id", inspecaoId);
+  // ── Envio direto (arquivo de fora): nova versão, já em aprovação ─────────
+  const substituidos = await marcarSubstituidos(inspecaoId, tipo, null);
+  const { data, error } = await inserirComVersao(supabase, {
+    id, inspecao_id: inspecaoId, tipo, arquivo_path: caminho, arquivo_hash: hash, status: "em_aprovacao",
+    enviado_por: profile.id, enviado_em: new Date().toISOString(),
+  });
+  if (error) {
+    await desfazerSubstituicao(substituidos);
+    await descartar();
+    if (ehViolacaoUnica(error)) return NextResponse.json({ erro: "Outro envio deste relatório acabou de entrar. Recarregue a página." }, { status: 409 });
+    return NextResponse.json({ erro: error.message }, { status: 500 });
   }
+  await apontarSubstituto(substituidos, data.id);
+  const colStatus = tipo === "inspecao" ? "status_relatorio_inspecao" : "status_relatorio_execucao";
+  await supabase.from("gp_inspecoes").update({ [colStatus]: "em_aprovacao" }).eq("id", inspecaoId);
 
-  return NextResponse.json({ ok: true, relatorio: data });
+  return NextResponse.json({ ok: true, relatorio: data, substituidos });
 }
