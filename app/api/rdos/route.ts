@@ -4,6 +4,8 @@ import { removerArquivos } from "@/lib/processos/arquivos";
 import { dataIsoValida } from "@/lib/asp/rdo";
 import { CAMPOS_RDO as CAMPOS, PERFIS_RDO as PERFIS, UUID, MSG_DIA_DUPLICADO, bloqueiosDoRdo, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 // RDO — Registro Diário de Operação (gp_rdos). Um por projeto por dia.
@@ -63,6 +65,9 @@ export async function POST(req: NextRequest) {
     const { data: existente } = await supabase.from("gp_rdos").select(CAMPOS).eq("id", id).maybeSingle();
     if (existente) return NextResponse.json({ ok: true, rdo: existente, existente: true });
   }
+  // ⛔ RDO que cobre OS encerrada não nasce (nem com ela marcada).
+  const travada = await garantirOsAberta(Array.isArray(b?.inspecoes) ? b.inspecoes : [], { rdo: true });
+  if (travada) return travada;
   const erroInsp = await erroDasInspecoes(supabase, projetoId, b?.inspecoes);
   if (erroInsp) return NextResponse.json({ erro: erroInsp }, { status: 400 });
   const bloq = bloqueiosDoRdo(b.dados, b.data, b.inspecoes as string[]);

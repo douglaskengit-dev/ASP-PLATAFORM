@@ -8,6 +8,8 @@ import {
 } from "@/lib/asp/fotos-execucao";
 import { erroValorColeta, formatoImagem, FOTO_MAX_BYTES } from "@/lib/validacao";
 
+import { garantirOsAberta, lerOS } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Coleta de fotos da execução (gp_fotos_execucao), uma por inspeção.
@@ -109,7 +111,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (padrao === null) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
     registro = { ...registroVazio(padrao), inspecao_id: params.id };
   }
-  return NextResponse.json({ ok: true, podeEditar: PERFIS.includes(profile.perfil), registro });
+  // OS encerrada: a tela fica só leitura (a gravação também recusa).
+  const encerrada = !!(await lerOS(params.id))?.encerrada_em;
+  return NextResponse.json({ ok: true, podeEditar: PERFIS.includes(profile.perfil) && !encerrada, encerrada, registro });
 }
 
 const HASH = /^[0-9a-f]{64}$/;
@@ -127,6 +131,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!PERFIS.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Coleta de fotos é responsabilidade de Operações." }, { status: 403 });
   }
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(params.id);
+  if (travada) return travada;
   const form = await req.formData();
   const f = form.get("arquivo");
   const slotId = String(form.get("slot") || "");
@@ -199,6 +206,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!PERFIS.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Coleta de fotos é responsabilidade de Operações." }, { status: 403 });
   }
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(params.id);
+  if (travada) return travada;
   const b = await req.json().catch(() => ({}));
   const flags: Partial<RegistroFotosExecucao> = {};
   for (const k of ["agua_antes", "agua_depois", "limpeza_confirmada"] as const) {
@@ -234,6 +244,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!PERFIS.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Coleta de fotos é responsabilidade de Operações." }, { status: 403 });
   }
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(params.id);
+  if (travada) return travada;
   const b = await req.json().catch(() => ({}));
   const caminho = String(b?.caminho || req.nextUrl.searchParams.get("caminho") || "");
   if (!caminho.startsWith(prefixo(params.id)) || caminho.includes("..")) {

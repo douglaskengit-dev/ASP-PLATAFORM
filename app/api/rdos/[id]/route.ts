@@ -3,6 +3,8 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { dataIsoValida } from "@/lib/asp/rdo";
 import { CAMPOS_RDO, PERFIS_RDO, MSG_DIA_DUPLICADO, bloqueiosDoRdo, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
 
+import { garantirOsAberta, osDoRdo } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -29,6 +31,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { data: atual } = await supabase.from("gp_rdos")
     .select("id, projeto_id, excluido_em, data, inspecoes, dados").eq("id", params.id).maybeSingle();
   if (!atual) return NextResponse.json({ erro: "RDO não encontrado." }, { status: 404 });
+  // ⛔ Cobre (ou passaria a cobrir) OS encerrada: travado — vale para
+  // editar, trocar a cobertura e restaurar da lixeira.
+  const travada = await garantirOsAberta(
+    [...((atual.inspecoes as string[]) || []), ...(Array.isArray(b?.inspecoes) ? b.inspecoes : [])], { rdo: true });
+  if (travada) return travada;
 
   const mudanca: Record<string, unknown> = {};
   if (b?.restaurar) {
@@ -78,6 +85,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   if (!PERFIS_RDO.includes(profile.perfil)) {
     return NextResponse.json({ erro: "RDO é responsabilidade de Operações." }, { status: 403 });
   }
+  const travada = await garantirOsAberta(await osDoRdo(params.id), { rdo: true });
+  if (travada) return travada;
   const { error } = await getSupabaseRouteClient().from("gp_rdos")
     .update({ excluido_em: new Date().toISOString(), excluido_por: profile.id })
     .eq("id", params.id);

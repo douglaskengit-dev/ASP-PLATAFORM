@@ -6,6 +6,8 @@ import {
   validarItensChecklist,
 } from "@/lib/validacao";
 
+import { garantirOsAberta, lerOS, osDe } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 const PERFIS = ["admin", "operacoes", "gerencia"];
@@ -26,8 +28,10 @@ export async function GET(req: NextRequest) {
   const { data, error } = await getSupabaseRouteClient()
     .from("gp_checklist_equipamentos").select("*").eq("inspecao_id", inspecaoId);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  // OS encerrada: a tela fica só leitura (a gravação também recusa).
+  const encerrada = !!(await lerOS(inspecaoId))?.encerrada_em;
   return NextResponse.json({
-    ok: true, podeEditar: PERFIS.includes(profile.perfil), checklists: data || [],
+    ok: true, podeEditar: PERFIS.includes(profile.perfil) && !encerrada, encerrada, checklists: data || [],
   });
 }
 
@@ -48,6 +52,9 @@ export async function POST(req: NextRequest) {
   if (!b?.inspecaoId || (b.tipo !== "inspecao" && b.tipo !== "execucao")) {
     return NextResponse.json({ erro: "OS ou etapa inválida." }, { status: 400 });
   }
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(b.inspecaoId);
+  if (travada) return travada;
   const admin = getSupabaseAdmin();
   const [os, catalogo, atual] = await Promise.all([
     admin.from("gp_inspecoes").select("id, procedimento, excluido_em").eq("id", b.inspecaoId).maybeSingle(),
@@ -97,6 +104,9 @@ export async function PATCH(req: NextRequest) {
   const temObs = typeof b.obs === "string";
   if (!temConferido && !temObs) return NextResponse.json({ erro: "Nada para alterar." }, { status: 400 });
 
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(await osDe("gp_checklist_equipamentos", b.id));
+  if (travada) return travada;
   const supabase = getSupabaseRouteClient();
   const catalogo = await catalogoEquipamentos();
   const nome = profile.nome_completo || profile.email || "usuário";

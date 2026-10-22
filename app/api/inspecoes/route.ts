@@ -6,6 +6,8 @@ import { normalizarTanque } from "@/lib/asp/tanque";
 import { ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
 import { normalizarEspacos, primeiroErro, ROTULOS_OS, temErros } from "@/lib/validacao";
 
+import { recalcularConclusaoProjeto } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 const DIAS_LIXEIRA = 30;
@@ -89,5 +91,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: "Identificação: já usada por outra OS deste projeto." }, { status: 409 });
   }
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  // Fase 10: OS nova num projeto concluído → volta a "em andamento".
+  await recalcularConclusaoProjeto(body.projetoId);
   return NextResponse.json({ ok: true, inspecao: data, avisos: resultado.avisos });
 }

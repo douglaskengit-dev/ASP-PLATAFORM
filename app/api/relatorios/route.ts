@@ -16,6 +16,8 @@ import {
   SnapshotRelatorio, temErros,
 } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 interface Corpo {
@@ -103,6 +105,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, relatorio: existente, repetido: true });
   }
 
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(inspecaoId);
+  if (travada) return travada;
   const info = await infoOSRelatorio(inspecaoId);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
   const tipo = corpo.tipo;

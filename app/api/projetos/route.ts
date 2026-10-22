@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseRouteClient();
   let query = supabase
     .from("gp_projetos")
-    .select("*, cliente:gp_orgaos(id, razao_social, cidade, uf), inspecoes:gp_inspecoes(id, fase, excluido_em)")
+    // gp_inspecoes(*): encerrada_em (Fase 10) sem quebrar antes da migração.
+    .select("*, cliente:gp_orgaos(id, razao_social, cidade, uf), inspecoes:gp_inspecoes(*)")
     .order(lixeira ? "excluido_em" : "criado_em", { ascending: false });
   query = lixeira ? query.not("excluido_em", "is", null) : query.is("excluido_em", null);
 
@@ -33,8 +34,9 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
   const projetos = (data || []).map((p: any) => {
-    const inspecoes = (p.inspecoes || []).filter((i: any) => !i.excluido_em);
-    return { ...p, inspecoes, inspecoes_total: inspecoes.length };
+    const inspecoes = (p.inspecoes || []).filter((i: any) => !i.excluido_em)
+      .map((i: any) => ({ id: i.id, fase: i.fase, encerrada_em: i.encerrada_em || null }));
+    return { ...p, concluido_em: p.concluido_em || null, inspecoes, inspecoes_total: inspecoes.length };
   });
   return NextResponse.json({ ok: true, projetos, podeExcluir: podeExcluirProjeto(profile), diasLixeira: DIAS_LIXEIRA });
 }

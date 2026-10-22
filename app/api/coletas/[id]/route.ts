@@ -12,6 +12,8 @@ import {
   chaveMedicao, DadosColeta, motivoNaoAprovavel, normalizarEspacos, primeiroErro, ROTULOS_COLETA, temErros, TipoColeta,
 } from "@/lib/validacao";
 
+import { garantirOsAberta, osDe } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** PATCH de uma coleta:
@@ -32,6 +34,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const admin = getSupabaseAdmin();
   const { data: coleta } = await admin.from("gp_coletas").select("*").eq("id", params.id).maybeSingle();
   if (!coleta) return NextResponse.json({ erro: "Coleta não encontrada." }, { status: 404 });
+  // ⛔ OS encerrada: nem editar, nem aprovar, nem restaurar.
+  const travada = await garantirOsAberta(coleta.inspecao_id);
+  if (travada) return travada;
 
   // A aprovação tem regra PRÓPRIA (Gerência/Admin/Coordenador) e é avaliada
   // antes da permissão de coleta — um Coordenador de outra área pode validar
@@ -160,6 +165,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!PERFIS_COLETA.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Coleta é responsabilidade de Operações." }, { status: 403 });
   }
+
+  const travada = await garantirOsAberta(await osDe("gp_coletas", params.id));
+  if (travada) return travada;
 
   const supabase = getSupabaseRouteClient();
   if (req.nextUrl.searchParams.get("definitivo") === "1") {

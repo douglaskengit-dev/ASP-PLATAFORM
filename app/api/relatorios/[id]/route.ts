@@ -10,6 +10,8 @@ import {
   erroTipoNaFase, MSG_LAUDO_OBRIGATORIO, planejarEnvio, primeiroErro, ROTULOS_RELATORIO, ROTULOS_RELATORIO_EXECUCAO, temErros,
 } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 /** Envia um relatório em rascunho para aprovação: PATCH { enviar: true }.
@@ -37,6 +39,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     .from("gp_relatorios").select("id, tipo, status, versao, inspecao_id, arquivo_path, dados, excluido_em")
     .eq("id", params.id).maybeSingle();
   if (!rel || rel.excluido_em) return NextResponse.json({ erro: "Relatório não encontrado." }, { status: 404 });
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(rel.inspecao_id);
+  if (travada) return travada;
   if (rel.status === "em_aprovacao") return NextResponse.json({ ok: true, repetido: true });
   if (rel.status !== "rascunho") {
     return NextResponse.json({ erro: "Só rascunhos podem ser enviados para aprovação." }, { status: 400 });
@@ -102,6 +107,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   const { data: rel } = await supabase
     .from("gp_relatorios").select("id, status, arquivo_path, inspecao_id, dados").eq("id", params.id).single();
   if (!rel) return NextResponse.json({ erro: "Relatório não encontrado." }, { status: 404 });
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(rel.inspecao_id);
+  if (travada) return travada;
   if (rel.status !== "rascunho") {
     return NextResponse.json({ erro: "Só rascunhos podem ser excluídos." }, { status: 400 });
   }

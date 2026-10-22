@@ -9,6 +9,8 @@ import {
   tipoDaFase, validarReprovacao,
 } from "@/lib/validacao";
 
+import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+
 export const runtime = "nodejs";
 
 interface AcaoBody {
@@ -103,6 +105,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
   }
 
+  // ⛔ OS encerrada: só consulta.
+  const travada = await garantirOsAberta(params.id);
+  if (travada) return travada;
   const faseAtual: number = inspecao.fase;
   // A tela via outra fase: alguém (ou o 1º clique) já moveu a OS.
   if (typeof body.faseDe === "number" && body.faseDe !== faseAtual) {

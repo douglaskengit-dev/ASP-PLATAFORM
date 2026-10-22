@@ -17,7 +17,7 @@ interface ClienteResumo {
   cidade?: string | null;
   uf?: string | null;
 }
-interface InspecaoResumo { id: string; fase: number }
+interface InspecaoResumo { id: string; fase: number; encerrada_em?: string | null }
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
@@ -28,6 +28,8 @@ interface Projeto {
   cliente: ClienteResumo | null;
   inspecoes: InspecaoResumo[];
   inspecoes_total: number;
+  /** Fase 10: todas as OSs ativas encerradas (preenchido pela API). */
+  concluido_em?: string | null;
 }
 
 const ULTIMA_FASE = 10;
@@ -36,12 +38,15 @@ const rotFiltro: React.CSSProperties = {
   fontWeight: 600, fontSize: 12.5, display: "block", marginBottom: 4,
 };
 
-/** Status do projeto derivado das fases das suas inspeções. */
-function statusProjeto(inspecoes: InspecaoResumo[]): { label: string; cor: string; pct: number; chave: string } {
+/** Status do projeto: "Concluído" quando todas as OSs ativas foram
+ *  ENCERRADAS (Fase 10 — concluido_em, gravado pela API); senão derivado
+ *  das fases das suas OSs. Todas na fase 10 sem encerrar = "Em encerramento". */
+function statusProjeto(inspecoes: InspecaoResumo[], concluidoEm?: string | null): { label: string; cor: string; pct: number; chave: string } {
+  if (concluidoEm) return { label: "Concluído", cor: "#16a34a", pct: 100, chave: "concluido" };
   if (!inspecoes.length) return { label: "Sem OS", cor: "#5a6b7b", pct: 0, chave: "sem" };
   const media = inspecoes.reduce((a, i) => a + i.fase, 0) / inspecoes.length;
   const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
-  if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Encerrado", cor: "#16a34a", pct: 100, chave: "encerrado" };
+  if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Em encerramento", cor: "#0f766e", pct: 100, chave: "encerramento" };
   if (inspecoes.some((i) => i.fase === 5 || i.fase === 9)) return { label: "Aguardando aprovação", cor: "#c2410c", pct, chave: "aprovacao" };
   return { label: "Em andamento", cor: "var(--primaria)", pct, chave: "andamento" };
 }
@@ -50,7 +55,8 @@ function statusProjeto(inspecoes: InspecaoResumo[]): { label: string; cor: strin
 const STATUS_OPCOES = [
   { chave: "andamento", label: "Em andamento" },
   { chave: "aprovacao", label: "Aguardando aprovação" },
-  { chave: "encerrado", label: "Encerrado" },
+  { chave: "encerramento", label: "Em encerramento" },
+  { chave: "concluido", label: "Concluído" },
   { chave: "sem", label: "Sem OS" },
 ];
 export default function ProjetosPage() {
@@ -105,7 +111,7 @@ export default function ProjetosPage() {
     const termo = busca.trim().toLowerCase();
     const lista = projetos.filter((p) => {
       if (filtroCliente && p.cliente?.id !== filtroCliente) return false;
-      if (filtroStatus && statusProjeto(p.inspecoes).chave !== filtroStatus) return false;
+      if (filtroStatus && statusProjeto(p.inspecoes, p.concluido_em).chave !== filtroStatus) return false;
       if (!termo) return true;
       return [p.codigo_projeto, p.pedido_compra, p.cliente?.razao_social, p.endereco, p.responsavel_projeto]
         .some((c) => (c || "").toLowerCase().includes(termo));
@@ -146,7 +152,7 @@ export default function ProjetosPage() {
    *  React não recriar o tipo a cada render — mesmo cuidado adotado no modal
    *  de relatório, onde isso custava o foco dos campos. */
   function CartaoProjeto(p: Projeto) {
-    const st = statusProjeto(p.inspecoes);
+    const st = statusProjeto(p.inspecoes, p.concluido_em);
     return (
       <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
         <div style={{ display: "flex", width: "100%", alignItems: "flex-start", gap: 8 }}>
