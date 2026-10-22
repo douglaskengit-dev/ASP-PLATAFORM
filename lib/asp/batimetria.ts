@@ -24,15 +24,38 @@ export interface DadosBatimetria {
   negativos: number;
 }
 
-function paraNumero(v: any): number | null {
-  if (v === null || v === undefined || v === "") return null;
+/** Número de uma célula da planilha. Prioridade pt-BR: vírgula decimal e
+ * ponto de milhar ("1.234,56" = 1234.56; "0,26" = 0.26). Também aceita o
+ * formato inglês quando não há ambiguidade ("1,234.56" — o separador que vem
+ * por ÚLTIMO é o decimal; "0.26"). Ponto sozinho é decimal ("1.5"); vários
+ * pontos sem vírgula são milhar ("1.234.567"). Espaços (inclusive o fino/
+ * não separável do Excel) e sinal são aceitos. Texto que não é número → null. */
+export function paraNumero(v: any): number | null {
+  if (v === null || v === undefined) return null;
   if (typeof v === "number") return isFinite(v) ? v : null;
-  const n = parseFloat(String(v).trim().replace(/\./g, "").replace(",", ".")) ;
-  // Observação: acima trata "1.234,56" e "0,08". Se vier com ponto decimal
-  // simples ("0.08"), o replace de pontos zeraria — então tentamos os dois.
-  const n2 = parseFloat(String(v).trim().replace(",", "."));
-  const escolhido = !isNaN(n2) ? n2 : n;
-  return isNaN(escolhido) ? null : escolhido;
+  let t = String(v).replace(/[\s  ]/g, "").replace(/^−/, "-");
+  if (!t || !/^[+-]?[\d.,]+$/.test(t) || !/\d/.test(t)) return null;
+  const ultPonto = t.lastIndexOf(".");
+  const ultVirg = t.lastIndexOf(",");
+  if (ultPonto >= 0 && ultVirg >= 0) {
+    // Os dois: o último é o decimal, o outro é milhar.
+    t = ultVirg > ultPonto ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
+  } else if (ultVirg >= 0) {
+    // Só vírgula: uma = decimal (pt-BR); várias = milhar ("1,234,567").
+    t = (t.match(/,/g) || []).length > 1 ? t.replace(/,/g, "") : t.replace(",", ".");
+  } else if ((t.match(/\./g) || []).length > 1) {
+    t = t.replace(/\./g, ""); // vários pontos: milhar
+  }
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(t)) return null;
+  const n = Number(t);
+  return isFinite(n) ? n : null;
+}
+
+/** 0 → "A", 27 → "AB" (para apontar a coluna na mensagem). */
+function colunaLetra(c: number): string {
+  let s = "";
+  for (let n = c + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
 }
 
 function texto(v: any): string {
@@ -57,8 +80,46 @@ export async function lerArquivoParaMatriz(file: File): Promise<any[][]> {
   // CSV
   let txt = await file.text();
   if (txt.charCodeAt(0) === 0xfeff) txt = txt.slice(1); // remove BOM (UTF-8)
-  const sep = txt.includes(";") ? ";" : ",";
-  return txt.split(/\r?\n/).map((l) => l.split(sep));
+  const sep = separadorCsv(txt);
+  return txt.split(/\r?\n/).map((l) => dividirLinhaCsv(l, sep));
+}
+
+/** Separador do CSV. Prefere ";" (Excel pt-BR) e tabulação — com eles a
+ * vírgula decimal ("0,26") sobrevive. Vírgula só quando não há ";" nem tab
+ * fora de aspas; aí o decimal tem de ser ponto ou vir entre aspas ("0,26"). */
+export function separadorCsv(txt: string): ";" | "\t" | "," {
+  const linhas = txt.split(/\r?\n/).filter((l) => l.trim()).slice(0, 20);
+  let pv = 0, tab = 0;
+  for (const l of linhas) {
+    let aspas = false;
+    for (const ch of l) {
+      if (ch === '"') aspas = !aspas;
+      else if (!aspas && ch === ";") pv++;
+      else if (!aspas && ch === "\t") tab++;
+    }
+  }
+  return pv > 0 ? ";" : tab > 0 ? "\t" : ",";
+}
+
+/** Divide uma linha de CSV respeitando aspas. */
+export function dividirLinhaCsv(linha: string, sep: string): string[] {
+  const out: string[] = [];
+  let atual = "";
+  let aspas = false;
+  for (let i = 0; i < linha.length; i++) {
+    const ch = linha[i];
+    if (ch === '"') {
+      if (aspas && linha[i + 1] === '"') { atual += '"'; i++; }
+      else aspas = !aspas;
+    } else if (ch === sep && !aspas) {
+      out.push(atual);
+      atual = "";
+    } else {
+      atual += ch;
+    }
+  }
+  out.push(atual);
+  return out;
 }
 
 /** Interpreta a matriz 2D no layout da planilha e extrai a batimetria. */
@@ -71,6 +132,19 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
     throw new Error("Não encontrei os blocos de vetores (v1, v2, …) na primeira linha.");
   }
   const N = blocos.length;
+  const nomeBloco = (b: number) => texto(linha0[blocos[b]]).replace(/\s+/g, "");
+
+  // ⛔ Cabeçalho de vetor repetido (dois "v1"): qual leitura é de qual vetor?
+  const porNumero = new Map<number, number>();
+  const repetidos: string[] = [];
+  blocos.forEach((col, b) => {
+    const n = parseInt((/^v(\d+)/i.exec(nomeBloco(b)) || [])[1] || "", 10);
+    if (porNumero.has(n)) repetidos.push(`v${n} (colunas ${colunaLetra(porNumero.get(n)!)} e ${colunaLetra(col)})`);
+    else porNumero.set(n, col);
+  });
+  if (repetidos.length) {
+    throw new Error(`Cabeçalho de vetor repetido: ${repetidos.join(", ")}. Cada vetor precisa de um nome único na linha 1.`);
+  }
 
   // Para cada bloco: rótulo em base+2, valores esq/centro/dir em base+3/+4/+5.
   // Linhas de ponto = onde a célula (base+2) contém "sedimento".
@@ -83,6 +157,22 @@ export function extrairBatimetria(rows: any[][]): DadosBatimetria {
     throw new Error("Não encontrei as linhas de 'Altura sedimento'. Confira o template.");
   }
   const m = linhasPonto.length;
+
+  // ⛔ Todos os vetores com os mesmos pontos, nas mesmas linhas — senão a
+  // leitura de um vetor seria lida na linha de outro ponto.
+  const diferentes: string[] = [];
+  blocos.forEach((base, b) => {
+    if (b === 0) return;
+    const linhasB: number[] = [];
+    for (let r = 0; r < rows.length; r++) {
+      if (/sedimento/i.test(texto((rows[r] || [])[base + 2]))) linhasB.push(r);
+    }
+    if (linhasB.length !== m) diferentes.push(`${nomeBloco(b)} tem ${linhasB.length}`);
+    else if (linhasB.some((r, i) => r !== linhasPonto[i])) diferentes.push(`${nomeBloco(b)} tem os pontos em outras linhas`);
+  });
+  if (diferentes.length) {
+    throw new Error(`Os vetores têm quantidades de pontos diferentes: ${nomeBloco(0)} tem ${m} ponto(s); ${diferentes.join("; ")}. Todos os vetores precisam ter os mesmos pontos.`);
+  }
 
   const valores: (number | null)[][] = [];
   let negativos = 0;
@@ -170,7 +260,13 @@ export async function gerarModeloXlsx(N: number, m: number): Promise<Blob> {
 }
 
 // ── Entrada manual (mesma matemática da planilha) ──────────────────────────
-// Espessura = (régua + peso) − (sonar + ROV). Padrões: ROV 0,26 e peso 0,15.
+// Espessura = (régua + peso) − (sonar + ROV). Padrões: ROV 0,26 m e peso
+// 0,15 m — na mesma unidade das leituras (em cm: 26 e 15).
+
+/** ROV e peso da régua padrão na unidade escolhida. */
+export function padroesRovPeso(unidade: "m" | "cm"): { rov: number; peso: number } {
+  return unidade === "cm" ? { rov: 26, peso: 15 } : { rov: 0.26, peso: 0.15 };
+}
 
 export interface GridManual {
   vetores: number;
@@ -256,6 +352,9 @@ export function montarEstadoMedidor(
     height: opts.altura,
     refMode: "bottom",
     gridMode: "paralelo",
+    // Planilha/digitação: 3 laterais (E/C/D) por vetor — é assim que a
+    // validação aponta a leitura ("v2-E, ponto 3").
+    origem: "batimetria",
     batimetria: "sim",
     formato: t?.formato || "circulo",
     largura: t?.largura ?? null,

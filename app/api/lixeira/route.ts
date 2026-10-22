@@ -3,6 +3,7 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { conflitoAoRestaurarOS } from "@/lib/asp/os-validacao-api";
+import { conflitoAoRestaurarColeta } from "@/lib/asp/coleta-api";
 
 export const runtime = "nodejs";
 
@@ -75,9 +76,17 @@ export async function PATCH(req: NextRequest) {
       }, { status: 409 });
     }
   }
+  // Coleta: restaurar não pode duplicar uma medição/PDF ativo, e volta SEM a
+  // aprovação (excluir já a retirou; registros antigos podem ter ficado).
+  if (body.tipo === "medicao") {
+    const conflito = await conflitoAoRestaurarColeta(body.id);
+    if (conflito) return NextResponse.json({ erro: conflito }, { status: 409 });
+  }
   const { error } = await getSupabaseAdmin()
     .from(TABELAS[body.tipo].tabela)
-    .update({ excluido_em: null, excluido_por: null })
+    .update(body.tipo === "medicao"
+      ? { excluido_em: null, excluido_por: null, aprovada_em: null, aprovada_por: null }
+      : { excluido_em: null, excluido_por: null })
     .eq("id", body.id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

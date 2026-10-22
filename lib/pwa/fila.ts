@@ -19,6 +19,8 @@ export interface ItemFila {
   jsonBody?: unknown;
   arquivo?: ArquivoFila;
   criadoEm: number;
+  /** Idempotency-Key do envio original — o reenvio manda a mesma. */
+  chave?: string;
 }
 
 function abrir(): Promise<IDBDatabase> {

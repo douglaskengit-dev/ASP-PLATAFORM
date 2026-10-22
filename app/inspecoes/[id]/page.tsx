@@ -3,7 +3,11 @@
 /** ASP — Detalhe da Inspeção: barra de progresso das fases (2..10), ações
  * conforme o perfil (avançar / aprovar / reprovar-"Ajustar"), coleta (medidor
  * de sedimento), agendamento (checklist jsonb), relatórios versionados e
- * histórico de autenticação. As fases correm por inspeção. Ver COWORK-ASP §2. */
+ * histórico de autenticação. As fases correm por inspeção. Ver COWORK-ASP §2.
+ *
+ * Fase 3 (coleta): toda medição passa por uma confirmação (data da coleta,
+ * responsável, regras de lib/validacao/coleta.ts + medicao.ts) antes de
+ * gravar; a API repete as mesmas regras. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -12,9 +16,9 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { acoesDisponiveis, definicaoFase, descreverAcaoFase, perfilAtuaNaFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
 import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
-import { enviarJson, enviarArquivo } from "@/lib/pwa/sync";
+import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
 import { podeAprovarColeta } from "@/lib/asp/permissoes";
-import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx } from "@/lib/asp/batimetria";
+import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx, paraNumero } from "@/lib/asp/batimetria";
 import EntradaBatimetria from "@/app/components/EntradaBatimetria";
 import GerarRelatorio from "@/app/components/GerarRelatorio";
 import ChecklistEquipamentos from "@/app/components/ChecklistEquipamentos";
@@ -27,8 +31,10 @@ import Rdos from "@/app/components/Rdos";
 import { dataBr, numeroRdo, resumoRdos, type RegistroRdo } from "@/lib/asp/rdo";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import {
-  agendamentosSubstituidos, ContextoAgendamento, dataCurta, hojeBrasil, mesclar, nomeDoCatalogo, normalizarEquipamento,
-  novoResultado, OSRef, ResultadoValidacao, ROTULOS_AGENDAMENTO, sugestaoCatalogo, temErros, validarAgendamento, validarOS,
+  agendamentosSubstituidos, chaveMedicao, ColetaRef, ContextoAgendamento, ContextoColeta, dataColetaSugerida, dataCurta,
+  dataIsoValida, diferencasTanque, hojeBrasil, medicaoPreenchida, mesclar, motivoNaoAprovavel, nomeDoCatalogo,
+  normalizarEquipamento, normalizarNome, novoResultado, OSRef, ResultadoValidacao, ROTULOS_AGENDAMENTO, ROTULOS_COLETA,
+  sugestaoCatalogo, tanqueComMedidas, temErros, validarAgendamento, validarColeta, validarOS, validarPdf,
 } from "@/lib/validacao";
 
 interface Projeto {
@@ -62,7 +68,20 @@ interface Historico {
   criado_em: string;
   autor_perfil: { nome_completo: string | null; email: string | null } | null;
 }
-interface Coleta { id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null }
+interface Coleta {
+  id: string; tipo: string; pdf_path: string | null; dados: any; criado_em: string; aprovada_em?: string | null;
+  /** Fase 3: dia da coleta (AAAA-MM-DD), quem mediu, descrição do anexo. */
+  data_coleta?: string | null; responsavel_id?: string | null; descricao?: string | null;
+  arquivo_hash?: string | null; aprovacao_retirada_em?: string | null;
+}
+/** Salvar medição (Medidor) aguardando confirmar data/responsável. */
+interface ConfirmacaoMedicao {
+  modo: "salvar" | "pdf";
+  dados: any;
+  /** Coleta aberta (edição) — null = medição nova, que nasce com `idNovo`. */
+  editId: string | null;
+  idNovo: string;
+}
 interface Relatorio { id: string; tipo: string; versao: number; status: string; motivo_ajuste: string | null; enviado_em: string | null; dados?: any }
 interface MembroEquipe { id: string; nome: string }
 interface Agendamento {
@@ -110,7 +129,6 @@ export default function InspecaoDetalhePage() {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [funcao, setFuncao] = useState<string | null>(null);
-  const [nomeUsuarioAtual, setNomeUsuarioAtual] = useState("");
   const [aprovandoColeta, setAprovandoColeta] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
@@ -122,7 +140,6 @@ export default function InspecaoDetalhePage() {
   // Coleta
   const [modalMedidor, setModalMedidor] = useState(false);
   const [enviandoColeta, setEnviandoColeta] = useState(false);
-  const coletaInputRef = useRef<HTMLInputElement>(null);
   // Medidor: salvar/editar medição (registro editável = Relatório Técnico interno)
   const medidorRef = useRef<HTMLIFrameElement>(null);
   const [coletaEditando, setColetaEditando] = useState<string | null>(null);
@@ -132,6 +149,27 @@ export default function InspecaoDetalhePage() {
   const [gerandoPdfMedicao, setGerandoPdfMedicao] = useState(false);
   /** Quando true, o próximo asp:save vira PDF anexado em vez de só salvar. */
   const querPdfRef = useRef(false);
+  // Fase 3: antes de gravar, a medição passa por uma confirmação com data da
+  // coleta, responsável e as regras (lib/validacao/coleta.ts + medicao.ts).
+  const [confirmacao, setConfirmacao] = useState<ConfirmacaoMedicao | null>(null);
+  const [cfData, setCfData] = useState("");
+  const [cfResp, setCfResp] = useState("");
+  const [cfServidor, setCfServidor] = useState<ResultadoValidacao>(novoResultado());
+  const [cfErro, setCfErro] = useState<string | null>(null);
+  const [atualizandoTanque, setAtualizandoTanque] = useState(false);
+  /** Mensagem curta na barra do medidor (ex.: "PDF anexado"). */
+  const [msgMedidor, setMsgMedidor] = useState<string | null>(null);
+  // Anexo (PDF avulso): descrição obrigatória, data e o arquivo.
+  const [modalAnexo, setModalAnexo] = useState(false);
+  const [anxDescricao, setAnxDescricao] = useState("");
+  const [anxData, setAnxData] = useState("");
+  const [anxArquivo, setAnxArquivo] = useState<File | null>(null);
+  const [anxErroArquivo, setAnxErroArquivo] = useState<string | null>(null);
+  const [anxHash, setAnxHash] = useState<string | null>(null);
+  const [anxId, setAnxId] = useState("");
+  const [anxTentou, setAnxTentou] = useState(false);
+  const [anxServidor, setAnxServidor] = useState<ResultadoValidacao>(novoResultado());
+  const [anxErro, setAnxErro] = useState<string | null>(null);
   // Importação de batimetria (CSV/XLSX no layout da planilha)
   const [modalImport, setModalImport] = useState(false);
   const [impDiametro, setImpDiametro] = useState("");
@@ -263,7 +301,6 @@ export default function InspecaoDetalhePage() {
       const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao, nome_completo").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
       setFuncao((p as any)?.funcao ?? null);
-      setNomeUsuarioAtual((p as any)?.nome_completo || data.user.email || "");
     });
     fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
@@ -328,7 +365,7 @@ export default function InspecaoDetalhePage() {
     // Material, capacidade e medidas de projeto vêm do cadastro do tanque.
     const doTanque = dadosRelatorioDoTanque(insp?.tanque);
     // Prioriza a medição APROVADA; se nenhuma foi validada, usa a mais recente.
-    const comDados = coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0);
+    const comDados = coletas.filter((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados));
     const medicao = (comDados.find((c) => c.aprovada_em) || comDados[0])?.dados as any;
     const res = medicao?.resultado;
     const un = medicao?.unit === "cm" ? "cm" : "m";
@@ -423,40 +460,79 @@ export default function InspecaoDetalhePage() {
 
   function clicarAcao(opcao: OpcaoAcao) {
     if (opcao.exigeMotivo) { setMotivo(""); setReprovar(opcao); return; }
-    // Execução → Relatório de Execução: coleta de fotos incompleta e falta de
-    // RDO só AVISAM, num confirm só. Quem está em campo decide se segue assim
-    // mesmo (ex.: vaga sem acesso, RDO feito no papel).
+    // Pendências que só AVISAM, num confirm só — quem está em campo decide se
+    // segue assim mesmo:
+    //  · Inspeção → Relatório (3 → 4) sem medição aprovada (muitas OSs não
+    //    têm procedimento de inspeção/medição).
+    //  · Execução → Relatório de Execução (7 → 8): coleta de fotos incompleta
+    //    e falta de RDO (ex.: vaga sem acesso, RDO feito no papel).
+    const blocos: string[] = [];
+    let titulo = "Pendências";
+    if (insp?.fase === 3 && opcao.acao === "avancar" && !coletas.some((c) => c.aprovada_em)) {
+      titulo = "Pendências da Inspeção";
+      blocos.push(coletas.some((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados))
+        ? "Nenhuma medição aprovada nesta OS — o relatório usará a medição mais recente, sem validação de Gerência/Coordenação."
+        : "Nenhuma medição registrada nesta OS. Se o procedimento não tem medição, pode seguir.");
+    }
     if (insp?.fase === 7 && opcao.acao === "avancar") {
+      titulo = "Pendências da Execução";
       const pend = fotosExec ? pendenciasColeta(fotosExec) : [];
       const semRdo = rdosInsp !== null && rdosInsp.length === 0;
-      const blocos: string[] = [];
       if (pend.length > 0) {
         blocos.push(`Coleta de fotos da execução incompleta (${pend.length} pendência(s)):\n• ${pend.join("\n• ")}\n` +
           "As fotos que faltam não entram no Relatório de Execução.");
       }
       if (semRdo) blocos.push("Nenhum RDO (Registro Diário de Operação) cobre esta OS.");
-      if (blocos.length > 0 && !confirm(`Pendências da Execução:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
     }
+    if (blocos.length > 0 && !confirm(`${titulo}:\n\n${blocos.join("\n\n")}\n\nAvançar mesmo assim?`)) return;
     aplicar(opcao.acao);
   }
 
-  async function anexarColeta(arquivo: File) {
+  /** Abre o "Anexar PDF": anexo é um PDF avulso, com descrição obrigatória. */
+  function abrirAnexo() {
+    setAnxDescricao(""); setAnxData(dataSugerida); setAnxArquivo(null); setAnxErroArquivo(null); setAnxHash(null);
+    setAnxId(novoId()); setAnxTentou(false); setAnxServidor(novoResultado()); setAnxErro(null);
+    setModalAnexo(true);
+  }
+
+  /** Confere o PDF já na escolha: é PDF de verdade, tamanho e SHA-256 (para
+   *  avisar se o mesmo arquivo já está anexado). A API repete tudo. */
+  async function escolherArquivoAnexo(f: File | null) {
+    setAnxArquivo(f); setAnxErroArquivo(null); setAnxHash(null); setAnxServidor(novoResultado()); setAnxErro(null);
+    if (!f) return;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const problema = validarPdf(bytes, f.size);
+    if (problema) { setAnxErroArquivo(problema); return; }
+    setAnxHash(await sha256Hex(bytes));
+  }
+
+  async function salvarAnexo() {
+    setAnxTentou(true);
+    setAnxErro(null);
+    if (temErros(resultadoAnexo) || !anxArquivo) return;
     setEnviandoColeta(true);
-    setErro(null);
     try {
-      const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento" }, arquivo, "Coleta (PDF)");
-      if (res.queued) { alert("Sem conexão — PDF salvo offline e enviado ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Falha ao anexar a coleta."); return; }
+      const res = await enviarArquivo("/api/coletas",
+        { id: anxId, inspecaoId: id, tipo: "anexo", descricao: anxDescricao.replace(/\s+/g, " ").trim(), dataColeta: anxData },
+        anxArquivo, "Anexo (PDF)", { chave: anxId });
+      if (res.queued) { setModalAnexo(false); alert("Sem conexão — PDF salvo offline e enviado ao reconectar."); return; }
+      if (!res.ok) {
+        if (res.data?.erros) setAnxServidor({ erros: res.data.erros, avisos: res.data.avisos || {} });
+        setAnxErro(res.data?.erro || "Falha ao anexar o PDF.");
+        return;
+      }
+      setModalAnexo(false);
       carregar();
     } finally {
       setEnviandoColeta(false);
-      if (coletaInputRef.current) coletaInputRef.current.value = "";
     }
   }
 
   /** Marca qual medição vale para o relatório (uma por inspeção). */
   async function aprovarColeta(c: Coleta) {
     const jaAprovada = !!c.aprovada_em;
+    const motivo = jaAprovada ? null : motivoNaoAprovavel(c);
+    if (motivo) { setErro(motivo); return; }
     const outraAprovada = coletas.find((x) => x.aprovada_em && x.id !== c.id);
     if (!jaAprovada && outraAprovada &&
         !confirm("Outra medição já está aprovada. Ao aprovar esta, a anterior deixa de valer para o relatório. Continuar?")) return;
@@ -570,9 +646,12 @@ export default function InspecaoDetalhePage() {
 
   /** Exclui a medição — vai para a lixeira, recuperável por 30 dias. */
   async function excluirColeta(c: Coleta) {
-    const temMedicao = c.dados && Object.keys(c.dados).length > 0;
-    const rotulo = temMedicao ? "esta medição (Relatório Técnico interno)" : `este anexo (${c.tipo})`;
-    if (!confirm(`Excluir ${rotulo}?\n\nEla sai da lista, mas fica recuperável por 30 dias antes de ser apagada definitivamente.`)) return;
+    const temMedicao = c.tipo !== "anexo" && medicaoPreenchida(c.dados);
+    const rotulo = temMedicao ? "esta medição (Relatório Técnico interno)" : `este anexo (${c.descricao || c.tipo})`;
+    const aprovada = c.aprovada_em
+      ? "\n\nEla está APROVADA para o relatório: ao excluir, a aprovação é retirada e não volta se ela for restaurada."
+      : "";
+    if (!confirm(`Excluir ${rotulo}?\n\nEla sai da lista, mas fica recuperável por 30 dias antes de ser apagada definitivamente.${aprovada}`)) return;
     setExcluindoColeta(c.id);
     setErro(null);
     try {
@@ -587,106 +666,190 @@ export default function InspecaoDetalhePage() {
     }
   }
 
-  // Salva/atualiza a medição (registro editável = Relatório Técnico interno).
-  const salvarMedicao = useCallback(async (dados: any) => {
+  /** O medidor mandou o estado (asp:save): abre a confirmação com a data da
+   *  coleta e o responsável. Nada é gravado sem passar pelas regras. */
+  const abrirConfirmacao = useCallback((dados: any, modo: "salvar" | "pdf") => {
+    const editId = editandoRef.current;
+    const col = editId ? coletasRef.current.find((c) => c.id === editId) : null;
+    // A data que o medidor mandou (cabeçalho do relatório) vale como sugestão.
+    const dataMedidor = typeof dados?.reportDate === "string" && dataIsoValida(dados.reportDate) ? dados.reportDate : null;
+    setCfData(dataMedidor || col?.data_coleta || dataSugeridaRef.current);
+    let resp = col?.responsavel_id || "";
+    if (!resp && typeof dados?.reportResponsavel === "string" && dados.reportResponsavel.trim()) {
+      const alvo = normalizarNome(dados.reportResponsavel);
+      resp = usuariosRef.current.find((u) => normalizarNome(u.nome) === alvo)?.id || "";
+    }
+    setCfResp(resp);
+    setCfServidor(novoResultado());
+    setCfErro(null);
+    setConfirmacao((prev) => ({ modo, dados, editId, idNovo: prev && !prev.editId && !editId ? prev.idNovo : novoId() }));
+  }, []);
+
+  /** Grava a medição confirmada: salvar (POST nova / PATCH aberta) ou PDF —
+   *  que ATUALIZA a coleta aberta (anexa/substitui o PDF dela) e só cria uma
+   *  coleta se a medição ainda não foi salva. Nunca duas. */
+  async function confirmarMedicao() {
+    if (!confirmacao || temErros(resultadoConfirmacao)) return;
+    const { modo, editId, idNovo } = confirmacao;
+    const nome = usuarios.find((u) => u.id === cfResp)?.nome || "";
+    const dados = { ...confirmacao.dados, reportDate: cfData, reportResponsavel: nome };
+    const campos = { dataColeta: cfData, responsavelId: cfResp };
     setSalvandoMedicao(true);
-    setErro(null);
+    setCfErro(null);
     try {
-      const editId = editandoRef.current;
-      const res = await enviarJson(
-        editId ? `/api/coletas/${editId}` : "/api/coletas",
-        editId ? "PATCH" : "POST",
-        editId ? { dados } : { inspecaoId: id, tipo: "sedimento", dados },
-        "Coleta / medição"
-      );
-      if (!res.queued && !res.ok) { setErro(res.data?.erro || "Falha ao salvar a medição."); return; }
-      setModalMedidor(false);
-      setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
-      if (res.queued) alert("Sem conexão — medição salva offline e enviada ao reconectar.");
-      else carregar();
+      let res;
+      if (modo === "pdf") {
+        setGerandoPdfMedicao(true);
+        const { gerarPdfMedicao } = await import("@/lib/asp/relatorio-medicao");
+        const blob = await gerarPdfMedicao(dados, {
+          inspecao: insp?.identificacao || "OS",
+          projeto: insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || undefined,
+          cliente: insp?.projeto?.cliente?.razao_social || undefined,
+          dataColeta: cfData,
+          responsavel: nome,
+        });
+        const arquivo = new File([blob], `Medicao-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}.pdf`, { type: "application/pdf" });
+        res = editId
+          ? await enviarArquivo(`/api/coletas/${editId}`, { ...campos, dados: JSON.stringify(dados) }, arquivo, "Relatório da medição", { method: "PATCH" })
+          : await enviarArquivo("/api/coletas", { id: idNovo, inspecaoId: id, tipo: "sedimento", ...campos, dados: JSON.stringify(dados) },
+            arquivo, "Relatório da medição", { chave: idNovo });
+      } else {
+        res = await enviarJson(
+          editId ? `/api/coletas/${editId}` : "/api/coletas",
+          editId ? "PATCH" : "POST",
+          editId ? { ...campos, dados } : { id: idNovo, inspecaoId: id, tipo: "sedimento", ...campos, dados },
+          "Coleta / medição",
+          editId ? undefined : idNovo
+        );
+      }
+      if (!res.queued && !res.ok) {
+        if (res.data?.erros) setCfServidor({ erros: res.data.erros, avisos: res.data.avisos || {} });
+        setCfErro(res.data?.erro || (modo === "pdf" ? "Falha ao anexar o relatório da medição." : "Falha ao salvar a medição."));
+        return;
+      }
+      setConfirmacao(null);
+      if (modo === "pdf") {
+        // O medidor segue aberto, agora editando a coleta (a mesma, nunca outra).
+        if (!editId) { editandoRef.current = idNovo; setColetaEditando(idNovo); }
+        medidorRef.current?.contentWindow?.postMessage({ type: "asp:setHeader", reportDate: cfData, reportResponsavel: nome }, window.location.origin);
+        setMsgMedidor(res.queued ? "Sem conexão — o PDF será enviado ao reconectar." : "PDF do relatório anexado à medição.");
+      } else {
+        setModalMedidor(false);
+        setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
+        if (res.queued) alert("Sem conexão — medição salva offline e enviada ao reconectar.");
+      }
+      if (!res.queued) carregar();
+    } catch (e) {
+      setCfErro(e instanceof Error ? e.message : "Falha ao salvar a medição.");
     } finally {
       setSalvandoMedicao(false);
+      setGerandoPdfMedicao(false);
     }
-  }, [id, carregar]);
+  }
+
+  /** Atualiza o cadastro do tanque com as medidas da medição (mesma regra da
+   *  edição do tanque: erroDoTanque, aqui e na API). */
+  async function atualizarTanqueComMedicao() {
+    if (!insp?.tanque || !confirmacao) return;
+    const novo = tanqueComMedidas(insp.tanque, confirmacao.dados);
+    const problema = erroDoTanque(novo);
+    if (problema) { setCfErro(problema); return; }
+    setAtualizandoTanque(true);
+    try {
+      const res = await fetch(`/api/inspecoes/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tanque: novo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setCfErro(data?.erro || "Falha ao atualizar o cadastro do tanque."); return; }
+      setInsp((p) => (p ? { ...p, tanque: data.inspecao?.tanque || novo } : p));
+    } catch {
+      setCfErro("Sem conexão — tente novamente quando estiver online.");
+    } finally {
+      setAtualizandoTanque(false);
+    }
+  }
 
   // Ponte com o iframe do medidor: recebe o snapshot ao salvar e envia os
-  // dados salvos ao abrir (asp:ready) para editar.
+  // dados salvos ao abrir (asp:ready) para editar. Só aceita mensagens do
+  // próprio iframe, na mesma origem.
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
+      if (ev.origin !== window.location.origin || ev.source !== medidorRef.current?.contentWindow) return;
       const msg = (ev.data || {}) as { type?: string; dados?: any };
       if (msg.type === "asp:ready") {
         if (dadosCarregarRef.current && medidorRef.current?.contentWindow) {
-          medidorRef.current.contentWindow.postMessage({ type: "asp:load", dados: dadosCarregarRef.current }, "*");
+          medidorRef.current.contentWindow.postMessage({ type: "asp:load", dados: dadosCarregarRef.current }, window.location.origin);
         }
       } else if (msg.type === "asp:save") {
-        if (querPdfRef.current) {
-          querPdfRef.current = false;
-          anexarPdfMedicao(msg.dados);
-        } else {
-          salvarMedicao(msg.dados);
-        }
+        const modo = querPdfRef.current ? "pdf" : "salvar";
+        querPdfRef.current = false;
+        abrirConfirmacao(msg.dados, modo);
       }
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [salvarMedicao]);
+  }, [abrirConfirmacao]);
+
+  /** Medição nova já sai com o tanque do cadastro (formato, medidas, altura,
+   *  em metros) e a data sugerida da coleta no cabeçalho. */
+  function estadoInicialMedidor(): Record<string, unknown> {
+    const t = insp?.tanque;
+    const base: Record<string, unknown> = { reportDate: dataSugerida };
+    if (!t) return base;
+    const ret = t.formato === "retangular";
+    return {
+      ...base, unit: "m", inputMode: "diameter",
+      formato: ret ? "retangulo" : "circulo",
+      dimValue: ret ? t.comprimento : t.diametro,
+      largura: ret ? t.largura : null,
+      height: t.altura,
+    };
+  }
 
   function abrirMedidorNovo() {
-    setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = null;
-    setErro(null); setModalMedidor(true);
+    setColetaEditando(null); editandoRef.current = null; dadosCarregarRef.current = estadoInicialMedidor();
+    setErro(null); setMsgMedidor(null); setModalMedidor(true);
   }
   function abrirMedidorEdicao(c: Coleta) {
     setColetaEditando(c.id); editandoRef.current = c.id; dadosCarregarRef.current = c.dados || null;
-    setErro(null); setModalMedidor(true);
-  }
-  /** Gera o PDF do relatório da medição e anexa à inspeção como coleta.
-   *  O "Exportar em PDF" da ferramenta usa a impressão do navegador, cujo
-   *  arquivo o site não enxerga — por isso montamos o PDF por código. */
-  async function anexarPdfMedicao(estado: any) {
-    setGerandoPdfMedicao(true);
-    setErro(null);
-    try {
-      const { gerarPdfMedicao } = await import("@/lib/asp/relatorio-medicao");
-      const blob = await gerarPdfMedicao(estado, {
-        inspecao: insp?.identificacao || "OS",
-        projeto: insp?.projeto?.codigo_projeto || insp?.projeto?.pedido_compra || undefined,
-        cliente: insp?.projeto?.cliente?.razao_social || undefined,
-      });
-      const nome = `Medicao-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}.pdf`;
-      const arquivo = new File([blob], nome, { type: "application/pdf" });
-      const res = await enviarArquivo("/api/coletas", { inspecaoId: id, tipo: "sedimento", dados: JSON.stringify(estado) }, arquivo, "Relatório da medição");
-      if (res.queued) { alert("Sem conexão — o relatório será enviado ao reconectar."); return; }
-      if (!res.ok) { setErro(res.data?.erro || "Falha ao anexar o relatório da medição."); return; }
-      carregar();
-      alert("Relatório da medição anexado às Coletas.");
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Falha ao gerar o PDF da medição.");
-    } finally {
-      setGerandoPdfMedicao(false);
-    }
+    setErro(null); setMsgMedidor(null); setModalMedidor(true);
   }
 
   /** Pede o estado ao medidor para virar PDF anexado. */
   function pedirPdfMedicao() {
     querPdfRef.current = true;
-    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
+    setMsgMedidor(null);
+    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, window.location.origin);
   }
 
   function pedirSalvarMedicao() {
-    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, "*");
+    querPdfRef.current = false;
+    setMsgMedidor(null);
+    medidorRef.current?.contentWindow?.postMessage({ type: "asp:requestSave" }, window.location.origin);
   }
 
   function carregarNoMedidor(estado: Record<string, unknown>) {
+    // Mantém a data sugerida da coleta no cabeçalho do medidor.
+    const comData = { reportDate: dataSugerida, ...estado };
     if (modalMedidor) {
-      medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: estado }, "*");
+      medidorRef.current?.contentWindow?.postMessage({ type: "asp:load", dados: comData }, window.location.origin);
     } else {
-      dadosCarregarRef.current = estado;
+      dadosCarregarRef.current = comData;
       setColetaEditando(null); editandoRef.current = null;
       setModalMedidor(true);
     }
   }
+  /** Importar: formato, medidas e altura já vêm do cadastro do tanque (m). */
   function abrirImport() {
-    setImpDiametro(""); setImpAltura(""); setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
+    const t = insp?.tanque;
+    const txt = (v?: number | null) => (v == null ? "" : String(v).replace(".", ","));
+    const ret = t?.formato === "retangular";
+    setImpFormato(ret ? "retangulo" : "circulo");
+    setImpDiametro(txt(ret ? t?.comprimento : t?.diametro));
+    setImpLargura(txt(ret ? t?.largura : null));
+    setImpAltura(txt(t?.altura));
+    setImpUnidade("m"); setImpArquivo(null); setImpErro(null);
     setModalImport(true);
   }
   async function baixarModelo() {
@@ -709,14 +872,14 @@ export default function InspecaoDetalhePage() {
   async function importarBatimetria() {
     setImpErro(null);
     if (!impArquivo) { setImpErro("Selecione o arquivo (CSV ou XLSX)."); return; }
-    const diam = parseFloat((impDiametro || "").replace(",", "."));
+    const diam = paraNumero(impDiametro) ?? 0;
     const ehRetangular = impFormato === "quadrado" || impFormato === "retangulo";
     if (!diam || diam <= 0) {
-      setImpErro(ehRetangular ? "Informe o comprimento do tanque (m)." : "Informe o diâmetro do tanque (m).");
+      setImpErro(ehRetangular ? `Informe o comprimento do tanque (${impUnidade}).` : `Informe o diâmetro do tanque (${impUnidade}).`);
       return;
     }
-    const larg = parseFloat((impLargura || "").replace(",", "."));
-    if (impFormato === "retangulo" && (!larg || larg <= 0)) { setImpErro("Informe a largura do tanque (m)."); return; }
+    const larg = paraNumero(impLargura) ?? 0;
+    if (impFormato === "retangulo" && (!larg || larg <= 0)) { setImpErro(`Informe a largura do tanque (${impUnidade}).`); return; }
     if (impFormato === "custom" && !(impVertices || "").trim()) { setImpErro("Informe os vértices do tanque (x,y; x,y; …)."); return; }
     setImportando(true);
     try {
@@ -727,15 +890,16 @@ export default function InspecaoDetalhePage() {
         alertas.push(`${dados.invalidos} de ${dados.totalValidacao} leituras estão INCORRETO na validação (régua × sonar).`);
       }
       if (dados.negativos > 0) {
-        alertas.push(`${dados.negativos} leitura(s) com espessura negativa (sonar corrigido maior que a régua corrigida) — essas ficarão FORA do cálculo.`);
+        alertas.push(`${dados.negativos} leitura(s) com espessura negativa (sonar corrigido maior que a régua corrigida) — a medição só poderá ser salva depois de corrigi-las no medidor.`);
       }
       if (alertas.length > 0) {
         const ok = confirm(`Atenção:\n\n• ${alertas.join("\n• ")}\n\nImportar mesmo assim?`);
         if (!ok) { setImportando(false); return; }
       }
       const maxVal = Math.max(0, ...dados.valores.flat().map((v) => (typeof v === "number" ? v : 0)));
-      const alturaInput = parseFloat((impAltura || "").replace(",", "."));
-      const altura = alturaInput > 0 ? alturaInput : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + 0.5);
+      const alturaInput = paraNumero(impAltura) ?? 0;
+      const altura = alturaInput > 0 ? alturaInput
+        : (dados.alturaSugerida && dados.alturaSugerida > 0 ? dados.alturaSugerida : maxVal + (impUnidade === "cm" ? 50 : 0.5));
       const estado = montarEstadoMedidor(dados, {
         diametro: diam, altura, unidade: impUnidade,
         tanque: {
@@ -916,6 +1080,49 @@ export default function InspecaoDetalhePage() {
     setAgServidor(novoResultado());
     setErroAgenda(null);
   }
+
+  // ── Coleta (Fase 3) ──────────────────────────────────────────────────────
+  /** Agendamento ativo de inspeção (o mais recente com data): sugere a data
+   *  da coleta e põe a equipe no topo da lista de responsáveis. */
+  const agInspecao = agAtivos.find((a) => a.tipo === "inspecao" && a.data_visita) || null;
+  const dataSugerida = dataColetaSugerida(agInspecao?.data_visita, hojeBrasil());
+  const equipeAgendada = new Set((agInspecao?.equipe || []).map((m) => m.id));
+  const responsaveisEquipe = usuarios.filter((u) => equipeAgendada.has(u.id));
+  const responsaveisOutros = usuarios.filter((u) => !equipeAgendada.has(u.id));
+  // Refs para o callback do iframe (registrado uma vez) ler o estado atual.
+  const coletasRef = useRef<Coleta[]>([]);
+  coletasRef.current = coletas;
+  const usuariosRef = useRef<UsuarioOpcao[]>([]);
+  usuariosRef.current = usuarios;
+  const dataSugeridaRef = useRef("");
+  dataSugeridaRef.current = dataSugerida;
+
+  const coletaRefs: ColetaRef[] = useMemo(() => coletas.map((c) => ({
+    id: c.id, tipo: c.tipo, chave: c.tipo === "anexo" ? null : chaveMedicao(c.dados), arquivoHash: c.arquivo_hash || null,
+    dataColeta: c.data_coleta || null, descricao: c.descricao || null, criadoEm: c.criado_em,
+  })), [coletas]);
+  const ctxColeta: ContextoColeta = {
+    hoje: hojeBrasil(),
+    dataAgendamento: agInspecao?.data_visita || null,
+    usuariosAtivos: usuarios.length ? usuarios.map((u) => u.id) : undefined,
+    coletas: coletaRefs,
+    tanque: insp?.tanque || null,
+  };
+  const coletaAberta = confirmacao?.editId ? coletas.find((c) => c.id === confirmacao.editId) || null : null;
+  const resultadoConfirmacao = confirmacao
+    ? mesclar(validarColeta({
+      id: confirmacao.editId, tipo: "sedimento", dataColeta: cfData, responsavelId: cfResp, dados: confirmacao.dados,
+    }, ctxColeta), cfServidor)
+    : novoResultado();
+  /** Editar a medição de uma coleta aprovada retira a aprovação. */
+  const retiraAprovacao = !!coletaAberta?.aprovada_em && !!confirmacao
+    && chaveMedicao(confirmacao.dados) !== chaveMedicao(coletaAberta.dados);
+  const difTanque = confirmacao ? diferencasTanque(confirmacao.dados, insp?.tanque) : [];
+  const resultadoAnexo = mesclar(validarColeta({
+    tipo: "anexo", dataColeta: anxData, descricao: anxDescricao, exigirArquivo: true, erroArquivo: anxErroArquivo,
+    // Sem SHA-256 no navegador (http), a duplicidade fica para a API.
+    arquivoHash: anxHash || (anxArquivo && !anxErroArquivo ? `local:${anxArquivo.name}:${anxArquivo.size}` : null),
+  }, ctxColeta), anxServidor);
 
   async function salvarAgenda() {
     setErroAgenda(null);
@@ -1222,11 +1429,9 @@ export default function InspecaoDetalhePage() {
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalEntrada(true)}>✍ Digitar batimetria</button>
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={abrirImport}>⬆ Importar batimetria</button>
                 <button className="btn-azul btn-sec" style={btnColeta} onClick={() => setModalModelo(true)}>⬇ Modelo vazio</button>
-                <button className="btn-azul btn-sec" style={btnColeta} onClick={() => coletaInputRef.current?.click()} disabled={enviandoColeta}>
-                  {enviandoColeta ? "Enviando…" : "Anexar PDF"}
+                <button className="btn-azul btn-sec" style={btnColeta} onClick={abrirAnexo} disabled={enviandoColeta}>
+                  📎 Anexar PDF
                 </button>
-                <input ref={coletaInputRef} type="file" accept="application/pdf" style={{ display: "none" }}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) anexarColeta(f); }} />
               </>
           )}>
           <p className="detalhe" style={{ marginTop: 0 }}>Medidor de sedimento: a medição vira um Relatório Técnico interno editável.</p>
@@ -1239,15 +1444,24 @@ export default function InspecaoDetalhePage() {
             <p className="vazio" style={{ margin: 0 }}>Nenhuma coleta registrada.</p>
           ) : (
             coletas.map((c) => {
-              const temMedicao = c.dados && Object.keys(c.dados).length > 0;
+              const temMedicao = c.tipo !== "anexo" && medicaoPreenchida(c.dados);
+              const naoAprovavel = c.aprovada_em ? null : motivoNaoAprovavel(c);
+              const resp = temMedicao && typeof c.dados?.reportResponsavel === "string" ? c.dados.reportResponsavel : "";
               return (
                 <div key={c.id} className="linha-item">
                   <span className="detalhe linha-texto" style={{ margin: 0 }}>
-                    {temMedicao ? "📋 Relatório Técnico interno" : `📎 ${c.tipo}`} · {formatar(c.criado_em)}
+                    {temMedicao ? "📋 Relatório Técnico interno" : `📎 Anexo — ${c.descricao || c.tipo}`}
+                    {" · "}{c.data_coleta ? formatarData(c.data_coleta) : formatar(c.criado_em)}
+                    {resp ? ` · ${resp}` : ""}
                     {c.aprovada_em && (
                       <strong style={{ display: "block", color: "#16a34a" }}>
                         ✓ Em uso no relatório — aprovada em {formatar(c.aprovada_em)}
                       </strong>
+                    )}
+                    {!c.aprovada_em && c.aprovacao_retirada_em && (
+                      <span className="alerta" style={{ display: "block" }}>
+                        Aprovação retirada por edição em {formatar(c.aprovacao_retirada_em)} — aprove de novo se ela vale para o relatório.
+                      </span>
                     )}
                   </span>
                   <span className="linha-acoes">
@@ -1262,14 +1476,14 @@ export default function InspecaoDetalhePage() {
                         style={c.aprovada_em
                           ? { color: "#16a34a", borderColor: "#16a34a" }
                           : undefined}
-                        title={c.aprovada_em ? "Desmarcar esta medição" : "Marcar como a medição válida para o relatório"}
-                        disabled={aprovandoColeta === c.id} onClick={() => aprovarColeta(c)}>
+                        title={c.aprovada_em ? "Desmarcar esta medição" : naoAprovavel || "Marcar como a medição válida para o relatório"}
+                        disabled={aprovandoColeta === c.id || !!naoAprovavel} onClick={() => aprovarColeta(c)}>
                         {aprovandoColeta === c.id ? "…" : c.aprovada_em ? "✓ Aprovada" : "Aprovar"}
                       </button>
                     )}
                     {podeColeta && (
                       <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
-                        title="Excluir medição (lixeira de 30 dias)"
+                        title={c.aprovada_em ? "Excluir (lixeira de 30 dias) — a aprovação é retirada" : "Excluir (lixeira de 30 dias)"}
                         disabled={excluindoColeta === c.id} onClick={() => excluirColeta(c)}>
                         {excluindoColeta === c.id ? "Excluindo…" : "Excluir"}
                       </button>
@@ -1353,7 +1567,7 @@ export default function InspecaoDetalhePage() {
         <ChecklistEquipamentos
           inspecaoId={id}
           etapa={bloco}
-          nomeUsuario={nomeUsuarioAtual}
+          procedimento={insp.procedimento}
           clienteId={insp.projeto?.cliente?.id}
           embutido
           onResumo={setResumoChecklist}
@@ -1545,6 +1759,7 @@ export default function InspecaoDetalhePage() {
       {/* Modal: digitar batimetria (mesma matemática da importação) */}
       {modalEntrada && (
         <EntradaBatimetria
+          tanque={insp.tanque}
           onFechar={() => setModalEntrada(false)}
           onGerar={(estado) => { setModalEntrada(false); carregarNoMedidor(estado); }}
         />
@@ -1557,6 +1772,7 @@ export default function InspecaoDetalhePage() {
             <p className="detalhe" style={{ margin: 0 }}>
               Envie a planilha no layout atual (blocos v1..vN com Esquerda/Centro/Direita e a linha “Altura sedimento”).
               Cada lateral vira um vetor paralelo atravessando o tanque — todas as leituras entram no cálculo.
+              {insp.tanque ? " Formato e medidas vieram do cadastro do tanque da OS." : ""}
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
@@ -1571,7 +1787,7 @@ export default function InspecaoDetalhePage() {
               </div>
               {impFormato === "retangulo" && (
                 <div>
-                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Largura *</label>
+                  <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Largura ({impUnidade}) *</label>
                   <input style={inputStyle} value={impLargura} onChange={(e) => setImpLargura(e.target.value)} placeholder="ex.: 4" inputMode="decimal" />
                 </div>
               )}
@@ -1591,12 +1807,12 @@ export default function InspecaoDetalhePage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: 12 }}>
               <div>
                 <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>
-                  {impFormato === "quadrado" || impFormato === "retangulo" ? "Comprimento (m) *" : "Diâmetro (m) *"}
+                  {impFormato === "quadrado" || impFormato === "retangulo" ? `Comprimento (${impUnidade}) *` : `Diâmetro (${impUnidade}) *`}
                 </label>
                 <input style={inputStyle} value={impDiametro} onChange={(e) => setImpDiametro(e.target.value)} placeholder="ex.: 12" inputMode="decimal" />
               </div>
               <div>
-                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Altura do tanque</label>
+                <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Altura do tanque ({impUnidade})</label>
                 <input style={inputStyle} value={impAltura} onChange={(e) => setImpAltura(e.target.value)} placeholder="auto (planilha)" inputMode="decimal" />
               </div>
               <div>
@@ -1627,7 +1843,7 @@ export default function InspecaoDetalhePage() {
           nomeArquivo={`Relatorio-${(insp?.identificacao || "OS").replace(/[^\w-]+/g, "-")}`}
           inicial={dadosIniciaisRelatorio}
           usuarios={usuarios}
-          coletas={coletas.filter((c) => c.dados && Object.keys(c.dados).length > 0)}
+          coletas={coletas.filter((c) => c.tipo !== "anexo" && medicaoPreenchida(c.dados))}
           // Relatório de Execução: as fotos da coleta entram já posicionadas.
           coletaFotos={(tipoRelatorio || bloco) === "execucao" ? fotosExec : undefined}
           onSalvar={async (blob, snapshot) => {
@@ -1647,22 +1863,130 @@ export default function InspecaoDetalhePage() {
           <div className="medidor-shell">
             <div className="medidor-barra" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--borda)", background: "var(--bg-suave)", flexShrink: 0 }}>
               <span className="detalhe" style={{ margin: 0 }}>
-                {coletaEditando ? "Editando o registro salvo." : "A medição é salva como Relatório Técnico interno (editável). Use “Exportar em PDF” dentro da ferramenta para o PDF."}
+                {msgMedidor ? <strong style={{ color: "#16a34a" }}>✓ {msgMedidor}</strong>
+                  : coletaEditando ? "Editando o registro salvo — salvar atualiza esta medição (e o PDF dela)."
+                  : "A medição é salva como Relatório Técnico interno (editável). “Salvar relatório (PDF)” salva a medição com o PDF anexado."}
               </span>
-              <span style={{ display: "flex", gap: 8 }}>
+              <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn-azul btn-sec" onClick={() => setModalEntrada(true)}>✍ Digitar</button>
                 <button className="btn-azul btn-sec" onClick={abrirImport}>⬆ Importar</button>
-                <button className="btn-azul btn-sec" onClick={pedirPdfMedicao} disabled={gerandoPdfMedicao || salvandoMedicao}
-                  title="Gera o relatório da medição em PDF e anexa às Coletas">
+                <button className="btn-azul btn-sec" onClick={pedirPdfMedicao} disabled={gerandoPdfMedicao || salvandoMedicao || !!confirmacao}
+                  title={coletaEditando ? "Gera o PDF e anexa (ou substitui) na medição aberta" : "Salva a medição com o relatório em PDF anexado"}>
                   {gerandoPdfMedicao ? "Gerando…" : "📄 Salvar relatório (PDF)"}
                 </button>
-                <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao}>
+                <button className="btn-azul" onClick={pedirSalvarMedicao} disabled={salvandoMedicao || !!confirmacao}>
                   {salvandoMedicao ? "Salvando…" : "💾 Salvar medição"}
                 </button>
               </span>
             </div>
             <iframe ref={medidorRef} src="/ferramentas/medidor-sedimento-asp.html" title="Medidor de Sedimento"
               style={{ flex: 1, width: "100%", border: "none", display: "block" }} />
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: confirmar a medição (Fase 3). Regras em lib/validacao/coleta.ts
+          e medicao.ts — a API repete: ⛔ bloqueia, ⚠️ só alerta. */}
+      {confirmacao && (
+        <Modal titulo={confirmacao.modo === "pdf" ? "📄 Salvar relatório (PDF) da medição" : "💾 Salvar medição"} zIndex={300}
+          onFechar={() => { if (!salvandoMedicao) setConfirmacao(null); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              {confirmacao.editId
+                ? confirmacao.modo === "pdf" ? "Atualiza a medição aberta e anexa (ou substitui) o PDF dela." : "Atualiza a medição aberta."
+                : confirmacao.modo === "pdf" ? "Salva a medição nesta OS com o relatório em PDF anexado." : "Salva a medição nesta OS."}
+            </p>
+            {retiraAprovacao && (
+              <p className="val-msg val-aviso">⚠️ Esta medição está aprovada; ao salvar, a aprovação será retirada (será preciso aprovar de novo).</p>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+              <div>
+                <label htmlFor="cf-data" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da coleta *</label>
+                <input id="cf-data" type="date" style={inputStyle} value={cfData} max={hojeBrasil()}
+                  className={resultadoConfirmacao.erros.dataColeta ? "val-invalido" : undefined}
+                  onChange={(e) => { setCfData(e.target.value); setCfServidor(novoResultado()); }} />
+                <MensagensCampo r={resultadoConfirmacao} campo="dataColeta" />
+              </div>
+              <div>
+                <label htmlFor="cf-resp" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Responsável pela medição *</label>
+                <select id="cf-resp" style={inputStyle} value={cfResp}
+                  className={resultadoConfirmacao.erros.responsavelId ? "val-invalido" : undefined}
+                  onChange={(e) => { setCfResp(e.target.value); setCfServidor(novoResultado()); }}>
+                  <option value="">— escolha —</option>
+                  {responsaveisEquipe.length > 0 && (
+                    <optgroup label="Equipe agendada">
+                      {responsaveisEquipe.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                    </optgroup>
+                  )}
+                  <optgroup label={responsaveisEquipe.length > 0 ? "Demais usuários" : "Usuários"}>
+                    {responsaveisOutros.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                  </optgroup>
+                </select>
+                <MensagensCampo r={resultadoConfirmacao} campo="responsavelId" />
+              </div>
+            </div>
+            <MensagensCampo r={resultadoConfirmacao} campo="medicao" />
+            <MensagensCampo r={resultadoConfirmacao} campo="valores" />
+            <MensagensCampo r={resultadoConfirmacao} campo="tanque">
+              {difTanque.length > 0 && insp.tanque && podeRenomear && (
+                <span style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                  <button type="button" className="btn-dl btn-sec" disabled={atualizandoTanque} onClick={atualizarTanqueComMedicao}>
+                    {atualizandoTanque ? "Atualizando…" : "Atualizar cadastro do tanque"}
+                  </button>
+                  <span className="detalhe" style={{ margin: 0, alignSelf: "center" }}>ou salve mantendo o cadastro como está.</span>
+                </span>
+              )}
+            </MensagensCampo>
+            <ResumoValidacao r={resultadoConfirmacao} rotulos={ROTULOS_COLETA} />
+            {cfErro && <p className="val-msg val-erro">⛔ {cfErro}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setConfirmacao(null)} disabled={salvandoMedicao}>Voltar ao medidor</button>
+              <button className="btn-azul" onClick={confirmarMedicao} disabled={salvandoMedicao || temErros(resultadoConfirmacao)}>
+                {salvandoMedicao ? (confirmacao.modo === "pdf" ? "Gerando e enviando…" : "Salvando…")
+                  : confirmacao.modo === "pdf" ? "Salvar com PDF" : "Salvar medição"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: anexar PDF avulso (tipo 'anexo', descrição obrigatória). */}
+      {modalAnexo && (
+        <Modal titulo="📎 Anexar PDF" onFechar={() => { if (!enviandoColeta) setModalAnexo(false); }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Documento avulso da coleta (laudo, foto em PDF, relatório de terceiro). Medição do medidor
+              não entra aqui — use “Nova medição”.
+            </p>
+            <div>
+              <label htmlFor="anx-desc" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Descrição *</label>
+              <input id="anx-desc" style={inputStyle} value={anxDescricao} maxLength={200}
+                placeholder="ex.: Laudo de espessura do fundo"
+                className={anxTentou && resultadoAnexo.erros.descricao ? "val-invalido" : undefined}
+                onChange={(e) => { setAnxDescricao(e.target.value); setAnxServidor(novoResultado()); }} />
+              <MensagensCampo r={resultadoAnexo} campo="descricao" mostrarErros={anxTentou} />
+            </div>
+            <div>
+              <label htmlFor="anx-data" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Data da coleta *</label>
+              <input id="anx-data" type="date" style={inputStyle} value={anxData} max={hojeBrasil()}
+                className={resultadoAnexo.erros.dataColeta ? "val-invalido" : undefined}
+                onChange={(e) => { setAnxData(e.target.value); setAnxServidor(novoResultado()); }} />
+              <MensagensCampo r={resultadoAnexo} campo="dataColeta" />
+            </div>
+            <div>
+              <label htmlFor="anx-arq" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Arquivo PDF * (até 20 MB)</label>
+              <input id="anx-arq" type="file" accept="application/pdf,.pdf"
+                onChange={(e) => escolherArquivoAnexo(e.target.files?.[0] || null)} />
+              <MensagensCampo r={resultadoAnexo} campo="arquivo" mostrarErros={anxTentou || !!anxErroArquivo || !!anxHash} />
+            </div>
+            <ResumoValidacao r={resultadoAnexo} rotulos={ROTULOS_COLETA} mostrarErros={anxTentou} />
+            {anxErro && <p className="val-msg val-erro">⛔ {anxErro}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setModalAnexo(false)} disabled={enviandoColeta}>Cancelar</button>
+              <button className="btn-azul" onClick={salvarAnexo} disabled={enviandoColeta || (anxTentou && temErros(resultadoAnexo))}>
+                {enviandoColeta ? "Enviando…" : "Anexar"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
@@ -1854,6 +2178,18 @@ export default function InspecaoDetalhePage() {
       )}
     </div>
   );
+}
+
+/** SHA-256 (hex) no navegador; null se a API de cripto não estiver disponível
+ *  (página fora de HTTPS) — aí a checagem de arquivo repetido fica com a API. */
+async function sha256Hex(bytes: Uint8Array): Promise<string | null> {
+  try {
+    if (typeof crypto === "undefined" || !crypto.subtle) return null;
+    const buf = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
+    return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null;
+  }
 }
 
 function formatar(iso?: string | null) {
