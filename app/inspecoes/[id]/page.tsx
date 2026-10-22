@@ -23,6 +23,14 @@
  * Gerência envia a versão ASSINADA (PDF), que vira o documento final.
  * Regras em lib/validacao/aprovacao.ts.
  *
+ * Fase 9 (aprovação do relatório de execução): além dos avisos gerais, avisa
+ * (nunca bloqueia) versão sem PDF do laudo (enviada antes da Fase 8),
+ * parâmetro fora do limite não citado na Conclusão, resultado não conforme
+ * após a limpeza (cloro < 0,2 ou laudo DEPOIS fora do limite), dias sem RDO,
+ * RDO com .docx desatualizado/não gerado e coleta de fotos incompleta. A
+ * reprovação ganha a categoria "Laudo/Laboratório" (só na execução). Regras
+ * em lib/validacao/aprovacaoExecucao.ts.
+ *
  * Fase 6 (agendamento da execução): a execução tem PERÍODO (início + último
  * dia); conflitos, fim de semana/feriado e remarcação olham o período todo.
  * O card da execução avisa checklist de segurança, equipamento do
@@ -61,7 +69,7 @@ import {
   arquivoRelatorioRepetido, codigoRelatorio, descreverRelatorio, emAprovacaoDoTipo, examinarArquivoRelatorio, faixaVolume,
   planejarEnvio, rascunhoDoTipo, RELATORIO_MAX_BYTES, RelatorioRef, revisaoDoTipo, ROTULO_STATUS_RELATORIO, ROTULO_TIPO,
   tipoDaFase, type FormatoRelatorio, type TipoRelatorio,
-  avisosAprovacao, avisosAssinatura, CATEGORIAS_REPROVACAO, formatarMotivo, mudancasDesdeEnvio, PERFIS_ASSINADO,
+  avisosAprovacao, avisosAprovacaoExecucao, avisosAssinatura, categoriasReprovacao, formatarMotivo, mudancasDesdeEnvio, PERFIS_ASSINADO,
   PERFIS_TROCAR_ASSINADO, resumoValidacao, ROTULOS_REPROVACAO, validarReprovacao,
   aguaPotavelDesmarcada, avisosExecucao, CHECKLIST_PADRAO, diasSemRdo, execucaoAtiva, nomesEquipamentosProcedimento,
   periodoDe, periodoMudou, periodosSobrepoem, textoDiasSemRdo, textoPeriodo, equipamentosFaltando,
@@ -521,11 +529,21 @@ export default function InspecaoDetalhePage() {
       fotosExecucaoEm,
     });
   }, [relAval, insp, coletas, fotosExecucaoEm]);
-  /** ⚠️ ao aprovar a versão mostrada (nenhum bloqueia). */
-  const avisosAprov = useMemo(() => relAval ? avisosAprovacao({
-    usuarioId, relatorio: relAval, baixou: visualizados.includes(relAval.id),
-    temMedicaoAprovada: coletas.some((c) => c.aprovada_em), mudancas: mudancasAval,
-  }) : novoResultado(), [relAval, usuarioId, visualizados, coletas, mudancasAval]);
+  /** ⚠️ ao aprovar a versão mostrada (nenhum bloqueia). Na execução (fase
+   *  9) entram os avisos próprios dela: laudo, resultado após a limpeza,
+   *  RDOs e fotos — com o que a página já carregou. */
+  const avisosAprov = useMemo(() => {
+    if (!relAval) return novoResultado();
+    const gerais = avisosAprovacao({
+      usuarioId, relatorio: relAval, baixou: visualizados.includes(relAval.id),
+      temMedicaoAprovada: coletas.some((c) => c.aprovada_em), mudancas: mudancasAval,
+    });
+    if (relAval.tipo !== "execucao") return gerais;
+    return mesclar(gerais, avisosAprovacaoExecucao({
+      dados: relAval.dados, usaLaudo: procedimentoUsaLaudo(procOS), unidadeCloro: cloroOS.unidade,
+      hoje: hojeExec, periodo: periodoExec, rdos: rdosInsp, coleta: fotosExec,
+    }));
+  }, [relAval, usuarioId, visualizados, coletas, mudancasAval, procOS, cloroOS.unidade, hojeExec, periodoExec, rdosInsp, fotosExec]);
 
   /** Reprovação: categoria + descrição; aviso se repetir a anterior do tipo. */
   const reprovacaoAnterior = useMemo(() => {
@@ -536,8 +554,8 @@ export default function InspecaoDetalhePage() {
     return ant ? { descricao: ant.motivo_ajuste, versao: ant.versao } : null;
   }, [relAval, relatorios]);
   const valReprovacao = useMemo(
-    () => validarReprovacao({ categoria, descricao: motivo, anterior: reprovacaoAnterior }),
-    [categoria, motivo, reprovacaoAnterior]
+    () => validarReprovacao({ categoria, descricao: motivo, anterior: reprovacaoAnterior, tipo: relAval?.tipo || null }),
+    [categoria, motivo, reprovacaoAnterior, relAval?.tipo]
   );
   const podeAssinar = PERFIS_ASSINADO.includes(perfil || "");
   const podeTrocarAssinado = PERFIS_TROCAR_ASSINADO.includes(perfil || "");
@@ -2745,7 +2763,7 @@ export default function InspecaoDetalhePage() {
               <span style={{ fontSize: 13, fontWeight: 600 }}>Categoria *</span>
               <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={inputStyle} aria-label="Categoria do ajuste">
                 <option value="">Escolha…</option>
-                {CATEGORIAS_REPROVACAO.map((c) => <option key={c.valor} value={c.valor}>{c.rotulo}</option>)}
+                {categoriasReprovacao(relAval?.tipo || (insp ? tipoDaFase(insp.fase) : null)).map((c) => <option key={c.valor} value={c.valor}>{c.rotulo}</option>)}
               </select>
             </label>
             <MensagensCampo r={valReprovacao} campo="categoria" mostrarErros={tentouReprovar} />

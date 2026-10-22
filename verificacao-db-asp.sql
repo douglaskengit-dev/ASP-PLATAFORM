@@ -832,6 +832,28 @@ begin
 end $$;
 
 
+-- ============================================================================
+-- ASP — Fase 9: categoria de reprovação "Laudo/Laboratório" ('laudo').
+--
+-- Os checks da categoria (gp_relatorios e gp_fase_historico, criados na
+-- migração das Fases 5/9) passam a aceitar 'laudo'. Ela só é oferecida — e
+-- aceita pela API — ao reprovar o relatório de EXECUÇÃO (fase 9); o banco
+-- aceita o valor nas duas tabelas e a regra por tipo fica na API.
+-- Idempotente: derruba e recria os dois checks com a lista nova (só amplia a
+-- lista — nenhuma linha existente passa a violar). Nenhum dado é alterado.
+-- ============================================================================
+
+do $$
+begin
+  alter table public.gp_relatorios drop constraint if exists ck_gp_relatorios_motivo_categoria;
+  alter table public.gp_relatorios add constraint ck_gp_relatorios_motivo_categoria
+    check (motivo_categoria is null or motivo_categoria in ('dados_incorretos', 'fotos', 'texto', 'medicao', 'laudo', 'formatacao', 'outro'));
+
+  alter table public.gp_fase_historico drop constraint if exists ck_gp_fase_historico_motivo_categoria;
+  alter table public.gp_fase_historico add constraint ck_gp_fase_historico_motivo_categoria
+    check (motivo_categoria is null or motivo_categoria in ('dados_incorretos', 'fotos', 'texto', 'medicao', 'laudo', 'formatacao', 'outro'));
+end $$;
+
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
 
@@ -978,5 +1000,14 @@ select * from (
   select 'gp_procedimentos', 'check limite de aviso do cloro > 0',
     case when exists (select 1 from pg_constraint where conname = 'ck_gp_procedimentos_cloro_limite_aviso')
       then 'OK' else '*** FALTANDO ***' end
+  union all
+  -- Fase 9: categoria "Laudo/Laboratório" ('laudo') aceita na reprovação.
+  select 'gp_relatorios', 'check categoria aceita laudo',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_relatorios_motivo_categoria'
+      and pg_get_constraintdef(oid) like '%''laudo''%') then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_fase_historico', 'check categoria aceita laudo',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_fase_historico_motivo_categoria'
+      and pg_get_constraintdef(oid) like '%''laudo''%') then 'OK' else '*** FALTANDO ***' end
 ) r
 order by status desc, tabela, coluna;

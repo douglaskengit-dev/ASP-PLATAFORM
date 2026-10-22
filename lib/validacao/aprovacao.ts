@@ -6,13 +6,16 @@
  *   ⛔ aprovar/reprovar sem relatório do tipo em aprovação · reprovação sem
  *      categoria · descrição com menos de 15 letras ou sem sentido ("ok",
  *      "ajustar", "....") · avaliação repetida (outro já avaliou: 409) ·
+ *      categoria Laudo/Laboratório num relatório que não é de execução ·
  *      versão assinada: só PDF de verdade, até 30 MB, arquivo que já está na
  *      OS, relatório não aprovado, perfil sem permissão, trocar a assinada
  *      sem ser Gerência/Admin
  *   ⚠️ mesmo motivo da reprovação anterior · quem aprova preparou/enviou o
  *      relatório · aprovar sem ter baixado ESTA versão · dados da OS mudaram
  *      depois do envio · inspeção sem medição aprovada · seguir da fase 6 sem
- *      o relatório de inspeção assinado · encerrar sem o de execução assinado */
+ *      o relatório de inspeção assinado · encerrar sem o de execução assinado
+ *   Os avisos próprios da fase 9 (laudo, resultado após a limpeza, RDOs,
+ *   fotos) ficam em aprovacaoExecucao.ts. */
 import { addAviso, addErro, novoResultado, ResultadoValidacao } from "./resultado";
 import { normalizarEspacos, normalizarTexto, semPontuacao } from "./texto";
 import { ROTULO_TIPO, type TipoRelatorio } from "./relatorio";
@@ -24,16 +27,28 @@ export const CATEGORIAS_REPROVACAO = [
   { valor: "fotos", rotulo: "Fotos" },
   { valor: "texto", rotulo: "Texto/redação" },
   { valor: "medicao", rotulo: "Medição" },
+  { valor: "laudo", rotulo: "Laudo/Laboratório" },
   { valor: "formatacao", rotulo: "Formatação" },
   { valor: "outro", rotulo: "Outro" },
 ] as const;
 
 export type CategoriaReprovacao = (typeof CATEGORIAS_REPROVACAO)[number]["valor"];
 
-export function categoriaValida(v: unknown): v is CategoriaReprovacao {
-  return CATEGORIAS_REPROVACAO.some((c) => c.valor === v);
+/** Categorias que só valem para um tipo de relatório (Fase 9: o laudo do
+ *  laboratório só existe no relatório de execução). */
+const SO_DO_TIPO: Partial<Record<CategoriaReprovacao, string>> = { laudo: "execucao" };
+
+/** Categorias oferecidas ao reprovar um relatório do tipo (sem tipo: todas). */
+export function categoriasReprovacao(tipo?: string | null) {
+  return CATEGORIAS_REPROVACAO.filter((c) => !tipo || !SO_DO_TIPO[c.valor] || SO_DO_TIPO[c.valor] === tipo);
 }
 
+/** Categoria da lista e, com `tipo`, válida para esse tipo de relatório. */
+export function categoriaValida(v: unknown, tipo?: string | null): v is CategoriaReprovacao {
+  return categoriasReprovacao(tipo).some((c) => c.valor === v);
+}
+
+/** Todas as categorias (inclusive as de um tipo só) — dados gravados. */
 export function rotuloCategoria(v: string | null | undefined): string {
   return CATEGORIAS_REPROVACAO.find((c) => c.valor === v)?.rotulo || "";
 }
@@ -74,16 +89,22 @@ export function motivoRepetido(descricao: string | null | undefined, anterior: s
   return !!a && a === b;
 }
 
-/** Categoria + descrição da reprovação. `anterior` = motivo (descrição) da
+/** Categoria + descrição da reprovação (⛔ "Laudo/Laboratório" fora do
+ *  relatório de execução). `anterior` = motivo (descrição) da
  *  última reprovação do mesmo relatório (OS + tipo), para o aviso. */
 export function validarReprovacao(e: {
   categoria: string | null | undefined;
   descricao: string | null | undefined;
+  /** Tipo do relatório reprovado ("inspecao" | "execucao"): "laudo" só na execução. */
+  tipo?: string | null;
   anterior?: { descricao: string | null; versao?: number } | null;
 }): ResultadoValidacao {
   const r = novoResultado();
   if (!e.categoria) addErro(r, "categoria", "Escolha a categoria do ajuste.");
   else if (!categoriaValida(e.categoria)) addErro(r, "categoria", "Categoria inválida.");
+  else if (!categoriaValida(e.categoria, e.tipo)) {
+    addErro(r, "categoria", `A categoria “${rotuloCategoria(e.categoria)}” só vale para o relatório de ${ROTULO_TIPO[SO_DO_TIPO[e.categoria] as TipoRelatorio] || SO_DO_TIPO[e.categoria]}.`);
+  }
   const erro = erroDescricaoMotivo(e.descricao);
   if (erro) addErro(r, "motivo", erro);
   else if (e.anterior && motivoRepetido(e.descricao, e.anterior.descricao)) {
@@ -153,7 +174,7 @@ export interface RelatorioAprovacao {
   versao: number;
   enviado_por?: string | null;
   enviado_em?: string | null;
-  dados?: { pessoas?: Record<string, string | undefined>; d?: Record<string, any>; coletaId?: string } | null;
+  dados?: { pessoas?: Record<string, string | undefined>; d?: Record<string, any>; coletaId?: string; laudoPdf?: { caminho?: string } | null } | null;
 }
 
 /** Coleta (medição) como a página da OS a conhece. */
