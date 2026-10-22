@@ -473,12 +473,12 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               {pendColeta.map((p) => <li key={p}>{p}</li>)}
             </ul>
             Você pode gerar assim mesmo — o que falta só não entra no relatório. Para completar,
-            use o card “Coleta de fotos da execução” da inspeção.
+            use o card “Coleta de fotos da execução” da OS.
           </div>
         )}
         {infoColeta && <p className="detalhe" style={{ margin: "6px 0 0" }}>{infoColeta}</p>}
         {minhas.length === 0 && !infoColeta && (
-          <p className="vazio" style={{ margin: "6px 0 0" }}>Nenhuma foto coletada nesta inspeção.</p>
+          <p className="vazio" style={{ margin: "6px 0 0" }}>Nenhuma foto coletada nesta OS.</p>
         )}
         {minhas.map(({ f, i }) => {
           const vagas = vagasModelo.filter((v) => v.topico === f.topico);
@@ -941,7 +941,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
         <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
           <label style={rotulo}>Medição utilizada <span className="detalhe">(define altura, diâmetro, capacidade e volume)</span></label>
           {coletas.length === 0 ? (
-            <p className="vazio" style={{ margin: 0 }}>Nenhuma medição salva nesta inspeção — os campos automáticos ficam vazios.</p>
+            <p className="vazio" style={{ margin: 0 }}>Nenhuma medição salva nesta OS — os campos automáticos ficam vazios.</p>
           ) : (
             <select style={campo} value={coletaId} onChange={(e) => trocarColeta(e.target.value)}>
               {coletas.map((c, i) => (
@@ -954,7 +954,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
           )}
           {coletas.length > 0 && !coletas.some((c) => c.aprovada_em) && (
             <p className="detalhe" style={{ margin: "6px 0 0", color: "#c2410c" }}>
-              ⚠ Nenhuma medição foi aprovada nesta inspeção. Você pode gerar assim mesmo, mas convém
+              ⚠ Nenhuma medição foi aprovada nesta OS. Você pode gerar assim mesmo, mas convém
               aprovar a medição válida no card de Coletas antes de enviar.
             </p>
           )}
@@ -980,7 +980,7 @@ export default function GerarRelatorio({ onFechar, inicial, nomeArquivo, usuario
               <label style={rotulo}>Revisão <span className="detalhe">(automática)</span></label>
               <input style={{ ...campo, fontWeight: 700 }} value={d.revisao || ""}
                 onChange={(e) => mudarRevisao(e.target.value)} />
-              <span className="detalhe">Incrementa a cada reprovação registrada nesta inspeção e compõe o campo Relatório.</span>
+              <span className="detalhe">Incrementa a cada reprovação registrada nesta OS e compõe o campo Relatório.</span>
             </div>
             <div>
               <label style={rotulo}>Status</label>

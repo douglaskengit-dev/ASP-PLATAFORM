@@ -93,7 +93,7 @@ export default function CalendarioAgenda() {
                   <Link key={a.id} href={a.inspecao ? `/inspecoes/${a.inspecao.id}` : "#"} title={`${a.kind === "execucao" ? "Execução" : "Inspeção"} · ${a.inspecao?.identificacao || ""}${a.hora ? " às " + a.hora : ""}`}
                     style={{ fontSize: 10, textDecoration: "none", color: "#fff", borderRadius: 4, padding: "1px 4px",
                       background: a.kind === "execucao" ? "#0f766e" : "var(--primaria)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                    {a.hora ? `${a.hora} ` : ""}{a.inspecao?.identificacao || "Inspeção"}
+                    {a.hora ? `${a.hora} ` : ""}{a.inspecao?.identificacao || "OS"}
                   </Link>
                 ))}
                 {doDia.length > 3 && <span className="detalhe" style={{ margin: 0, fontSize: 10 }}>+{doDia.length - 3}</span>}

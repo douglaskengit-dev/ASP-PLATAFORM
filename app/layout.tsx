@@ -33,7 +33,7 @@ const antonio = localFont({
 
 export const metadata: Metadata = {
   title: "Plataforma ASP",
-  description: "Sistema interno — gestão de projetos e inspeções.",
+  description: "Sistema interno — gestão de projetos e Ordens de Serviço.",
   applicationName: "ASP",
   icons: {
     icon: "/assets/asp-badge.svg",

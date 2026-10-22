@@ -3,14 +3,17 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { erroDoTanque, normalizarTanque } from "@/lib/asp/tanque";
+import { codigosDoCatalogo, conflitoAoRestaurarOS, ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
+import { normalizarEspacos, primeiroErro, ROTULOS_OS, temErros } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-/** PATCH: restaurar da lixeira ({ restaurar: true }), renomear a inspeção
+/** PATCH: restaurar da lixeira ({ restaurar: true }), renomear a OS
  *  ({ identificacao }) ou corrigir o cadastro do tanque ({ tanque }). O título
  *  é usado no relatório (campo TAG) e nos nomes dos arquivos gerados, e as
  *  medidas do tanque saem em todo relatório — vale corrigir os dois sem
- *  refazer a inspeção. */
+ *  refazer a OS. Mesmas regras da criação (lib/validacao/ordemServico.ts):
+ *  identificação única no projeto e procedimento do Catálogo. */
 const PERFIS_EDICAO = ["admin", "operacoes", "gerencia", "comercial"];
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
@@ -22,9 +25,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!PERFIS_EDICAO.includes(profile.perfil)) {
       return NextResponse.json({ erro: "Sem permissão para alterar o procedimento." }, { status: 403 });
     }
+    const proc = body.procedimento.trim();
+    if (!proc) return NextResponse.json({ erro: "Procedimento: escolha um procedimento do Catálogo." }, { status: 400 });
+    if (!(await codigosDoCatalogo()).includes(proc)) {
+      return NextResponse.json({ erro: `Procedimento “${proc}” não está no Catálogo.` }, { status: 400 });
+    }
     const { data, error } = await getSupabaseAdmin()
       .from("gp_inspecoes")
-      .update({ procedimento: body.procedimento.trim() || null, atualizado_em: new Date().toISOString() })
+      .update({ procedimento: proc, atualizado_em: new Date().toISOString() })
       .eq("id", params.id)
       .select("id, procedimento")
       .single();
@@ -52,12 +60,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if (typeof body.identificacao === "string") {
     if (!PERFIS_EDICAO.includes(profile.perfil)) {
-      return NextResponse.json({ erro: "Sem permissão para renomear a inspeção." }, { status: 403 });
+      return NextResponse.json({ erro: "Sem permissão para renomear a OS." }, { status: 403 });
     }
-    const titulo = body.identificacao.trim();
-    if (!titulo) return NextResponse.json({ erro: "Informe o título da inspeção." }, { status: 400 });
-    if (titulo.length > 160) {
-      return NextResponse.json({ erro: "Título muito longo (máx. 160 caracteres)." }, { status: 400 });
+    const titulo = normalizarEspacos(body.identificacao);
+    const { data: atual } = await getSupabaseAdmin().from("gp_inspecoes").select("projeto_id").eq("id", params.id).maybeSingle();
+    if (!atual) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
+    // Só o nome muda aqui: o procedimento tem o seu próprio PATCH.
+    const { resultado, conflito } = await validarOSNoServidor(
+      { identificacao: titulo },
+      { projetoId: atual.projeto_id, excluirId: params.id, exigirProcedimento: false }
+    );
+    if (temErros(resultado)) {
+      return NextResponse.json(
+        { erro: primeiroErro(resultado, ROTULOS_OS), erros: resultado.erros, avisos: resultado.avisos, conflito },
+        { status: conflito ? 409 : 400 }
+      );
     }
     const { data, error } = await getSupabaseAdmin()
       .from("gp_inspecoes")
@@ -65,12 +82,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .eq("id", params.id)
       .select("id, identificacao")
       .single();
+    if (ehViolacaoUnica(error)) {
+      return NextResponse.json({ erro: "Identificação: já usada por outra OS deste projeto." }, { status: 409 });
+    }
     if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true, inspecao: data });
+    return NextResponse.json({ ok: true, inspecao: data, avisos: resultado.avisos });
   }
 
   if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Sem permissão." }, { status: 403 });
   if (!body.restaurar) return NextResponse.json({ ok: true });
+  const conflito = await conflitoAoRestaurarOS(params.id);
+  if (conflito) {
+    return NextResponse.json({
+      erro: `Já existe a OS “${conflito.identificacao}” ativa neste projeto. Renomeie-a antes de restaurar esta.`, conflito,
+    }, { status: 409 });
+  }
   const { error } = await getSupabaseAdmin()
     .from("gp_inspecoes")
     .update({ excluido_em: null, excluido_por: null, atualizado_em: new Date().toISOString() })
@@ -83,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir inspeções." }, { status: 403 });
+  if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir Ordens de Serviço." }, { status: 403 });
   const admin = getSupabaseAdmin();
   if (req.nextUrl.searchParams.get("definitivo") === "1") {
     const { error } = await admin.from("gp_inspecoes").delete().eq("id", params.id);
@@ -108,7 +134,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const supabase = getSupabaseRouteClient();
   const { data: inspecao, error } = await supabase
     .from("gp_inspecoes")
-    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(id, razao_social))")
+    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, cliente:gp_orgaos(id, razao_social))")
     .eq("id", params.id)
     .single();
 

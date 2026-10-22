@@ -225,7 +225,7 @@ export default function Rdos({
   }, [projetoId, clienteId, definirInspecoesProjeto]);
 
   const nomeInspecao = useCallback((id: string) =>
-    inspecoesProjeto.find((i) => i.id === id)?.identificacao || "inspeção", [inspecoesProjeto]);
+    inspecoesProjeto.find((i) => i.id === id)?.identificacao || "OS", [inspecoesProjeto]);
 
   /** Equipe do agendamento de execução do dia (ou o mais recente), com a
    *  função do cadastro de cada usuário. */
@@ -405,7 +405,7 @@ export default function Rdos({
       return;
     }
     if (!data) { setErroForm("Informe a data do RDO."); return; }
-    if (cobertas.length === 0) { setErroForm("Marque ao menos uma inspeção coberta por este RDO."); return; }
+    if (cobertas.length === 0) { setErroForm("Marque ao menos uma OS coberta por este RDO."); return; }
     const limpos = limparDados(dados);
     setSalvando(gerar ? "gerar" : "salvar");
     try {
@@ -471,7 +471,7 @@ export default function Rdos({
         <p className="vazio" style={{ margin: 0 }}>{erroCarga ? "Lista indisponível no momento." : "Carregando…"}</p>
       ) : visiveis.length === 0 ? (
         <p className="vazio" style={{ margin: 0 }}>
-          {inspecaoId ? "Nenhum RDO cobre esta inspeção ainda." : "Nenhum RDO neste projeto."}
+          {inspecaoId ? "Nenhum RDO cobre esta OS ainda." : "Nenhum RDO neste projeto."}
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -485,7 +485,7 @@ export default function Rdos({
                     <strong>RDO nº {numeroRdo(r.numero)}</strong> · {dataBr(r.data)}
                   </div>
                   <div className="detalhe" style={{ margin: 0 }}>
-                    {nomes || `${r.inspecoes.length} inspeç${r.inspecoes.length === 1 ? "ão" : "ões"}`}
+                    {nomes || `${r.inspecoes.length} OS${r.inspecoes.length === 1 ? "" : "s"}`}
                     {" · "}{r.dados.atividades.length} atividade{r.dados.atividades.length === 1 ? "" : "s"}
                     {r.autor?.nome_completo ? ` · por ${r.autor.nome_completo}` : ""}
                   </div>
@@ -519,7 +519,7 @@ export default function Rdos({
       )}
       {inspecaoId && rdos.length > visiveis.length && (
         <p className="detalhe" style={{ margin: "8px 0 0" }}>
-          O projeto tem {rdos.length} RDO{rdos.length === 1 ? "" : "s"} no total (os demais cobrem outras inspeções).
+          O projeto tem {rdos.length} RDO{rdos.length === 1 ? "" : "s"} no total (os demais cobrem outras OSs).
         </p>
       )}
     </>
@@ -564,14 +564,14 @@ export default function Rdos({
                 <div className="rdo-aviso">
                   Já existe o RDO nº {numeroRdo(doMesmoDia.numero)} neste dia — é um RDO por dia no projeto.
                   {" "}<button type="button" className="secao-link" onClick={() => abrirEdicao(doMesmoDia, inspecaoId)}>
-                    Abrir esse RDO{inspecaoId && !doMesmoDia.inspecoes.includes(inspecaoId) ? " e incluir esta inspeção" : ""}
+                    Abrir esse RDO{inspecaoId && !doMesmoDia.inspecoes.includes(inspecaoId) ? " e incluir esta OS" : ""}
                   </button>
                 </div>
               )}
               <fieldset className="rdo-cobertura">
-                <legend style={rotulo}>Inspeções cobertas</legend>
+                <legend style={rotulo}>Ordens de Serviço cobertas</legend>
                 {inspecoesProjeto.length === 0 ? (
-                  <p className="detalhe" style={{ margin: 0 }}>{cobertas.length} inspeção(ões) marcada(s).</p>
+                  <p className="detalhe" style={{ margin: 0 }}>{cobertas.length} OS(s) marcada(s).</p>
                 ) : inspecoesProjeto.map((i) => {
                   const cedo = i.fase < 6 && !cobertas.includes(i.id);
                   return (
@@ -590,7 +590,7 @@ export default function Rdos({
               <div className="rdo-bloco-topo">
                 <h4>Equipe</h4>
                 <button type="button" className="secao-link"
-                  onClick={() => { const eq = equipeSugerida(fontes, cobertas, data); if (eq.length) mudar({ equipe: eq }); else alert("Nenhum agendamento de execução com equipe para estas inspeções."); }}>
+                  onClick={() => { const eq = equipeSugerida(fontes, cobertas, data); if (eq.length) mudar({ equipe: eq }); else alert("Nenhum agendamento de execução com equipe para estas OSs."); }}>
                   ↻ Puxar do agendamento
                 </button>
               </div>

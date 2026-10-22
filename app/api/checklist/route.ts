@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   const inspecaoId = req.nextUrl.searchParams.get("inspecaoId");
-  if (!inspecaoId) return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
+  if (!inspecaoId) return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
 
   const { data, error } = await getSupabaseRouteClient()
     .from("gp_checklist_equipamentos").select("*").eq("inspecao_id", inspecaoId);
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   }
   const b = await req.json().catch(() => ({}));
   if (!b?.inspecaoId || (b.tipo !== "inspecao" && b.tipo !== "execucao")) {
-    return NextResponse.json({ erro: "Inspeção ou etapa inválida." }, { status: 400 });
+    return NextResponse.json({ erro: "OS ou etapa inválida." }, { status: 400 });
   }
   const { data, error } = await getSupabaseRouteClient()
     .from("gp_checklist_equipamentos")

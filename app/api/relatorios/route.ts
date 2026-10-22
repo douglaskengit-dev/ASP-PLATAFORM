@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   const nomeInformado = String(form.get("nomeArquivo") || "");
 
   if (!inspecaoId) {
-    return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
+    return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   }
   if (!arquivoPath && (!(f instanceof Blob) || !(f as File).name)) {
     return NextResponse.json({ erro: "Envie o relatório no campo 'arquivo'." }, { status: 400 });

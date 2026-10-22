@@ -29,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .eq("id", params.id)
     .single();
   if (erroBusca || !inspecao) {
-    return NextResponse.json({ erro: "Inspeção não encontrada." }, { status: 404 });
+    return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
   }
 
   const faseAtual: number = inspecao.fase;

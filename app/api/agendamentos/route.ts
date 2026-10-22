@@ -1,54 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
-import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { enviarEmail } from "@/lib/email";
-import { emailAgendamentoHtml } from "@/lib/email-templates";
-import { gerarIcsAgendamento } from "@/lib/ics";
-import { enviarPushParaUsuarios } from "@/lib/push/send";
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://asp-plataform.vercel.app";
+import {
+  contextoAgendamento, limparDados, marcarSubstituidos, notificarADefinir, notificarDesmarcacao, notificarEquipe,
+  PERFIS_AGENDA, resolverAvisoADefinir,
+} from "@/lib/asp/agendamento-api";
+import {
+  agendamentosSubstituidos, nomeDoCatalogo, primeiroErro, ROTULOS_AGENDAMENTO, temErros,
+  validarAgendamento,
+} from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-const PERFIS_AGENDA = ["admin", "comercial", "gerencia"];
-
-interface MembroEquipe { id: string; nome: string }
-interface NovoAgendamentoBody {
-  inspecaoId: string;
-  tipo?: "inspecao" | "execucao";
-  dataVisita?: string;
-  dataExecucao?: string;
-  hora?: string;
-  equipe?: MembroEquipe[];
-  equipamentos?: string[];
-  checklist?: { item: string; ok?: boolean }[];
-}
-
-function fmtData(iso?: string) {
-  if (!iso) return "";
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("pt-BR");
-}
-
-/** Lista agendamentos (para o calendário do Dashboard). Filtro opcional por
- * inspeção via ?inspecaoId=. */
+/** Lista agendamentos ATIVOS (não substituídos por uma remarcação) — para o
+ * calendário do Dashboard e o pré-preenchimento do RDO. Filtros opcionais:
+ * ?inspecaoId= (uma OS) e ?aDefinir=1 (pendentes "data a definir", para os
+ * avisos do Dashboard; OS ou projeto na lixeira ficam de fora). */
 export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
   const inspecaoId = req.nextUrl.searchParams.get("inspecaoId");
+  const aDefinir = req.nextUrl.searchParams.get("aDefinir") === "1";
   const supabase = getSupabaseRouteClient();
   let query = supabase
     .from("gp_agendamentos")
-    .select("id, tipo, data_visita, data_execucao, hora, equipe, equipamentos, checklist, criado_em, inspecao:gp_inspecoes(id, identificacao, projeto:gp_projetos(id, codigo_projeto, pedido_compra))")
+    .select("id, tipo, data_visita, data_execucao, hora, equipe, equipamentos, checklist, a_definir, lembrar_em, criado_em, inspecao:gp_inspecoes(id, identificacao, excluido_em, projeto:gp_projetos(id, codigo_projeto, pedido_compra, excluido_em, cliente:gp_orgaos(razao_social)))")
+    .is("substituido_em", null)
     .order("data_visita", { ascending: true });
   if (inspecaoId) query = query.eq("inspecao_id", inspecaoId);
+  if (aDefinir) query = query.eq("a_definir", true).order("lembrar_em", { ascending: true, nullsFirst: false });
   const { data, error } = await query;
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, agendamentos: data || [] });
+  const agendamentos = aDefinir
+    ? (data || []).filter((a: any) => a.inspecao && !a.inspecao.excluido_em && !a.inspecao.projeto?.excluido_em)
+    : data || [];
+  return NextResponse.json({ ok: true, agendamentos });
 }
 
-/** Cria um agendamento e notifica a equipe designada (in-app + e-mail). */
+/** Cria um agendamento. As regras de lib/validacao/agendamento.ts são
+ * repetidas aqui (a tela não é confiável). Remarcação SUBSTITUI: o
+ * agendamento ativo do mesmo tipo desta OS sai de cena (fica no histórico).
+ * Com data: notifica a equipe (in-app + push + e-mail com .ics), como
+ * remarcação se substituiu uma data. "Data a definir": aviso in-app para
+ * Comercial/Gerência/Admin (e o Dashboard lista o pendente). */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
@@ -58,93 +53,62 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: "Agendamento é responsabilidade do Comercial." }, { status: 403 });
   }
 
-  const body = (await req.json()) as NovoAgendamentoBody;
-  if (!body.inspecaoId) {
-    return NextResponse.json({ erro: "Inspeção obrigatória." }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  if (!body?.inspecaoId) {
+    return NextResponse.json({ erro: "OS obrigatória." }, { status: 400 });
   }
-  if (!body.dataVisita) {
-    return NextResponse.json({ erro: "Informe a data da visita." }, { status: 400 });
+  const dados = limparDados(body);
+
+  const { ctx, info } = await contextoAgendamento({ inspecaoId: body.inspecaoId, dataVisita: dados.dataVisita });
+  if (!info) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
+  dados.equipamentos = (dados.equipamentos || []).map((e) => nomeDoCatalogo(e, ctx.catalogo));
+  const resultado = validarAgendamento(dados, ctx);
+  if (temErros(resultado)) {
+    const conflito = (ctx.daOS || []).find((a) => a.tipo === dados.tipo && !!dados.dataVisita && a.data_visita === dados.dataVisita) || null;
+    return NextResponse.json(
+      { erro: primeiroErro(resultado, ROTULOS_AGENDAMENTO), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { status: conflito ? 409 : 400 }
+    );
   }
-  const tipo = body.tipo === "execucao" ? "execucao" : "inspecao";
-  const equipe = (body.equipe || []).filter((m) => m && m.id);
+  const substituidos = agendamentosSubstituidos(dados, ctx);
 
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
     .from("gp_agendamentos")
     .insert({
       inspecao_id: body.inspecaoId,
-      tipo,
-      data_visita: body.dataVisita,
-      data_execucao: body.dataExecucao || null,
-      hora: body.hora?.trim() || null,
-      equipe,
-      equipamentos: body.equipamentos ?? [],
-      checklist: body.checklist ?? [],
+      tipo: dados.tipo,
+      data_visita: dados.aDefinir ? null : dados.dataVisita,
+      a_definir: !!dados.aDefinir,
+      lembrar_em: dados.aDefinir ? dados.lembrarEm || null : null,
+      data_execucao: dados.dataExecucao || null,
+      hora: dados.aDefinir ? null : dados.hora || null,
+      equipe: dados.equipe,
+      equipamentos: dados.equipamentos,
+      checklist: dados.checklist,
       criado_por: profile.id,
     })
     .select("*")
     .single();
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
-  // Notifica os envolvidos (equipe designada) — in-app + e-mail (se configurado).
-  if (equipe.length > 0) {
-    const admin = getSupabaseAdmin();
-    const { data: insp } = await admin
-      .from("gp_inspecoes")
-      .select("identificacao, projeto:gp_projetos(codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(razao_social))")
-      .eq("id", body.inspecaoId)
-      .single();
-    const ident = insp?.identificacao || "Inspeção";
-    const projeto: any = insp?.projeto;
-    const projLabel = projeto?.codigo_projeto || projeto?.pedido_compra || "";
-    const endereco = projeto?.endereco || "";
-    const clienteNome = projeto?.cliente?.razao_social || "";
-    const tipoLabel = tipo === "execucao" ? "Execução" : "Inspeção";
-    const quando = `${fmtData(body.dataVisita)}${body.hora ? " às " + body.hora : ""}`;
-    const titulo = `${tipoLabel} agendada — ${ident}${projLabel ? ` (${projLabel})` : ""}`;
-    const mensagem = `${tipoLabel} de ${ident}${projLabel ? ` (${projLabel})` : ""} agendada para ${quando}.`;
-    const link = `/inspecoes/${body.inspecaoId}`;
+  const erroSub = await marcarSubstituidos(supabase, substituidos.map((a) => a.id), data.id);
+  if (erroSub) return NextResponse.json({ erro: `Agendamento criado, mas o anterior não foi substituído: ${erroSub}` }, { status: 500 });
 
-    await admin.from("gp_notificacoes").insert(
-      equipe.map((m) => ({
-        usuario_id: m.id, tipo: "agendamento", titulo, mensagem, link,
-        inspecao_id: body.inspecaoId, criado_por: profile.id,
-      }))
-    );
-
-    // Push (Web Push/VAPID) — best-effort; não bloqueia o agendamento se falhar.
-    try {
-      await enviarPushParaUsuarios(equipe.map((m) => m.id), { titulo, mensagem, link });
-    } catch (e) { /* ignora: push é complementar ao in-app/e-mail */ }
-
-    // Destinatários: equipe (para) + Gerência/Comercial em cópia.
-    const { data: eqPerfis } = await admin.from("gp_profiles").select("email").in("id", equipe.map((m) => m.id));
-    const paraEmails = (eqPerfis || []).map((p: any) => p.email).filter(Boolean);
-    const { data: gestores } = await admin.from("gp_profiles").select("email").in("perfil", ["gerencia", "comercial"]).eq("ativo", true);
-    const ccEmails = (gestores || []).map((p: any) => p.email).filter(Boolean);
-
-    const html = emailAgendamentoHtml({
-      tipoLabel, ident, cliente: clienteNome, projeto: projLabel, endereco, quando,
-      equipe: equipe.map((m) => m.nome),
-      equipamentos: body.equipamentos || [],
-      checklist: body.checklist || [],
-      link: `${APP_URL}${link}`,
-    });
-    const ics = gerarIcsAgendamento({
-      uid: `${data.id}@asp-plataforma`,
-      titulo, descricao: mensagem,
-      local: endereco || projLabel || undefined,
-      data: body.dataVisita, hora: body.hora,
-      organizador: process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
-      participantes: paraEmails,
-    });
-    const resultadoEmail = await enviarEmail(
-      paraEmails, titulo, html,
-      [{ filename: "inspecao.ics", content: ics, contentType: "text/calendar" }],
-      { cc: ccEmails }
-    );
-    return NextResponse.json({ ok: true, agendamento: data, email: { destinatarios: paraEmails.length, ...resultadoEmail } });
+  // A data anterior (a mais recente substituída) define o texto de remarcação.
+  const anterior = [...substituidos].filter((a) => a.data_visita).sort((a, b) => b.data_visita!.localeCompare(a.data_visita!))[0];
+  let email: Record<string, unknown> = { destinatarios: 0, ignorado: true, motivo: "data a definir" };
+  if (data.a_definir) {
+    await notificarADefinir({ ag: data, info, autorId: profile.id });
+    for (const a of substituidos) await notificarDesmarcacao({ anterior: a, info, autorId: profile.id });
+  } else {
+    if (substituidos.some((a) => a.a_definir)) await resolverAvisoADefinir(body.inspecaoId);
+    email = await notificarEquipe({ ag: data, info, autorId: profile.id, remarcadoDe: anterior?.data_visita });
   }
 
-  return NextResponse.json({ ok: true, agendamento: data, email: { destinatarios: 0, ignorado: true, motivo: "nenhum usuário na equipe" } });
+  return NextResponse.json({
+    ok: true, agendamento: data, avisos: resultado.avisos, email,
+    // Quem foi substituído, para a tela dizer "remarcado de … para …".
+    substituidos: substituidos.map((a) => ({ id: a.id, data_visita: a.data_visita })),
+  });
 }

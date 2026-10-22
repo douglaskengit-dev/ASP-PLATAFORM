@@ -83,7 +83,7 @@ export default function AvisoCliente({ clienteId, compacto = false }: {
             }}
           />
           <p className="detalhe" style={{ margin: "4px 0 8px" }}>
-            Este aviso vale para <strong>todos</strong> os projetos e inspeções deste cliente.
+            Este aviso vale para <strong>todos</strong> os projetos e Ordens de Serviço deste cliente.
           </p>
           {erro && <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erro}</p>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { PRIMEIRA_FASE_INSPECAO } from "@/lib/asp/fases";
-import { erroDoTanque, normalizarTanque } from "@/lib/asp/tanque";
+import { normalizarTanque } from "@/lib/asp/tanque";
+import { ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
+import { normalizarEspacos, primeiroErro, ROTULOS_OS, temErros } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -41,40 +43,51 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, inspecoes: data || [] });
 }
 
-/** Cria uma inspeção dentro de um projeto (ex.: "Tanque TQ-01").
- * Nasce na fase 2 (Agendamento). */
+/** Cria uma OS dentro de um projeto (ex.: "Tanque TQ-01"). Nasce na fase 2
+ * (Agendamento). As regras de lib/validacao/ordemServico.ts são repetidas
+ * aqui — a tela não é confiável: identificação única no projeto (409 com a
+ * OS que já a usa), procedimento do Catálogo e tanque completo. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
   if (!["admin", "comercial", "gerencia"].includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Sem permissão para criar inspeções." }, { status: 403 });
+    return NextResponse.json({ erro: "Sem permissão para criar Ordens de Serviço." }, { status: 403 });
   }
 
   const body = (await req.json()) as NovaInspecaoBody;
-  if (!body.projetoId || !body.identificacao?.trim()) {
-    return NextResponse.json({ erro: "Projeto e identificação são obrigatórios." }, { status: 400 });
+  if (!body.projetoId) {
+    return NextResponse.json({ erro: "Projeto obrigatório." }, { status: 400 });
   }
-  // Mesma regra do formulário: ela mora em lib/asp/tanque e vale dos dois lados.
-  const erroTanque = erroDoTanque(body.tanque);
-  if (erroTanque) return NextResponse.json({ erro: erroTanque }, { status: 400 });
+  const identificacao = normalizarEspacos(body.identificacao);
+  const dados = { identificacao, procedimento: body.procedimento?.trim() || "", tanque: body.tanque ?? null };
+  const { resultado, conflito } = await validarOSNoServidor(dados, { projetoId: body.projetoId });
+  if (temErros(resultado)) {
+    return NextResponse.json(
+      { erro: primeiroErro(resultado, ROTULOS_OS), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { status: conflito ? 409 : 400 }
+    );
+  }
 
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
     .from("gp_inspecoes")
     .insert({
       projeto_id: body.projetoId,
-      identificacao: body.identificacao.trim(),
+      identificacao,
       fase: PRIMEIRA_FASE_INSPECAO,
       ferramenta_coleta: body.ferramentaColeta?.trim() || "sedimento",
-      procedimento: body.procedimento?.trim() || null,
+      procedimento: dados.procedimento,
       tanque: normalizarTanque(body.tanque),
       criado_por: profile.id,
     })
     .select("*")
     .single();
 
+  if (ehViolacaoUnica(error)) {
+    return NextResponse.json({ erro: "Identificação: já usada por outra OS deste projeto." }, { status: 409 });
+  }
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, inspecao: data });
+  return NextResponse.json({ ok: true, inspecao: data, avisos: resultado.avisos });
 }

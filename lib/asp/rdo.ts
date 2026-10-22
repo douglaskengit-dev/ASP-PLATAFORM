@@ -300,7 +300,7 @@ export function validarRdo(d: DadosRdo, data: string, inspecoes: string[]): { er
   const erros: string[] = [];
   const avisos: string[] = [];
   if (!dataIsoValida(data)) erros.push("Informe a data do RDO.");
-  if (inspecoes.length === 0) erros.push("Marque ao menos uma inspeção coberta por este RDO.");
+  if (inspecoes.length === 0) erros.push("Marque ao menos uma OS coberta por este RDO.");
 
   const equipe = d.equipe.filter((m) => m.nome.trim() || m.funcao.trim());
   if (equipe.length === 0) erros.push("Informe a equipe do dia.");

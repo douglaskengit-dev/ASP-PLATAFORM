@@ -32,7 +32,7 @@ export default function PaginaInicial() {
         </div>
 
         <p className="landing-sub">
-          Sistema interno — gestão de projetos e inspeções.
+          Sistema interno — gestão de projetos e Ordens de Serviço.
 
         </p>
 
