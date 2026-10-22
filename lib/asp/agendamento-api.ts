@@ -5,14 +5,21 @@
  *  de serviço: conflito de equipe/equipamento olha TODAS as OSs.
  *
  *  Ativo = substituido_em is null. Remarcação nunca apaga: a linha antiga
- *  ganha substituido_em/substituido_por e só aparece no histórico. */
+ *  ganha substituido_em/substituido_por e só aparece no histórico.
+ *
+ *  Fase 6: a execução pode ter PERÍODO (data_visita = início, data_fim =
+ *  último dia). Conflito de equipe/equipamento olha qualquer dia em comum;
+ *  e-mail/.ics saem como evento de vários dias. Uma execução ativa por OS
+ *  (índice uq_gp_agendamentos_execucao_ativa): a anterior sai de cena ANTES
+ *  de a nova ser gravada (tirarDeCena → insert → ligarSubstituidos). */
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarEmail } from "@/lib/email";
 import { emailAgendamentoHtml } from "@/lib/email-templates";
 import { gerarIcsAgendamento } from "@/lib/ics";
 import { enviarPushParaUsuarios } from "@/lib/push/send";
 import {
-  AgendamentoRef, ContextoAgendamento, DadosAgendamento, hojeBrasil, MembroEquipe, nomeDoCatalogo, normalizarEspacos,
+  AgendamentoRef, ContextoAgendamento, DadosAgendamento, hojeBrasil, MembroEquipe, nomeDoCatalogo, nomesEquipamentosProcedimento,
+  normalizarEspacos, periodoDe, textoPeriodoLongo,
 } from "@/lib/validacao";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://asp-plataform.vercel.app";
@@ -23,7 +30,7 @@ export const PERFIS_AGENDA = ["admin", "comercial", "gerencia"];
 export const TIPO_AVISO_A_DEFINIR = "agendamento_a_definir";
 
 const CAMPOS_REF =
-  "id, inspecao_id, tipo, data_visita, a_definir, equipe, equipamentos, " +
+  "id, inspecao_id, tipo, data_visita, data_fim, data_execucao, a_definir, equipe, equipamentos, " +
   "inspecao:gp_inspecoes(identificacao, excluido_em, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, excluido_em))";
 
 /** Dados como vieram da tela → limpos: espaços colapsados, "data a definir"
@@ -33,10 +40,15 @@ export function limparDados(d: Partial<DadosAgendamento>, catalogo: string[] = [
   const aDefinir = !!d.aDefinir;
   const texto = (v: unknown) => normalizarEspacos(typeof v === "string" ? v : "");
   const lista = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+  const dataVisita = aDefinir ? null : texto(d.dataVisita) || null;
+  // Fim igual ao início = um dia só (null) — o mesmo período não fica com
+  // duas grafias.
+  const fim = aDefinir ? null : texto(d.dataFim) || null;
   return {
     tipo: d.tipo === "execucao" ? "execucao" : "inspecao",
     aDefinir,
-    dataVisita: aDefinir ? null : texto(d.dataVisita) || null,
+    dataVisita,
+    dataFim: fim && fim !== dataVisita ? fim : null,
     hora: aDefinir ? null : texto(d.hora) || null,
     dataExecucao: texto(d.dataExecucao) || null,
     lembrarEm: aDefinir ? texto(d.lembrarEm) || null : null,
@@ -55,12 +67,15 @@ export interface InfoOS {
   endereco: string;
   clienteNome: string;
   dataAbertura: string | null;
+  /** Código do procedimento da OS. */
+  procedimento: string | null;
 }
 
 function paraRef(a: any): AgendamentoRef {
   const p = a.inspecao?.projeto;
   return {
-    id: a.id, inspecao_id: a.inspecao_id, tipo: a.tipo, data_visita: a.data_visita, a_definir: !!a.a_definir,
+    id: a.id, inspecao_id: a.inspecao_id, tipo: a.tipo, data_visita: a.data_visita, data_fim: a.data_fim || null,
+    data_execucao: a.data_execucao || null, a_definir: !!a.a_definir,
     equipe: a.equipe || [], equipamentos: a.equipamentos || [],
     os: a.inspecao?.identificacao || null,
     projeto_id: p?.id || null, projeto: p?.codigo_projeto || p?.pedido_compra || null, endereco: p?.endereco || null,
@@ -75,7 +90,7 @@ function daLixeira(a: any): boolean {
 export async function infoDaOS(inspecaoId: string): Promise<InfoOS | null> {
   const { data } = await getSupabaseAdmin()
     .from("gp_inspecoes")
-    .select("id, identificacao, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, cliente:gp_orgaos(razao_social))")
+    .select("id, identificacao, procedimento, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, cliente:gp_orgaos(razao_social))")
     .eq("id", inspecaoId)
     .maybeSingle();
   if (!data) return null;
@@ -84,25 +99,45 @@ export async function infoDaOS(inspecaoId: string): Promise<InfoOS | null> {
     id: data.id, ident: data.identificacao || "OS",
     projetoId: p?.id || null, projLabel: p?.codigo_projeto || p?.pedido_compra || "",
     endereco: p?.endereco || "", clienteNome: p?.cliente?.razao_social || "", dataAbertura: p?.data_abertura || null,
+    procedimento: (data as any).procedimento || null,
   };
 }
 
-/** Contexto do banco para validar um agendamento desta OS na data dada. */
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Contexto do banco para validar um agendamento desta OS na data (ou no
+ *  período, para a execução) dada. */
 export async function contextoAgendamento(opts: {
   inspecaoId: string;
   dataVisita?: string | null;
-  original?: { id: string; data_visita: string | null } | null;
+  /** Execução de vários dias: último dia. */
+  dataFim?: string | null;
+  original?: { id: string; data_visita: string | null; data_fim?: string | null } | null;
 }): Promise<{ ctx: ContextoAgendamento; info: InfoOS | null }> {
   const admin = getSupabaseAdmin();
-  const [info, daOS, noDia, ativos, catalogo] = await Promise.all([
+  const inicio = opts.dataVisita && ISO.test(opts.dataVisita) ? opts.dataVisita : null;
+  const fim = inicio && opts.dataFim && ISO.test(opts.dataFim) && opts.dataFim > inicio ? opts.dataFim : inicio;
+  const [info, daOS, noDia, ativos, catalogo, relInsp] = await Promise.all([
     infoDaOS(opts.inspecaoId),
     admin.from("gp_agendamentos").select(CAMPOS_REF).eq("inspecao_id", opts.inspecaoId).is("substituido_em", null),
-    opts.dataVisita
-      ? admin.from("gp_agendamentos").select(CAMPOS_REF).eq("data_visita", opts.dataVisita).is("substituido_em", null).neq("inspecao_id", opts.inspecaoId)
+    // Outras OSs com algum dia em comum: começa até o fim E termina (data_fim,
+    // ou o próprio dia) a partir do início.
+    inicio && fim
+      ? admin.from("gp_agendamentos").select(CAMPOS_REF).is("substituido_em", null).neq("inspecao_id", opts.inspecaoId)
+        .lte("data_visita", fim).or(`data_fim.gte.${inicio},and(data_fim.is.null,data_visita.gte.${inicio})`)
       : Promise.resolve({ data: [] as any[] }),
-    admin.from("gp_profiles").select("id").eq("ativo", true),
-    admin.from("gp_equipamentos").select("nome"),
+    admin.from("gp_profiles").select("id, funcao").eq("ativo", true),
+    admin.from("gp_equipamentos").select("*"),
+    admin.from("gp_relatorios").select("versao, status").eq("inspecao_id", opts.inspecaoId).eq("tipo", "inspecao").is("excluido_em", null),
   ]);
+  const equipCatalogo = (catalogo.data || []) as any[];
+  let equipamentosProcedimento: string[] | undefined;
+  if (info?.procedimento) {
+    const { data: proc } = await admin.from("gp_procedimentos").select("equipamentos").eq("codigo", info.procedimento).limit(1).maybeSingle();
+    equipamentosProcedimento = nomesEquipamentosProcedimento((proc as any)?.equipamentos, equipCatalogo);
+  } else if (info) {
+    equipamentosProcedimento = [];
+  }
   const ctx: ContextoAgendamento = {
     hoje: hojeBrasil(),
     inspecaoId: opts.inspecaoId,
@@ -112,7 +147,11 @@ export async function contextoAgendamento(opts: {
     daOS: (daOS.data || []).map(paraRef),
     noDia: (noDia.data || []).filter((a: any) => !daLixeira(a)).map(paraRef),
     usuariosAtivos: (ativos.data || []).map((u: any) => u.id),
-    catalogo: (catalogo.data || []).map((e: any) => e.nome).filter(Boolean),
+    catalogo: equipCatalogo.map((e: any) => e.nome).filter(Boolean),
+    funcoes: Object.fromEntries((ativos.data || []).map((u: any) => [u.id, u.funcao || null])),
+    relatoriosInspecao: relInsp.error ? undefined : (relInsp.data || []).map((r: any) => ({ versao: r.versao, status: r.status })),
+    equipamentosProcedimento,
+    procedimento: info?.procedimento || null,
   };
   return { ctx, info };
 }
@@ -123,13 +162,19 @@ function fmtData(iso?: string | null) {
 
 const rotuloTipo = (tipo: string) => (tipo === "execucao" ? "Execução" : "Inspeção");
 
+/** "05/11/2026" ou "05/11 a 07/11/2026" (execução de vários dias). */
+export function quandoAgendamento(a: { data_visita: string | null; data_fim?: string | null } | null | undefined): string {
+  return textoPeriodoLongo(periodoDe(a)) || fmtData(a?.data_visita);
+}
+
 /** Visita com data: avisa a equipe (in-app + push + e-mail com .ics, Gerência/
- *  Comercial em cópia). `remarcadoDe` = data anterior → texto de remarcação. */
+ *  Comercial em cópia). `remarcadoDe` = agendamento anterior → texto de
+ *  remarcação (com o período, se era de vários dias). */
 export async function notificarEquipe(opts: {
   ag: any;
   info: InfoOS;
   autorId: string;
-  remarcadoDe?: string | null;
+  remarcadoDe?: { data_visita: string | null; data_fim?: string | null } | null;
 }): Promise<Record<string, unknown>> {
   const { ag, info } = opts;
   const equipe: MembroEquipe[] = (ag.equipe || []).filter((m: any) => m && m.id);
@@ -137,13 +182,14 @@ export async function notificarEquipe(opts: {
 
   const admin = getSupabaseAdmin();
   const tipoLabel = rotuloTipo(ag.tipo);
-  const quando = `${fmtData(ag.data_visita)}${ag.hora ? " às " + ag.hora : ""}`;
+  const quando = `${quandoAgendamento(ag)}${ag.hora ? " às " + ag.hora : ""}`;
+  const anterior = opts.remarcadoDe?.data_visita ? quandoAgendamento(opts.remarcadoDe) : null;
   const proj = info.projLabel ? ` (${info.projLabel})` : "";
-  const titulo = opts.remarcadoDe
+  const titulo = anterior
     ? `${tipoLabel} remarcada — ${info.ident}${proj}`
     : `${tipoLabel} agendada — ${info.ident}${proj}`;
-  const mensagem = opts.remarcadoDe
-    ? `${tipoLabel} da OS ${info.ident}${proj} remarcada de ${fmtData(opts.remarcadoDe)} para ${quando}.`
+  const mensagem = anterior
+    ? `${tipoLabel} da OS ${info.ident}${proj} remarcada de ${anterior} para ${quando}.`
     : `${tipoLabel} da OS ${info.ident}${proj} agendada para ${quando}.`;
   const link = `/inspecoes/${info.id}`;
 
@@ -171,13 +217,13 @@ export async function notificarEquipe(opts: {
     equipamentos: ag.equipamentos || [],
     checklist: ag.checklist || [],
     link: `${APP_URL}${link}`,
-    remarcadoDe: opts.remarcadoDe ? fmtData(opts.remarcadoDe) : undefined,
+    remarcadoDe: anterior || undefined,
   });
   const ics = gerarIcsAgendamento({
     uid: `${ag.id}@asp-plataforma`,
     titulo, descricao: mensagem,
     local: info.endereco || info.projLabel || undefined,
-    data: ag.data_visita, hora: ag.hora,
+    data: ag.data_visita, dataFim: ag.data_fim || null, hora: ag.hora,
     organizador: process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
     participantes: paraEmails,
   });
@@ -232,11 +278,40 @@ export async function resolverAvisoADefinir(inspecaoId: string): Promise<void> {
     .eq("inspecao_id", inspecaoId).eq("tipo", TIPO_AVISO_A_DEFINIR).eq("lida", false);
 }
 
-/** Tira de cena os agendamentos substituídos por `novoId` (remarcação). */
-export async function marcarSubstituidos(supabase: any, ids: string[], novoId: string): Promise<string | null> {
+/** Remarcação, passo 1: tira de cena os agendamentos que o novo vai
+ *  substituir ANTES de gravá-lo — com uma execução ativa por OS (índice
+ *  único), gravar primeiro seria barrado. Devolve os ids que ESTA chamada
+ *  tirou (um envio simultâneo pode ter tirado antes: aí o índice barra o
+ *  segundo insert, e só desfazemos o que nós mesmos tiramos). */
+export async function tirarDeCena(supabase: any, ids: string[]): Promise<{ ids: string[]; erro: string | null }> {
+  if (ids.length === 0) return { ids: [], erro: null };
+  const agora = new Date().toISOString();
+  const { data, error } = await supabase.from("gp_agendamentos")
+    .update({ substituido_em: agora, atualizado_em: agora })
+    .in("id", ids).is("substituido_em", null).select("id");
+  return { ids: (data || []).map((x: any) => x.id), erro: error ? error.message : null };
+}
+
+/** O novo não foi gravado: os que tiramos voltam a valer. */
+export async function voltarACena(supabase: any, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await supabase.from("gp_agendamentos")
+    .update({ substituido_em: null, atualizado_em: new Date().toISOString() })
+    .in("id", ids).is("substituido_por", null);
+}
+
+/** Remarcação, passo 3: liga os tirados de cena ao novo (histórico). */
+export async function ligarSubstituidos(supabase: any, ids: string[], novoId: string): Promise<string | null> {
   if (ids.length === 0) return null;
-  const { error } = await supabase.from("gp_agendamentos")
-    .update({ substituido_em: new Date().toISOString(), substituido_por: novoId, atualizado_em: new Date().toISOString() })
-    .in("id", ids).is("substituido_em", null);
+  const { error } = await supabase.from("gp_agendamentos").update({ substituido_por: novoId }).in("id", ids);
   return error ? error.message : null;
+}
+
+/** Erro do insert/update → resposta: o índice de uma execução ativa por OS
+ *  vira 409 com texto claro. */
+export function erroGravacao(error: { code?: string; message: string }): { erro: string; status: number } {
+  if (error.code === "23505" && /execucao_ativa/.test(error.message)) {
+    return { erro: "Já há outra execução ativa desta OS (gravada agora há pouco?). Recarregue a página e remarque a existente.", status: 409 };
+  }
+  return { erro: error.message, status: 500 };
 }

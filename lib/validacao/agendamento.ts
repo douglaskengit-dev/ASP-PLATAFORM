@@ -14,12 +14,30 @@
  *      do mesmo tipo será substituído (remarcação)
  *
  * "Local" = projeto; dois projetos com o mesmo endereço também contam como
- * o mesmo local (vários tanques no mesmo site não conflitam). */
+ * o mesmo local (vários tanques no mesmo site não conflitam).
+ *
+ * Fase 6 — execução com PERÍODO (data_visita = início, data_fim = último
+ * dia; null = um dia só):
+ *   ⛔ fim antes do início · período em agendamento de inspeção · outro
+ *      agendamento ATIVO do mesmo tipo desta OS com período sobreposto
+ *   ⚠️ período > 30 dias · dias de fim de semana/feriado (listados) ·
+ *      conflito de equipe/equipamento em qualquer dia do período ·
+ *      relatório de inspeção ainda não aprovado/assinado · início ≠
+ *      previsão de execução do agendamento de inspeção · equipamento do
+ *      procedimento fora da lista · equipe sem Coordenador/Engenheiro ·
+ *      checklist de segurança incompleto com a execução já começando */
 import { addAviso, addErro, novoResultado, ResultadoValidacao } from "./resultado";
 import { dataIsoValida } from "./formatos";
 import { duplicadosEmLista, nomesParecidos, normalizarTexto, semPontuacao } from "./texto";
 import { normalizarEndereco } from "./projeto";
 import { feriadoNacional, fimDeSemana } from "./feriados";
+import { diasNaoUteis, duracaoDias, intersecao, Periodo, periodoDe, periodosSobrepoem, textoPeriodo } from "./periodo";
+
+/** Itens de segurança que nascem no checklist do agendamento (COWORK-ASP §3.2). */
+export const CHECKLIST_PADRAO = ["NR-33 (espaço confinado)", "NR-10 (elétrica)", "EPIs", "Permissão de Trabalho (PT)"];
+
+/** Execução com mais dias que isto pede confirmação (⚠️). */
+export const PERIODO_MAX_DIAS = 30;
 
 export type TipoAgendamento = "inspecao" | "execucao";
 
@@ -33,6 +51,8 @@ export interface DadosAgendamento {
   /** "Data a definir": agendamento pendente, sem data da visita. */
   aDefinir?: boolean;
   dataVisita?: string | null;
+  /** Só execução: último dia do período (vazio = um dia só). */
+  dataFim?: string | null;
   hora?: string | null;
   dataExecucao?: string | null;
   /** Só com "data a definir": quando o aviso deve voltar a chamar atenção. */
@@ -54,6 +74,10 @@ export interface AgendamentoRef {
   inspecao_id: string;
   tipo: string;
   data_visita: string | null;
+  /** Execução de vários dias: último dia (null = um dia). */
+  data_fim?: string | null;
+  /** Agendamento de inspeção: execução prevista (Fase 6 compara com o início). */
+  data_execucao?: string | null;
   a_definir?: boolean;
   equipe: MembroEquipe[];
   equipamentos: string[];
@@ -73,19 +97,29 @@ export interface ContextoAgendamento {
   dataAbertura?: string | null;
   local?: LocalOS;
   /** Edição: o agendamento como está gravado. */
-  original?: { id: string; data_visita: string | null } | null;
+  original?: { id: string; data_visita: string | null; data_fim?: string | null } | null;
   /** Agendamentos ativos DESTA OS (todas as datas). */
   daOS?: AgendamentoRef[];
-  /** Agendamentos ativos de outras OSs na data da visita. */
+  /** Agendamentos ativos de outras OSs que tocam algum dia da visita/período. */
   noDia?: AgendamentoRef[];
   /** Ids dos usuários ativos. undefined = não checado. */
   usuariosAtivos?: string[];
   /** Nomes de equipamento do Catálogo. */
   catalogo?: string[];
+  // ── Fase 6 (execução) — undefined = não checado (não avisa sem saber) ──
+  /** Relatórios de inspeção (não excluídos) desta OS. */
+  relatoriosInspecao?: { versao: number; status: string }[];
+  /** Funções do cadastro (gp_profiles.funcao) por id de usuário. */
+  funcoes?: Record<string, string | null>;
+  /** Equipamentos previstos no procedimento da OS (nomes do Catálogo). */
+  equipamentosProcedimento?: string[];
+  /** Código do procedimento da OS (só para a mensagem). */
+  procedimento?: string | null;
 }
 
 export const ROTULOS_AGENDAMENTO: Record<string, string> = {
   dataVisita: "Data da visita",
+  dataFim: "Fim da execução",
   hora: "Hora",
   dataExecucao: "Execução prevista",
   lembrarEm: "Lembrar em",
@@ -97,6 +131,76 @@ export const ROTULOS_AGENDAMENTO: Record<string, string> = {
 /** "2026-11-05" → "05/11". */
 export function dataCurta(iso: string | null | undefined): string {
   return iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "";
+}
+
+/** "Remarcação" e conflitos falam do período: "05/11" ou "05/11 a 07/11". */
+function periodoTexto(p: Periodo | null): string {
+  return p ? textoPeriodo(p) : "data a definir";
+}
+
+/** Coordenador ou Engenheiro (gp_profiles.funcao), em qualquer grafia. */
+export function funcaoLideranca(funcao: string | null | undefined): boolean {
+  return /^\s*(coord|eng)/i.test(funcao || "");
+}
+
+/** Nomes do Catálogo dos equipamentos previstos no procedimento (slugs, como
+ *  o checklist de equipamentos lê de gp_procedimentos.equipamentos). */
+export function nomesEquipamentosProcedimento(
+  slugs: string[] | null | undefined,
+  catalogo: { slug?: string | null; id?: string | null; nome?: string | null }[] = []
+): string[] {
+  return (slugs || []).flatMap((s) => {
+    const e = catalogo.find((x) => (x.slug || x.id) === s);
+    return e?.nome ? [e.nome] : [];
+  });
+}
+
+/** Equipamentos do procedimento (nomes) que faltam na lista do agendamento. */
+export function equipamentosFaltando(previstos: string[] = [], lista: string[] = []): string[] {
+  const tem = new Set(lista.map(normalizarEquipamento));
+  const vistos = new Set<string>();
+  return previstos.filter((p) => {
+    const n = normalizarEquipamento(p);
+    if (!n || tem.has(n) || vistos.has(n)) return false;
+    vistos.add(n);
+    return true;
+  });
+}
+
+/** Itens de segurança (CHECKLIST_PADRAO) presentes no checklist e não marcados. */
+export function segurancaPendente(checklist: { item: string; ok?: boolean }[] = []): string[] {
+  const padrao = new Set(CHECKLIST_PADRAO.map(normalizarEquipamento));
+  return checklist.filter((c) => padrao.has(normalizarEquipamento(c.item)) && !c.ok).map((c) => c.item);
+}
+
+/** Relatório de inspeção existe mas nenhum aprovado/assinado: o atual
+ *  (versão mais alta), para a mensagem; null = nada a avisar. */
+export function relatorioInspecaoPendente(rels: { versao: number; status: string }[] | undefined): { versao: number; status: string } | null {
+  if (!rels || rels.length === 0) return null;
+  if (rels.some((r) => r.status === "aprovado" || r.status === "assinado")) return null;
+  return [...rels].sort((a, b) => b.versao - a.versao)[0];
+}
+
+const STATUS_REL: Record<string, string> = {
+  rascunho: "rascunho", em_aprovacao: "em aprovação", ajustar: "reprovado — “Ajustar”", substituido: "substituído",
+};
+
+/** Previsão de execução: data_execucao do agendamento de INSPEÇÃO ativo. */
+export function execucaoPrevista(daOS: AgendamentoRef[] | undefined): string | null {
+  const v = (daOS || []).find((a) => a.tipo === "inspecao" && a.data_execucao)?.data_execucao;
+  return v && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+}
+
+/** Mudou o início ou o fim do período — é remarcação. */
+export function periodoMudou(
+  antes: { data_visita: string | null; data_fim?: string | null } | null | undefined,
+  depois: { data_visita: string | null; data_fim?: string | null }
+): boolean {
+  if (!antes?.data_visita) return false;
+  const a = periodoDe(antes);
+  const b = periodoDe(depois);
+  if (!b) return true;
+  return !a || a.inicio !== b.inicio || a.fim !== b.fim;
 }
 
 /** Equipamento para comparação: sem acento, caixa e pontuação. */
@@ -149,9 +253,13 @@ export function agendamentosSubstituidos(d: Pick<DadosAgendamento, "tipo" | "dat
 export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento): ResultadoValidacao {
   const r = novoResultado();
   const aDefinir = !!d.aDefinir;
+  const execucao = d.tipo === "execucao";
   const data = aDefinir ? "" : (d.dataVisita || "").trim();
   const dataOriginal = ctx.original?.data_visita || "";
   const dataMudou = !ctx.original || data !== dataOriginal;
+  const fimDigitado = aDefinir ? "" : (d.dataFim || "").trim();
+  /** Período válido do que está sendo agendado (null sem data ou data inválida). */
+  let periodo: Periodo | null = data && dataIsoValida(data) ? { inicio: data, fim: data } : null;
 
   // Data da visita
   if (!aDefinir) {
@@ -164,16 +272,42 @@ export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento
       if (dataMudou && ctx.dataAbertura && data < ctx.dataAbertura) {
         addErro(r, "dataVisita", `A visita não pode ser antes da abertura do projeto (${dataCurta(ctx.dataAbertura)}/${ctx.dataAbertura.slice(0, 4)}).`);
       }
-      const fds = fimDeSemana(data);
-      if (fds) addAviso(r, "dataVisita", `A visita cai num ${fds}.`);
-      const feriado = feriadoNacional(data);
-      if (feriado) addAviso(r, "dataVisita", `${dataCurta(data)} é feriado nacional (${feriado}).`);
       const igual = (ctx.daOS || []).find((a) => a.id !== ctx.original?.id && a.tipo === d.tipo && a.data_visita === data);
       if (igual) {
         addErro(r, "dataVisita", `Já há agendamento de ${d.tipo === "execucao" ? "execução" : "inspeção"} desta OS em ${dataCurta(data)}. Edite o existente.`);
       }
     }
     if (data && !(d.hora || "").trim()) addAviso(r, "hora", "Hora em branco — a equipe não saberá o horário.");
+  }
+
+  // Fim da execução (período)
+  if (fimDigitado) {
+    if (!execucao) addErro(r, "dataFim", "Só a execução tem período — a inspeção é de um dia. Deixe o fim em branco.");
+    else if (!dataIsoValida(fimDigitado)) addErro(r, "dataFim", "Data inválida.");
+    else if (data && dataIsoValida(data) && fimDigitado < data) {
+      addErro(r, "dataFim", "O fim da execução não pode ser antes do início.");
+    } else if (periodo) {
+      periodo = { inicio: data, fim: fimDigitado };
+      const dias = duracaoDias(periodo);
+      if (dias > PERIODO_MAX_DIAS) {
+        addAviso(r, "dataFim", `Execução de ${dias} dias (mais de ${PERIODO_MAX_DIAS}) — confira o fim; se for isso mesmo, pode seguir.`);
+      }
+    }
+  }
+
+  // Fim de semana / feriado: o dia da visita ou cada dia do período
+  if (periodo) {
+    if (periodo.inicio === periodo.fim) {
+      const fds = fimDeSemana(data);
+      if (fds) addAviso(r, "dataVisita", `A visita cai num ${fds}.`);
+      const feriado = feriadoNacional(data);
+      if (feriado) addAviso(r, "dataVisita", `${dataCurta(data)} é feriado nacional (${feriado}).`);
+    } else {
+      const nu = diasNaoUteis(periodo);
+      if (nu.length) {
+        addAviso(r, "dataFim", `O período inclui ${nu.length} dia(s) sem expediente: ${nu.map((x) => `${dataCurta(x.dia)} (${x.motivo})`).join(", ")}.`);
+      }
+    }
   }
 
   // "Lembrar em" (só com data a definir)
@@ -193,18 +327,39 @@ export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento
   }
 
   // Remarcação: o agendamento atual do mesmo tipo sai de cena
-  if (ctx.original && dataOriginal && dataMudou) {
-    addAviso(r, "dataVisita", `Remarcação: ${dataCurta(dataOriginal)} → ${data ? dataCurta(data) : "data a definir"}. A data anterior fica no histórico.`);
+  const novoPeriodo = { data_visita: periodo ? periodo.inicio : null, data_fim: periodo ? periodo.fim : null };
+  if (ctx.original && dataOriginal && periodoMudou(ctx.original, novoPeriodo)) {
+    addAviso(r, "dataVisita", `Remarcação: ${periodoTexto(periodoDe(ctx.original))} → ${periodoTexto(periodo)}. A data anterior fica no histórico.`);
   }
-  agendamentosSubstituidos(d, ctx).forEach((a) =>
+  const substituidos = agendamentosSubstituidos(d, ctx);
+  substituidos.forEach((a) =>
     addAviso(r, "dataVisita", a.data_visita
-      ? `O agendamento de ${dataCurta(a.data_visita)} será substituído (fica no histórico como remarcado).`
+      ? `O agendamento de ${periodoTexto(periodoDe(a))} será substituído (fica no histórico como remarcado).`
       : "O agendamento com data a definir será substituído por este.")
   );
 
-  const outrosLocais = (ctx.noDia || []).filter((a) =>
-    !aDefinir && !!data && a.data_visita === data && a.inspecao_id !== ctx.inspecaoId && !mesmoLocal(ctx.local, localDe(a))
-  );
+  // ⛔ Dois agendamentos ATIVOS do mesmo tipo nesta OS com dias em comum. A
+  // remarcação substitui o anterior; isto pega o que sobraria ativo (dado
+  // antigo, edição de um enquanto outro segue ativo). O mesmo início já é
+  // barrado acima ("Edite o existente").
+  if (periodo) {
+    (ctx.daOS || []).forEach((a) => {
+      if (a.id === ctx.original?.id || a.tipo !== d.tipo || a.data_visita === data || substituidos.some((s) => s.id === a.id)) return;
+      const p = periodoDe(a);
+      if (p && periodosSobrepoem(p, periodo!)) {
+        addErro(r, execucao ? "dataFim" : "dataVisita",
+          `Já há ${execucao ? "execução" : "inspeção"} ativa desta OS em ${textoPeriodo(p)} — os períodos se cruzam. Edite ou remarque a existente.`);
+      }
+    });
+  }
+
+  // Conflito com OUTRO local em qualquer dia em comum
+  const outrosLocais = (ctx.noDia || []).flatMap((a) => {
+    if (aDefinir || !periodo || a.inspecao_id === ctx.inspecaoId || mesmoLocal(ctx.local, localDe(a))) return [];
+    const p = periodoDe(a);
+    const comum = p ? intersecao(p, periodo) : null;
+    return comum ? [{ a, quando: textoPeriodo(comum) }] : [];
+  });
 
   // Equipe
   const equipe = (d.equipe || []).filter((m) => m && m.id);
@@ -215,10 +370,13 @@ export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento
     );
   }
   equipe.forEach((m) => {
-    outrosLocais.filter((a) => (a.equipe || []).some((x) => x.id === m.id)).forEach((a) =>
-      addAviso(r, "equipe", `${m.nome} já está agendado(a) em ${dataCurta(data)} na ${descreverOndeAgendado(a)}.`)
+    outrosLocais.filter(({ a }) => (a.equipe || []).some((x) => x.id === m.id)).forEach(({ a, quando }) =>
+      addAviso(r, "equipe", `${m.nome} já está agendado(a) em ${quando} na ${descreverOndeAgendado(a)}.`)
     );
   });
+  if (execucao && ctx.funcoes && equipe.length > 0 && !equipe.some((m) => funcaoLideranca(ctx.funcoes![m.id]))) {
+    addAviso(r, "equipe", "Nenhum Coordenador ou Engenheiro na equipe da execução — confira quem responde pelo serviço em campo.");
+  }
 
   // Equipamentos
   const equipamentos = (d.equipamentos || []).map((e) => (e || "").trim()).filter(Boolean);
@@ -229,16 +387,40 @@ export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento
     const s = sugestaoCatalogo(e, ctx.catalogo);
     if (s) addAviso(r, "equipamentos", `“${e}” não está no Catálogo — seria “${s}”?`);
     const n = normalizarEquipamento(e);
-    outrosLocais.filter((a) => (a.equipamentos || []).some((x) => normalizarEquipamento(x) === n)).forEach((a) =>
-      addAviso(r, "equipamentos", `“${e}” já está agendado em ${dataCurta(data)} na ${descreverOndeAgendado(a)} — é uma unidade só?`)
+    outrosLocais.filter(({ a }) => (a.equipamentos || []).some((x) => normalizarEquipamento(x) === n)).forEach(({ a, quando }) =>
+      addAviso(r, "equipamentos", `“${e}” já está agendado em ${quando} na ${descreverOndeAgendado(a)} — é uma unidade só?`)
     );
   });
+  if (execucao) {
+    const faltam = equipamentosFaltando(ctx.equipamentosProcedimento, equipamentos);
+    if (faltam.length) {
+      addAviso(r, "equipamentos", `Previsto(s) no procedimento${ctx.procedimento ? ` ${ctx.procedimento}` : ""} e fora desta lista: ${faltam.join(", ")}.`);
+    }
+  }
 
   // Checklist
   const itens = (d.checklist || []).map((c) => (c?.item || "").trim());
   duplicadosEmLista(itens, normalizarEquipamento).forEach(({ indice }) =>
     addErro(r, "checklist", `Item “${itens[indice]}” repetido no checklist.`)
   );
+  if (execucao && periodo && periodo.inicio <= ctx.hoje) {
+    const pend = segurancaPendente(d.checklist);
+    if (pend.length) {
+      addAviso(r, "checklist", `A execução ${periodo.inicio < ctx.hoje ? "já começou" : "começa hoje"} e há item(ns) de segurança sem marcar: ${pend.join(", ")}.`);
+    }
+  }
+
+  // Execução: relatório de inspeção e previsão
+  if (execucao) {
+    const rel = relatorioInspecaoPendente(ctx.relatoriosInspecao);
+    if (rel) {
+      addAviso(r, "dataVisita", `O Relatório de Inspeção desta OS ainda não foi aprovado (v${rel.versao} — ${STATUS_REL[rel.status] || rel.status}). Confira antes de mobilizar a equipe.`);
+    }
+    const previsao = execucaoPrevista(ctx.daOS);
+    if (previsao && periodo && periodo.inicio !== previsao) {
+      addAviso(r, "dataVisita", `O início (${dataCurta(periodo.inicio)}) difere da execução prevista no agendamento da inspeção (${dataCurta(previsao)}).`);
+    }
+  }
 
   return r;
 }

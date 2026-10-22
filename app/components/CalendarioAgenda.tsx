@@ -1,19 +1,28 @@
 "use client";
 
 /** Calendário mensal do Dashboard com as datas de inspeção e execução
- * (gp_agendamentos). Cada marcador leva à inspeção correspondente. */
+ * (gp_agendamentos). Cada marcador leva à inspeção correspondente.
+ * Execução de vários dias (Fase 6) aparece em CADA dia do período, com
+ * "dia N/total" no marcador. */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { diasDoPeriodo, periodoDe } from "@/lib/validacao/periodo";
 
 interface Agendamento {
   id: string;
   tipo: string;
   data_visita: string | null;
+  /** Execução de vários dias: último dia. */
+  data_fim?: string | null;
   data_execucao: string | null;
   hora: string | null;
   inspecao: { id: string; identificacao: string; projeto: { codigo_projeto: string | null; pedido_compra: string | null } | null } | null;
 }
-interface Evento { id: string; date: string; kind: "inspecao" | "execucao"; hora: string | null; inspecao: Agendamento["inspecao"] }
+interface Evento {
+  id: string; date: string; kind: "inspecao" | "execucao"; hora: string | null; inspecao: Agendamento["inspecao"];
+  /** Execução de vários dias: "2/5". */
+  diaDe?: string;
+}
 
 const DIAS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -34,7 +43,14 @@ export default function CalendarioAgenda() {
     const m = new Map<string, Evento[]>();
     const add = (e: Evento) => { const k = e.date.slice(0, 10); m.set(k, [...(m.get(k) || []), e]); };
     ags.forEach((a) => {
-      if (a.data_visita) add({ id: a.id + "-v", date: a.data_visita, kind: a.tipo === "execucao" ? "execucao" : "inspecao", hora: a.hora, inspecao: a.inspecao });
+      const p = periodoDe(a);
+      if (p) {
+        const dias = diasDoPeriodo(p, 120);
+        dias.forEach((dia, i) => add({
+          id: `${a.id}-v${i}`, date: dia, kind: a.tipo === "execucao" ? "execucao" : "inspecao", hora: a.hora, inspecao: a.inspecao,
+          diaDe: dias.length > 1 ? `${i + 1}/${dias.length}` : undefined,
+        }));
+      }
       if (a.data_execucao) add({ id: a.id + "-e", date: a.data_execucao, kind: "execucao", hora: null, inspecao: a.inspecao });
     });
     return m;
@@ -90,10 +106,10 @@ export default function CalendarioAgenda() {
               <div style={{ fontSize: 11, fontWeight: ehHoje ? 800 : 600, color: ehHoje ? "var(--primaria)" : "var(--texto-suave)" }}>{d}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
                 {doDia.slice(0, 3).map((a) => (
-                  <Link key={a.id} href={a.inspecao ? `/inspecoes/${a.inspecao.id}` : "#"} title={`${a.kind === "execucao" ? "Execução" : "Inspeção"} · ${a.inspecao?.identificacao || ""}${a.hora ? " às " + a.hora : ""}`}
+                  <Link key={a.id} href={a.inspecao ? `/inspecoes/${a.inspecao.id}` : "#"} title={`${a.kind === "execucao" ? "Execução" : "Inspeção"} · ${a.inspecao?.identificacao || ""}${a.diaDe ? ` (dia ${a.diaDe})` : ""}${a.hora ? " às " + a.hora : ""}`}
                     style={{ fontSize: 10, textDecoration: "none", color: "#fff", borderRadius: 4, padding: "1px 4px",
                       background: a.kind === "execucao" ? "#0f766e" : "var(--primaria)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                    {a.hora ? `${a.hora} ` : ""}{a.inspecao?.identificacao || "OS"}
+                    {a.hora ? `${a.hora} ` : ""}{a.inspecao?.identificacao || "OS"}{a.diaDe ? ` ${a.diaDe}` : ""}
                   </Link>
                 ))}
                 {doDia.length > 3 && <span className="detalhe" style={{ margin: 0, fontSize: 10 }}>+{doDia.length - 3}</span>}
