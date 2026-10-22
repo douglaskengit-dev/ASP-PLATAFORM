@@ -801,6 +801,36 @@ end $$;
 create index if not exists idx_gp_agendamentos_periodo_ativos
   on public.gp_agendamentos (data_visita, data_fim) where substituido_em is null;
 
+-- ============================================================================
+-- ASP — Fase 7: unidade e limite de aviso do cloro livre por procedimento.
+--
+-- 1) gp_procedimentos.cloro_unidade ('mg/L' | 'PPM', padrão 'mg/L'): a
+--    unidade escolhida aparece em todo lugar onde o valor do cloro é
+--    mostrado ou escrito — card da coleta de fotos, frase do RDO (CVS 6) e
+--    legendas/valores do Relatório de Execução.
+-- 2) gp_procedimentos.cloro_limite_aviso (numeric > 0, padrão 5): acima dele
+--    a coleta de fotos AVISA (não bloqueia) — valor alto demais costuma ser
+--    erro de digitação.
+-- Idempotente; nenhum dado existente é alterado (as linhas antigas recebem
+-- os padrões). Hash e data de captura das fotos (gp_fotos_execucao.itens) e
+-- os campos novos do RDO (gp_rdos.dados) vivem no jsonb — sem coluna nova.
+-- ============================================================================
+
+alter table public.gp_procedimentos add column if not exists cloro_unidade text not null default 'mg/L';
+alter table public.gp_procedimentos add column if not exists cloro_limite_aviso numeric not null default 5;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_procedimentos_cloro_unidade') then
+    alter table public.gp_procedimentos add constraint ck_gp_procedimentos_cloro_unidade
+      check (cloro_unidade in ('mg/L', 'PPM'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'ck_gp_procedimentos_cloro_limite_aviso') then
+    alter table public.gp_procedimentos add constraint ck_gp_procedimentos_cloro_limite_aviso
+      check (cloro_limite_aviso > 0);
+  end if;
+end $$;
+
 
 -- PostgREST: recarrega o cache do schema (evita "Could not find the column").
 notify pgrst, 'reload schema';
@@ -835,7 +865,8 @@ with esperado(tabela, coluna) as (values
   ('gp_fase_historico','motivo_categoria'), ('gp_fase_historico','relatorio_id'), ('gp_fase_historico','chave_idempotencia'),
   ('gp_inspecoes','cadastro_atualizado_em'),
   ('gp_relatorio_visualizacoes','relatorio_id'), ('gp_relatorio_visualizacoes','usuario_id'), ('gp_relatorio_visualizacoes','em'),
-  ('gp_agendamentos','data_fim')
+  ('gp_agendamentos','data_fim'),
+  ('gp_procedimentos','cloro_unidade'), ('gp_procedimentos','cloro_limite_aviso')
 )
 select * from (
   select e.tabela, e.coluna,
@@ -938,5 +969,14 @@ select * from (
   select 'gp_agendamentos', 'índice uma execução ativa por OS',
     case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_agendamentos_execucao_ativa')
       then 'OK' else 'PENDENTE — OS com mais de uma execução ativa' end
+  union all
+  -- Fase 7: unidade e limite de aviso do cloro por procedimento.
+  select 'gp_procedimentos', 'check unidade do cloro (mg/L | PPM)',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_procedimentos_cloro_unidade')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_procedimentos', 'check limite de aviso do cloro > 0',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_procedimentos_cloro_limite_aviso')
+      then 'OK' else '*** FALTANDO ***' end
 ) r
 order by status desc, tabela, coluna;

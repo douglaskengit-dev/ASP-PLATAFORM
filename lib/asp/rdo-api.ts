@@ -1,6 +1,8 @@
 /** Regras de servidor do RDO, comuns às rotas /api/rdos (não são rotas:
  *  o Next só aceita GET/POST/… exportados de um route.ts). */
 import type { getSupabaseRouteClient } from "@/lib/supabase/route";
+import { hojeBrasil } from "@/lib/validacao/formatos";
+import { normalizarDadosRdo, validarRdo } from "./rdo";
 
 export const PERFIS_RDO = ["admin", "operacoes", "gerencia"];
 export const CAMPOS_RDO = "id, projeto_id, data, numero, inspecoes, dados, arquivo_path, arquivo_em, criado_em, atualizado_em, autor:gp_profiles!criado_por(nome_completo)";
@@ -32,6 +34,16 @@ export function erroDeDuplicidade(error: { code?: string; message?: string } | n
   return !!error && error.code === "23505" && (error.message || "").includes("uq_gp_rdos_projeto_data");
 }
 export const MSG_DIA_DUPLICADO = "Já existe RDO para este dia neste projeto.";
+
+/** Fase 7: as regras que IMPEDEM salvar (pessoa repetida, atividade
+ *  repetida, ordem impossível, assinante do cliente na equipe ASP, data no
+ *  futuro, pH/cloro fora da faixa) — as mesmas do formulário (validarRdo).
+ *  O que só falta preencher continua permitido (rascunho); avisos não
+ *  passam por aqui. Devolve a 1ª mensagem e a lista, ou null. */
+export function bloqueiosDoRdo(dados: unknown, data: string, inspecoes: string[]): { erro: string; bloqueios: string[] } | null {
+  const v = validarRdo(normalizarDadosRdo(dados as any), data, inspecoes, { hoje: hojeBrasil() });
+  return v.bloqueios.length ? { erro: v.bloqueios[0], bloqueios: v.bloqueios } : null;
+}
 
 /** dados: objeto jsonb de tamanho razoável (o formulário cabe com folga). */
 export function erroDosDados(dados: unknown): string | null {

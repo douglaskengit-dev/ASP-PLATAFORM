@@ -1,10 +1,12 @@
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { uploadArquivo, baixarArquivo, removerArquivos } from "@/lib/processos/arquivos";
 import {
-  slotPorId, registroVazio,
+  slotPorId, registroVazio, fotoRepetida,
   type FotoColetada, type ItemColetado, type RegistroFotosExecucao,
 } from "@/lib/asp/fotos-execucao";
+import { erroValorColeta, formatoImagem, FOTO_MAX_BYTES } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -110,8 +112,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ ok: true, podeEditar: PERFIS.includes(profile.perfil), registro });
 }
 
-/** Envia uma foto (multipart: arquivo + slot). Vaga simples é substituída
- *  (o arquivo anterior sai do storage); vaga de várias fotos acumula. */
+const HASH = /^[0-9a-f]{64}$/;
+const CAPTURA = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+const msgRepetida = (onde: string) => `Esta foto já está na coleta (${onde}). Use outra foto.`;
+
+/** Envia uma foto (multipart: arquivo + slot + hash + capturada_em?). Vaga
+ *  simples é substituída (o arquivo anterior sai do storage); vaga de várias
+ *  fotos acumula. Fase 7: só JPEG/PNG de verdade (pelos bytes), até 10 MB, e
+ *  a mesma foto (hash do original, calculado no aparelho antes da
+ *  compressão) não entra duas vezes. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
@@ -127,22 +136,42 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ erro: "Envie a imagem no campo 'arquivo'." }, { status: 400 });
   }
   const arquivo = f as File;
-  const ext = (arquivo.name.split(".").pop() || "jpg").toLowerCase();
-  if (!["png", "jpg", "jpeg", "webp"].includes(ext)) {
-    return NextResponse.json({ erro: "Use foto em PNG, JPG ou WEBP." }, { status: 400 });
+  if (arquivo.size > FOTO_MAX_BYTES) {
+    return NextResponse.json({ erro: "Foto com mais de 10 MB. Reduza a resolução e envie de novo." }, { status: 400 });
   }
+  const bytes = new Uint8Array(await arquivo.arrayBuffer());
+  const fmt = formatoImagem(bytes);
+  if (fmt !== "jpeg" && fmt !== "png") {
+    return NextResponse.json({ erro: "O arquivo não é uma foto JPEG ou PNG válida." }, { status: 400 });
+  }
+  const ext = fmt === "png" ? "png" : "jpg";
+  const hashInformado = String(form.get("hash") || "").toLowerCase();
+  // Fila offline antiga (sem hash do original): vale o hash do que chegou.
+  const hash = HASH.test(hashInformado) ? hashInformado : createHash("sha256").update(bytes).digest("hex");
+  const capturaInformada = String(form.get("capturada_em") || "");
+  const capturada_em = CAPTURA.test(capturaInformada) ? capturaInformada : null;
+
+  const supabase = getSupabaseRouteClient();
+  // Repetida? Responde antes de gastar o upload (a checagem se repete
+  // dentro da gravação, contra envios simultâneos).
+  const { data: existente } = await supabase.from(TABELA).select("itens").eq("inspecao_id", params.id).maybeSingle();
+  const ja = fotoRepetida(existente as RegistroFotosExecucao | null, hash, slotId);
+  if (ja) return NextResponse.json({ erro: msgRepetida(ja), repetida: true, slot: slotId }, { status: 409 });
 
   const caminho = `${prefixo(params.id)}${slotId}/${Date.now()}.${ext}`;
   try {
-    await uploadArquivo(caminho, Buffer.from(await arquivo.arrayBuffer()), arquivo.type || `image/${ext}`);
+    await uploadArquivo(caminho, Buffer.from(bytes), fmt === "png" ? "image/png" : "image/jpeg");
   } catch (e) {
     return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar a foto." }, { status: 500 });
   }
 
-  const foto: FotoColetada = { caminho, por: profile.nome_completo || profile.email || null, em: new Date().toISOString() };
-  const troca = { anterior: null as string | null };
-  const supabase = getSupabaseRouteClient();
+  const foto: FotoColetada = {
+    caminho, por: profile.nome_completo || profile.email || null, em: new Date().toISOString(), hash, capturada_em,
+  };
+  const troca = { anterior: null as string | null, repetida: false };
   const r = await alterar(supabase, params.id, profile.id, (atual) => {
+    const onde = fotoRepetida(atual, hash, slotId);
+    if (onde) { troca.repetida = true; return msgRepetida(onde); }
     const itens = { ...(atual.itens || {}) };
     if (def.slot.minimo) {
       const lista = Array.isArray(itens[slotId]) ? (itens[slotId] as FotoColetada[]) : [];
@@ -156,7 +185,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
   if (typeof r === "string") {
     await removerArquivos([caminho]);           // não deixa órfão no storage
-    return resposta(r);
+    return resposta(r, troca.repetida ? 409 : 500);
   }
   if (troca.anterior && troca.anterior !== caminho) await removerArquivos([troca.anterior]);
   return resposta(r);
@@ -183,6 +212,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (v !== null && (typeof v !== "number" || !isFinite(v))) {
       return NextResponse.json({ erro: "Valor inválido." }, { status: 400 });
     }
+    const erroValor = erroValorColeta(def.slot, v);
+    if (erroValor) return NextResponse.json({ erro: erroValor }, { status: 400 });
     valor = { slot: def.slot.id, valor: v };
   }
 

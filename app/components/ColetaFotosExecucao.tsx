@@ -15,6 +15,12 @@
  * Coleta incompleta não trava nada: o aviso aparece ao avançar a fase e no
  * formulário do Relatório de Execução.
  *
+ * Fase 7 (validação, lib/validacao/fotosExecucao.ts): antes de comprimir, o
+ * aparelho confere que o arquivo é imagem de verdade (até 10 MB; WebP, GIF,
+ * BMP e HEIC são convertidos), calcula o SHA-256 do ORIGINAL — a mesma foto
+ * não entra em duas vagas — e lê a data da câmera (EXIF), que a compressão
+ * apaga. Mensagens ⛔/⚠️ ficam junto da vaga.
+ *
  * `embutido`: dentro de uma SecaoRecolhivel (página da inspeção) — sem card
  * nem título próprios. Mesmo recolhido o componente segue montado, e a fila
  * e os envios em andamento são avisados à página (onLocais) para ela abrir
@@ -22,14 +28,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { enviarArquivo, enviarJson } from "@/lib/pwa/sync";
 import { comprimirImagem } from "@/lib/pwa/imagem";
+import { sha256Hex } from "@/lib/sha256";
+import { dataCapturaExif } from "@/lib/asp/exif";
+import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
 import {
   SECOES_FOTOS, fotosDoSlot, valorDoSlot, numeroBr, lerNumero, secaoExigida,
-  situacaoDosItens, progressoColeta,
-  type RegistroFotosExecucao, type SlotFoto, type SecaoFotos, type ItemColetado,
+  situacaoDosItens, progressoColeta, fotoRepetida, slotPorId, unidadeDoSlot, UNIDADE_CLORO_PADRAO,
+  type RegistroFotosExecucao, type SlotFoto, type SecaoFotos, type ItemColetado, type UnidadeCloro,
 } from "@/lib/asp/fotos-execucao";
+import {
+  FOTO_MAX_BYTES, addErro, erroValorColeta, formatoImagem, mesclar, novoResultado, validarColetaFotos,
+  type Periodo,
+} from "@/lib/validacao";
+import { MensagensCampo } from "./MensagensCampo";
 
 /** Foto que ficou na fila offline — só existe neste aparelho até sincronizar. */
-interface FotoLocal { chave: string; slot: string; url: string }
+interface FotoLocal { chave: string; slot: string; url: string; hash?: string }
+
+const mb = (n: number) => (n / 1048576).toFixed(1).replace(".", ",");
 
 const btn: React.CSSProperties = { padding: "6px 10px", fontSize: 12.5, lineHeight: 1.2, cursor: "pointer", border: "none" };
 const campo: React.CSSProperties = {
@@ -71,8 +87,17 @@ function Miniatura({ src, tamanho, onRemover, naFila }: {
   );
 }
 
-export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onLocais, onErro, aguaPotavel }: {
+export default function ColetaFotosExecucao({
+  inspecaoId, onMudar, embutido, onLocais, onErro, aguaPotavel,
+  cloroUnidade = UNIDADE_CLORO_PADRAO, cloroLimiteAviso, periodoExecucao,
+}: {
   inspecaoId: string;
+  /** Unidade do cloro do procedimento (Catálogo). */
+  cloroUnidade?: UnidadeCloro;
+  /** Acima disso, o cloro medido gera aviso (Catálogo; padrão 5). */
+  cloroLimiteAviso?: number;
+  /** Período da execução (Fase 6): foto com data da câmera fora dele avisa. */
+  periodoExecucao?: Periodo | null;
   /** Procedimento da OS é de água potável (Catálogo): coleta de água
    *  desmarcada vira aviso (Fase 6) — não trava nada. */
   aguaPotavel?: boolean;
@@ -88,10 +113,15 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
   const [registro, setRegistro] = useState<RegistroFotosExecucao | null>(null);
   const [podeEditar, setPodeEditar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  /** ⛔ da própria vaga (foto repetida, arquivo inválido, valor fora da
+   *  faixa) — aparecem junto dela, não no topo. */
+  const [errosVaga, setErrosVaga] = useState<Record<string, string>>({});
   const [enviando, setEnviando] = useState<Record<string, number>>({});
   const [locais, setLocais] = useState<FotoLocal[]>([]);
   const locaisRef = useRef<FotoLocal[]>([]);
   locaisRef.current = locais;
+  const registroRef = useRef<RegistroFotosExecucao | null>(null);
+  registroRef.current = registro;
 
   const url = `/api/inspecoes/${inspecaoId}/fotos`;
   const urlFoto = (caminho: string) => `${url}?caminho=${encodeURIComponent(caminho)}`;
@@ -131,20 +161,67 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
     if (res.data?.registro) setRegistro({ ...res.data.registro, itens: res.data.registro.itens || {} });
   }
 
+  const erroVaga = (slotId: string, msg: string | null) =>
+    setErrosVaga((p) => { const n = { ...p }; if (msg) n[slotId] = msg; else delete n[slotId]; return n; });
+
+  /** Confere o arquivo ORIGINAL (tipo real, tamanho), calcula o hash e lê a
+   *  data da câmera; converte o que não é JPEG/PNG; comprime. Devolve o que
+   *  enviar ou a mensagem de erro. */
+  async function prepararFoto(original: File): Promise<{ arquivo: File; hash: string; capturada: string | null } | string> {
+    const nome = original.name || "foto";
+    if (original.size > FOTO_MAX_BYTES) return `“${nome}” tem ${mb(original.size)} MB — o limite por foto é 10 MB.`;
+    if (original.size === 0) return `“${nome}” está vazio.`;
+    const bytes = new Uint8Array(await original.arrayBuffer());
+    const fmt = formatoImagem(bytes);
+    if (!fmt) return `“${nome}” não é uma imagem reconhecida. Envie JPEG ou PNG (WebP, GIF, BMP e HEIC são convertidos quando possível).`;
+    const hash = await sha256Hex(bytes);
+    const capturada = fmt === "jpeg" ? dataCapturaExif(bytes) : null;
+    let base = original;
+    if (fmt !== "jpeg" && fmt !== "png") {
+      const prep = await prepararImagemRelatorio(original, nome);
+      if ("erro" in prep) return prep.erro;
+      base = prep.arquivo;
+    }
+    const arquivo = await comprimirImagem(base);
+    const fmtFinal = formatoImagem(new Uint8Array(await arquivo.slice(0, 16).arrayBuffer()));
+    if (fmtFinal !== "jpeg" && fmtFinal !== "png") return `Não foi possível preparar “${nome}”. Salve como JPEG e envie de novo.`;
+    return { arquivo, hash, capturada };
+  }
+
+  /** "Limpeza — Durante" de uma vaga. */
+  const rotuloVaga = (id: string) => { const d = slotPorId(id); return d ? `${d.secao.titulo} — ${d.slot.rotulo}` : id; };
+
   async function enviarFotos(slot: SlotFoto, lista: FileList | null) {
     const arquivos = Array.from(lista || []).slice(0, slot.minimo ? 20 : 1);
     if (arquivos.length === 0) return;
     setErro(null);
+    erroVaga(slot.id, null);
+    // Hash -> vaga das fotos ainda fora do registro: fila offline e esta leva.
+    const pendentes = new Map<string, string>(locaisRef.current.filter((l) => l.hash).map((l) => [l.hash!, l.slot]));
+    const problemas: string[] = [];
     // Uma por vez: a fila offline e a trava otimista do servidor preservam a
     // ordem, e o celular não comprime dez fotos de 8 MB ao mesmo tempo.
     for (const original of arquivos) {
       setEnviando((p) => ({ ...p, [slot.id]: (p[slot.id] || 0) + 1 }));
       try {
-        const arquivo = await comprimirImagem(original);
-        const res = await enviarArquivo(url, { slot: slot.id }, arquivo, `Foto da execução — ${slot.rotulo}`);
+        const prep = await prepararFoto(original);
+        if (typeof prep === "string") { problemas.push(prep); continue; }
+        const pend = pendentes.get(prep.hash);
+        const onde = fotoRepetida(registroRef.current, prep.hash, slot.id)
+          || (pend && (pend !== slot.id || slot.minimo) ? rotuloVaga(pend) : null);
+        if (onde) { problemas.push(`${original.name ? `“${original.name}”: ` : ""}a mesma foto já está em “${onde}”.`); continue; }
+        pendentes.set(prep.hash, slot.id);
+        const campos: Record<string, string> = { slot: slot.id, hash: prep.hash };
+        if (prep.capturada) campos.capturada_em = prep.capturada;
+        const res = await enviarArquivo(url, campos, prep.arquivo, `Foto da execução — ${slot.rotulo}`);
         if (res.queued) {
-          const local: FotoLocal = { chave: `${slot.id}-${Date.now()}-${Math.random()}`, slot: slot.id, url: URL.createObjectURL(arquivo) };
+          const local: FotoLocal = {
+            chave: `${slot.id}-${Date.now()}-${Math.random()}`, slot: slot.id, url: URL.createObjectURL(prep.arquivo), hash: prep.hash,
+          };
           setLocais((p) => [...(slot.minimo ? p : p.filter((l) => l.slot !== slot.id)), local]);
+        } else if (res.status === 409 && res.data?.repetida) {
+          problemas.push(res.data.erro);
+          carregar();
         } else {
           aplicarResposta(res, "Falha ao enviar a foto.");
         }
@@ -152,6 +229,7 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
         setEnviando((p) => ({ ...p, [slot.id]: Math.max(0, (p[slot.id] || 1) - 1) }));
       }
     }
+    if (problemas.length) erroVaga(slot.id, problemas.join(" "));
   }
 
   async function remover(caminho: string) {
@@ -163,6 +241,7 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
         Array.isArray(v) ? v.filter((f) => f.caminho !== caminho)
           : v?.caminho === caminho ? { valor: v.valor ?? null } : v])),
     });
+    setErrosVaga({});
     const res = await enviarJson(url, "DELETE", { caminho }, "Remover foto da execução");
     aplicarResposta(res, "Falha ao remover a foto.");
   }
@@ -176,7 +255,10 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
 
   async function salvarValor(slot: SlotFoto, texto: string) {
     const valor = lerNumero(texto);
-    if (texto.trim() && valor === null) { setErro(`${slot.rotulo}: valor inválido — use números, ex.: 7,2.`); return; }
+    if (texto.trim() && valor === null) { erroVaga(slot.id, "Valor inválido — use números, ex.: 7,2."); return; }
+    const foraDaFaixa = erroValorColeta(slot, valor);
+    if (foraDaFaixa) { erroVaga(slot.id, foraDaFaixa); return; }
+    erroVaga(slot.id, null);
     if (valor === valorDoSlot(registro, slot.id)) return;
     setErro(null);
     setRegistro((r) => r && {
@@ -233,7 +315,7 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
         {slot.valor && (
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 3 }}>
-              {slot.valor.nome}{slot.valor.unidade ? ` (${slot.valor.unidade})` : ""}
+              {slot.valor.nome}{unidadeDoSlot(slot, cloroUnidade) ? ` (${unidadeDoSlot(slot, cloroUnidade)})` : ""}
             </label>
             {/* key: valor gravado mudou (ex.: recarga) → o campo recomeça dele */}
             <input key={`${slot.id}-${valor ?? ""}`} style={campo} inputMode="decimal" disabled={!podeEditar}
@@ -247,6 +329,7 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
             {foto.por}{foto.em ? ` · ${new Date(foto.em).toLocaleString("pt-BR")}` : ""}
           </span>
         )}
+        <MensagensCampo r={validacao} campo={slot.id} />
         {Botoes(slot, !!foto || !!local)}
       </div>
     );
@@ -275,6 +358,7 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
             {meus.map((l) => <Miniatura key={l.chave} src={l.url} tamanho={104} naFila />)}
           </div>
         )}
+        <MensagensCampo r={validacao} campo={slot.id} />
         {Botoes(slot, n > 0)}
       </div>
     );
@@ -321,6 +405,8 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
                 <span>Confirmo que as fotos da limpeza foram tiradas durante o serviço.</span>
               </label>
             )}
+            {secao.id === "limpeza" && <MensagensCampo r={validacao} campo="limpeza_confirmada" />}
+            {secao.id === "agua_depois" && <MensagensCampo r={validacao} campo="agua_depois" />}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginTop: 10 }}>
               {secao.slots.map((slot) => slot.minimo ? VagaMultipla(slot, ok(slot.id)) : VagaSimples(slot, ok(slot.id)))}
             </div>
@@ -331,6 +417,13 @@ export default function ColetaFotosExecucao({ inspecaoId, onMudar, embutido, onL
   }
 
   const situacao = situacaoDosItens(registro);
+  // ⛔/⚠️ da coleta gravada + os ⛔ locais de cada vaga (antes de enviar)
+  const locaisR = novoResultado();
+  Object.entries(errosVaga).forEach(([k, m]) => addErro(locaisR, k, m));
+  const validacao = mesclar(
+    validarColetaFotos(registro, { unidadeCloro: cloroUnidade, limiteCloro: cloroLimiteAviso, periodo: periodoExecucao }),
+    locaisR,
+  );
   const { feitos, total } = progressoColeta(registro);
 
   return (

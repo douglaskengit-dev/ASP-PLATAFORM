@@ -11,6 +11,32 @@
  * Coleta incompleta só AVISA — nunca bloqueia avanço de fase nem relatório.
  */
 
+// ── Cloro: unidade e limite de aviso (Catálogo → procedimento) ─────────────
+
+/** Unidade do cloro livre escolhida no procedimento. Em água, 1 mg/L = 1 PPM:
+ *  muda só o que se escreve — card da coleta, frase do RDO e relatório. */
+export const UNIDADES_CLORO = ["mg/L", "PPM"] as const;
+export type UnidadeCloro = (typeof UNIDADES_CLORO)[number];
+export const UNIDADE_CLORO_PADRAO: UnidadeCloro = "mg/L";
+/** Acima disso a coleta avisa (provável erro de digitação). */
+export const CLORO_LIMITE_AVISO_PADRAO = 5;
+
+export function unidadeCloroValida(u: unknown): u is UnidadeCloro {
+  return u === "mg/L" || u === "PPM";
+}
+
+/** Unidade e limite do procedimento (linha de gp_procedimentos); coluna
+ *  ausente (migração não rodada) ou inválida = padrões. */
+export function cloroDoProcedimento(p: { cloro_unidade?: unknown; cloro_limite_aviso?: unknown } | null | undefined): {
+  unidade: UnidadeCloro; limite: number;
+} {
+  const lim = Number(p?.cloro_limite_aviso);
+  return {
+    unidade: unidadeCloroValida(p?.cloro_unidade) ? p!.cloro_unidade as UnidadeCloro : UNIDADE_CLORO_PADRAO,
+    limite: isFinite(lim) && lim > 0 ? lim : CLORO_LIMITE_AVISO_PADRAO,
+  };
+}
+
 export type SecaoFotosId = "tanque" | "robo" | "agua_antes" | "agua_depois" | "limpeza";
 type Fase = "antes" | "durante" | "depois";
 
@@ -98,9 +124,19 @@ export const SECOES_FOTOS: SecaoFotos[] = [
 
 // ── Registro ─────────────────────────────────────────────────────────────────
 
-export interface FotoColetada { caminho: string; por?: string | null; em?: string | null }
+/** `hash` = SHA-256 do arquivo ORIGINAL (antes da compressão): a mesma foto
+ *  enviada de novo é reconhecida mesmo que a compressão saia diferente.
+ *  `capturada_em` = data/hora da câmera (EXIF DateTimeOriginal,
+ *  "aaaa-mm-ddThh:mm:ss", hora local da câmera), quando a foto tem. */
+export interface FotoColetada {
+  caminho: string; por?: string | null; em?: string | null;
+  hash?: string | null; capturada_em?: string | null;
+}
 /** Vaga de uma foto só. `valor` pode existir antes da foto (pH, cloro). */
-export interface ItemColetado { caminho?: string | null; valor?: number | null; por?: string | null; em?: string | null }
+export interface ItemColetado {
+  caminho?: string | null; valor?: number | null; por?: string | null; em?: string | null;
+  hash?: string | null; capturada_em?: string | null;
+}
 
 export interface RegistroFotosExecucao {
   /** null = ainda não gravado (a tela mostra os padrões do procedimento). */
@@ -128,7 +164,19 @@ export function slotPorId(id: string): { secao: SecaoFotos; slot: SlotFoto } | n
 export function fotosDoSlot(reg: RegistroFotosExecucao | null | undefined, id: string): FotoColetada[] {
   const v = reg?.itens?.[id];
   if (Array.isArray(v)) return v.filter((f) => f?.caminho);
-  return v?.caminho ? [{ caminho: v.caminho, por: v.por, em: v.em }] : [];
+  return v?.caminho ? [{ caminho: v.caminho, por: v.por, em: v.em, hash: v.hash, capturada_em: v.capturada_em }] : [];
+}
+
+/** Onde a mesma foto (mesmo hash) já está na coleta: "Limpeza — Durante".
+ *  Na vaga de uma foto só, a foto atual vai ser SUBSTITUÍDA — não conta. */
+export function fotoRepetida(reg: RegistroFotosExecucao | null | undefined, hash: string, slotId: string): string | null {
+  if (!hash || !reg?.itens) return null;
+  for (const id of Object.keys(reg.itens)) {
+    const def = slotPorId(id);
+    if (!def || (id === slotId && !def.slot.minimo)) continue;
+    if (fotosDoSlot(reg, id).some((f) => f.hash === hash)) return `${def.secao.titulo} — ${def.slot.rotulo}`;
+  }
+  return null;
 }
 
 export function valorDoSlot(reg: RegistroFotosExecucao | null | undefined, id: string): number | null {
@@ -149,10 +197,17 @@ export function numeroBr(n: number): string {
   return String(n).replace(".", ",");
 }
 
-/** Valor para legenda: "pH: 7,2" / "Cloro: 0,5 mg/L". */
-export function textoDoValor(slot: SlotFoto, valor: number | null): string {
+/** Unidade de exibição do valor da vaga: a do procedimento para o cloro. */
+export function unidadeDoSlot(slot: SlotFoto, unidadeCloro: UnidadeCloro = UNIDADE_CLORO_PADRAO): string {
+  if (!slot.valor) return "";
+  return slot.valor.nome === "Cloro" ? unidadeCloro : slot.valor.unidade || "";
+}
+
+/** Valor para legenda: "pH: 7,2" / "Cloro: 0,5 mg/L" (unidade do procedimento). */
+export function textoDoValor(slot: SlotFoto, valor: number | null, unidadeCloro: UnidadeCloro = UNIDADE_CLORO_PADRAO): string {
   if (!slot.valor || valor == null) return "";
-  return `${slot.valor.nome}: ${numeroBr(valor)}${slot.valor.unidade ? ` ${slot.valor.unidade}` : ""}`;
+  const u = unidadeDoSlot(slot, unidadeCloro);
+  return `${slot.valor.nome}: ${numeroBr(valor)}${u ? ` ${u}` : ""}`;
 }
 
 export function secaoExigida(reg: RegistroFotosExecucao | null | undefined, secao: SecaoFotos): boolean {
@@ -298,6 +353,8 @@ export function planejarFotosNoRelatorio(
     vagas: { topico: number; legenda: string }[];
     /** Último recurso quando nenhuma chave casa. */
     primeiraSecao: number;
+    /** Unidade do cloro do procedimento (legenda "Cloro: 0,5 mg/L"). */
+    unidadeCloro?: UnidadeCloro;
   },
 ): FotoPlanejada[] {
   const planejadas: FotoPlanejada[] = [];
@@ -319,7 +376,7 @@ export function planejarFotosNoRelatorio(
         topico = n; ancora = d.ancora;
         break;
       }
-      const valor = textoDoValor(slot, valorDoSlot(reg, slot.id));
+      const valor = textoDoValor(slot, valorDoSlot(reg, slot.id), modelo.unidadeCloro);
       fotos.forEach((f, k) => {
         const foto: FotoPlanejada = {
           caminho: f.caminho, slotId: slot.id,

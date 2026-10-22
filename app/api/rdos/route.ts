@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { removerArquivos } from "@/lib/processos/arquivos";
 import { dataIsoValida } from "@/lib/asp/rdo";
-import { CAMPOS_RDO as CAMPOS, PERFIS_RDO as PERFIS, UUID, MSG_DIA_DUPLICADO, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
+import { CAMPOS_RDO as CAMPOS, PERFIS_RDO as PERFIS, UUID, MSG_DIA_DUPLICADO, bloqueiosDoRdo, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
 
 export const runtime = "nodejs";
 
@@ -65,6 +65,8 @@ export async function POST(req: NextRequest) {
   }
   const erroInsp = await erroDasInspecoes(supabase, projetoId, b?.inspecoes);
   if (erroInsp) return NextResponse.json({ erro: erroInsp }, { status: 400 });
+  const bloq = bloqueiosDoRdo(b.dados, b.data, b.inspecoes as string[]);
+  if (bloq) return NextResponse.json(bloq, { status: 400 });
 
   // Dia já ocupado: responde antes de gastar um número.
   const { data: doDia } = await supabase.from("gp_rdos").select("id, numero")
