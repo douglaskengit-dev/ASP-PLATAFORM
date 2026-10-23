@@ -57,19 +57,8 @@ export default function FeedbackBotao() {
         onClick={abrir}
         title="Relatar um erro ou sugerir uma melhoria"
         aria-label="Relatar um erro ou sugerir uma melhoria"
-        style={{
-          background: "none",
-          border: "1px solid #3a3529",
-          borderRadius: 8,
-          width: 32,
-          height: 32,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          fontSize: 15,
-          color: "#c9c4b6",
-        }}
+        type="button"
+        className="barra-icone"
       >
         💬
       </button>

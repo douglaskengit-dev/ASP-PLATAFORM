@@ -48,66 +48,21 @@ export default function Modal({
   }, [onFechar]);
 
   return (
-    <div
-      onClick={onFechar}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(20, 18, 13, 0.55)",
-        zIndex,
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        overflowY: "auto",
-      }}
-      className="modal-overlay"
-    >
+    <div onClick={onFechar} style={{ zIndex }} className="modal-overlay">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="modal-caixa"
-        style={{
-          background: "var(--bg-card)",
-          color: "var(--texto)",
-          borderRadius: 12,
-          width: "100%",
-          maxWidth: largo ? 1120 : 720,
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
-        }}
+        className={`modal-caixa${largo ? " largo" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "14px 20px",
-            borderBottom: "1px solid var(--borda)",
-            background: "var(--escuro)",
-            borderRadius: "12px 12px 0 0",
-            flexShrink: 0,
-          }}
-        >
-          <strong style={{ color: "var(--primaria)", fontSize: 16 }}>{titulo}</strong>
-          <button
-            onClick={onFechar}
-            title="Fechar"
-            style={{
-              background: "none",
-              border: "1px solid #3a3529",
-              borderRadius: 8,
-              color: "#c9c4b6",
-              width: 30,
-              height: 30,
-              cursor: "pointer",
-              fontSize: 16,
-              lineHeight: 1,
-            }}
-          >
-            ✕
+        <div className="modal-cabeca">
+          <strong className="modal-titulo">{titulo}</strong>
+          <button type="button" onClick={onFechar} title="Fechar" aria-label="Fechar" className="modal-fechar">
+            <span aria-hidden="true">✕</span>
           </button>
         </div>
-        <div style={{ padding: semPadding ? 0 : 20, overflowY: "auto", flex: 1, minHeight: 0 }}>{children}</div>
+        <div className={`modal-corpo${semPadding ? " sem-padding" : ""}`}>{children}</div>
       </div>
     </div>
   );
