@@ -6,15 +6,74 @@
  * em vez do atalho reduzido que existia antes.
  * Validação: lib/validacao/cliente.ts (CNPJ válido e único, razão social
  * parecida, cidade com outra grafia na mesma UF, endereço em branco,
- * contatos), mensagens junto de cada campo + resumo no botão. */
+ * contatos), mensagens junto de cada campo + resumo no botão.
+ * "Serviço recorrente": periodicidade (3, 6 ou 12 meses) obrigatória quando
+ * marcado (lib/validacao/recorrencia.ts) — ver CamposRecorrencia. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NovoContatoInput, OrgaoComAcoes, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import {
-  cidadesParecidas, ClienteRef, mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao,
-  ROTULOS_CLIENTE, temErros, validarCliente, validarContatos,
+  AVISO_ANTECEDENCIA_PADRAO, cidadesParecidas, ClienteRef, mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, novoResultado,
+  PERIODICIDADES_MESES, ResultadoValidacao, ROTULOS_CLIENTE, ROTULOS_RECORRENCIA, temErros, validarCliente, validarContatos,
+  validarRecorrencia,
 } from "@/lib/validacao";
+
+/** Estado do bloco "Serviço recorrente" (cadastro e edição do cliente). */
+export interface FormRecorrencia {
+  recorrente: boolean;
+  periodicidadeMeses: string;
+  avisoAntecedenciaDias: string;
+}
+export const RECORRENCIA_VAZIA: FormRecorrencia = { recorrente: false, periodicidadeMeses: "", avisoAntecedenciaDias: String(AVISO_ANTECEDENCIA_PADRAO) };
+
+/** "Serviço recorrente" + periodicidade + antecedência do lembrete. */
+export function CamposRecorrencia({ valor, onChange, r, mostrarErros }: {
+  valor: FormRecorrencia; onChange: (v: FormRecorrencia) => void; r: ResultadoValidacao; mostrarErros: boolean;
+}) {
+  return (
+    <div className="field" style={{ gridColumn: "1 / -1" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
+        <input type="checkbox" checked={valor.recorrente} style={{ width: 16, height: 16 }}
+          onChange={(e) => onChange({ ...valor, recorrente: e.target.checked })} />
+        Serviço recorrente
+      </label>
+      <p className="detalhe" style={{ margin: "2px 0 6px" }}>
+        O cliente contrata o serviço periodicamente. Os próximos projetos dele já abrem sem inspeção (dá para trocar) e o
+        Comercial é lembrado antes do próximo vencimento.
+      </p>
+      {valor.recorrente && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+          <div>
+            <label htmlFor="rec-periodicidade">Periodicidade *</label>
+            <select id="rec-periodicidade" value={valor.periodicidadeMeses}
+              className={mostrarErros && r.erros.periodicidadeMeses ? "val-invalido" : undefined}
+              onChange={(e) => onChange({ ...valor, periodicidadeMeses: e.target.value })}>
+              <option value="">Selecione…</option>
+              {PERIODICIDADES_MESES.map((m) => <option key={m} value={String(m)}>A cada {m} meses</option>)}
+            </select>
+            <MensagensCampo r={r} campo="periodicidadeMeses" mostrarErros={mostrarErros} />
+          </div>
+          <div>
+            <label htmlFor="rec-aviso">Avisar com antecedência (dias)</label>
+            <input id="rec-aviso" type="number" min={0} max={365} inputMode="numeric" value={valor.avisoAntecedenciaDias}
+              onChange={(e) => onChange({ ...valor, avisoAntecedenciaDias: e.target.value })} />
+            <MensagensCampo r={r} campo="avisoAntecedenciaDias" mostrarErros />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Corpo da API a partir do bloco. */
+export function recorrenciaDoForm(v: FormRecorrencia) {
+  return {
+    recorrente: v.recorrente,
+    periodicidadeMeses: v.periodicidadeMeses ? Number(v.periodicidadeMeses) : null,
+    avisoAntecedenciaDias: v.avisoAntecedenciaDias === "" ? null : Number(v.avisoAntecedenciaDias),
+  };
+}
 
 /** Clientes que conflitam com o digitado (CNPJ igual / razão parecida),
  * consultados em /api/orgaos/verificar com debounce. Também usado na
@@ -89,6 +148,7 @@ export default function FormularioOrgao({
   const [endereco, setEndereco] = useState("");
   const [uf, setUf] = useState("");
   const [contatos, setContatos] = useState<NovoContatoInput[]>([novoContatoVazio()]);
+  const [recorrencia, setRecorrencia] = useState<FormRecorrencia>({ ...RECORRENCIA_VAZIA });
   const [salvando, setSalvando] = useState(false);
   const [mensagemForm, setMensagemForm] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
   const [tentou, setTentou] = useState(false);
@@ -100,9 +160,10 @@ export default function FormularioOrgao({
     () => mesclar(
       validarCliente({ razaoSocial, cnpj, cidade, uf, endereco }, { clientes: conflitantes, cidades: cidadesUf }),
       validarContatos(contatos),
+      validarRecorrencia(recorrenciaDoForm(recorrencia)),
       servidor
     ),
-    [razaoSocial, cnpj, cidade, uf, endereco, conflitantes, cidadesUf, contatos, servidor]
+    [razaoSocial, cnpj, cidade, uf, endereco, conflitantes, cidadesUf, contatos, recorrencia, servidor]
   );
   /** Erro de campo vazio só aparece depois de tentar salvar. */
   const mostrar = (valor: string | undefined) => tentou || !!valor?.trim();
@@ -136,7 +197,7 @@ export default function FormularioOrgao({
         headers: { "Content-Type": "application/json" },
         // Lista inteira: a API ignora blocos em branco e devolve as mensagens
         // com o índice do bloco na tela.
-        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, contatos }),
+        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, contatos, ...recorrenciaDoForm(recorrencia) }),
       });
       const dados = await resp.json();
       if (!resp.ok || !dados.ok) {
@@ -204,6 +265,8 @@ export default function FormularioOrgao({
           </select>
           <MensagensCampo r={resultado} campo="uf" mostrarErros={tentou} />
         </div>
+        <CamposRecorrencia valor={recorrencia} onChange={(v) => { setRecorrencia(v); setServidor(novoResultado()); }}
+          r={resultado} mostrarErros={tentou} />
       </div>
 
       <h3 style={{ marginTop: 16, marginBottom: 4, fontSize: 15 }}>Contatos (opcional)</h3>
@@ -266,7 +329,7 @@ export default function FormularioOrgao({
         + Adicionar contato
       </button>
 
-      {tentou && <div style={{ marginTop: 16 }}><ResumoValidacao r={resultado} rotulos={ROTULOS_CLIENTE} /></div>}
+      {tentou && <div style={{ marginTop: 16 }}><ResumoValidacao r={resultado} rotulos={{ ...ROTULOS_CLIENTE, ...ROTULOS_RECORRENCIA }} /></div>}
 
       <div className="actions" style={{ marginTop: 16 }}>
         <button className="btn" onClick={cadastrarOrgao} disabled={salvando}>

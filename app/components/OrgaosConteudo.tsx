@@ -9,6 +9,13 @@ import Link from "next/link";
 import { OrgaoComAcoes } from "@/lib/orgaos/types";
 import { mascaraCnpj } from "@/lib/mascaras";
 import FormularioOrgao from "./FormularioOrgao";
+import { ROTULO_STATUS_RECORRENCIA, type ProximoServico } from "@/lib/validacao";
+
+/** Chip do status do próximo serviço do cliente recorrente. */
+const CHIP_RECORRENCIA: Record<string, string> = {
+  vencido: "chip-perigo", em_breve: "chip-aviso", sem_historico: "chip-neutro", em_andamento: "chip-info", em_dia: "chip-sucesso",
+};
+const dataBr = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
 
 interface FiltrosClientes {
   q: string;
@@ -187,6 +194,15 @@ export default function OrgaosConteudo() {
                 <p className="item-analise-resumo" style={{ paddingRight: podeExcluir ? 28 : 0 }}>
                   CNPJ: {mascaraCnpj(c.cnpj)} — Cadastrado em {new Date(c.created_at).toLocaleString("pt-BR")}
                 </p>
+                {(c as any).recorrente && (() => {
+                  const p = (c as any).proximo_servico as ProximoServico | null;
+                  return (
+                    <p className="item-analise-resumo" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+                      <span>Recorrente · a cada {(c as any).periodicidade_meses} meses · próximo serviço: {p?.vencimento ? dataBr(p.vencimento) : "sem data"}</span>
+                      {p && <span className={`chip ${CHIP_RECORRENCIA[p.status] || "chip-neutro"}`}>{ROTULO_STATUS_RECORRENCIA[p.status]}</span>}
+                    </p>
+                  );
+                })()}
               </Link>
               {podeExcluir && (
                 <button className="fu-icone-btn lixeira" title="Excluir cliente (lixeira)"

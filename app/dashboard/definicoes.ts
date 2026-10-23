@@ -6,12 +6,12 @@ import { JANELA_AGENDA_DIAS, LIMITE_PARADA_DIAS } from "@/lib/asp/dashboard";
 export type ChaveDef =
   | "osAndamento" | "osEncerradas" | "leadTime" | "projetosConcluidos" | "reprovacao" | "aguardandoAprovacao"
   | "aguardandoAssinatura" | "encerramento" | "funil" | "duracao" | "motivos" | "filas" | "agenda" | "ocupacao"
-  | "aDefinir" | "conflitos" | "rdo" | "fotos" | "medicoes" | "laudos" | "clientes";
+  | "aDefinir" | "conflitos" | "rdo" | "fotos" | "medicoes" | "laudos" | "clientes" | "recorrencia";
 
 export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string }> = {
   osAndamento: {
     titulo: "OSs em andamento",
-    texto: "OSs sem data de encerramento, em qualquer fase de 2 a 10 (inclui as da fase 10 que aguardam o encerramento). Não conta OS nem projeto na lixeira. Estado atual: não depende do período. “Abertas no período” = OSs criadas dentro do período.",
+    texto: "OSs sem data de encerramento, em qualquer fase de 2 a 10 (inclui as da fase 10 que aguardam o encerramento). Não conta OS nem projeto na lixeira. Estado atual: não depende do período. “Abertas no período” = OSs criadas dentro do período. “Sem inspeção” = OSs que começam na fase 6 (não passam pelas fases 2 a 5).",
   },
   osEncerradas: {
     titulo: "OSs encerradas",
@@ -19,7 +19,7 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string }> = {
   },
   leadTime: {
     titulo: "Lead time da OS",
-    texto: "Só OSs encerradas no período: dias corridos entre o dia de abertura da OS (criação, horário de Brasília) e a data de encerramento. Mostra a média e a mediana.",
+    texto: "Só OSs encerradas no período: dias corridos entre o dia de abertura da OS (criação, horário de Brasília) e a data de encerramento. Mostra a média e a mediana — no total e separado entre OSs com e sem inspeção (a sem inspeção não passa pelas fases 2 a 5, então tende a ser mais curta).",
   },
   projetosConcluidos: {
     titulo: "Projetos concluídos",
@@ -39,11 +39,11 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string }> = {
   },
   encerramento: {
     titulo: "Pendências de encerramento",
-    texto: "OSs na fase 10 ainda não encerradas que têm ao menos uma pendência — as mesmas regras da tela da OS: relatórios sem versão assinada, laudo do laboratório, rascunho ou aprovação esquecidos, RDO sem .docx ou desatualizado, dias da execução sem RDO e coleta de fotos incompleta. Estado atual.",
+    texto: "OSs na fase 10 ainda não encerradas que têm ao menos uma pendência — as mesmas regras da tela da OS: relatórios sem versão assinada, laudo do laboratório, rascunho ou aprovação esquecidos, RDO sem .docx ou desatualizado, dias da execução sem RDO e coleta de fotos incompleta. Na OS sem inspeção, o relatório de inspeção não é pendência. Estado atual.",
   },
   funil: {
     titulo: "OSs por fase",
-    texto: `Quantas OSs não encerradas estão em cada fase agora. Idade = dias corridos desde a última entrada da OS na fase (histórico de fases; sem histórico, a abertura da OS). “Parada” = mais de ${LIMITE_PARADA_DIAS} dias na fase atual. Toque numa fase para ver as OSs.`,
+    texto: `Quantas OSs não encerradas estão em cada fase agora. Idade = dias corridos desde a última entrada da OS na fase (histórico de fases; sem histórico, a abertura da OS). “Parada” = mais de ${LIMITE_PARADA_DIAS} dias na fase atual. OSs sem inspeção nascem na fase 6 e nunca contam nas fases 2 a 5; nas fases 6 a 10 aparece quantas delas são sem inspeção. Toque numa fase para ver as OSs.`,
   },
   duracao: {
     titulo: "Tempo por fase",
@@ -88,6 +88,10 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string }> = {
   laudos: {
     titulo: "Laudo fora do limite após a limpeza",
     texto: "Relatório de execução atual (o assinado ou o de maior versão) enviado para aprovação no período, cujo laudo “depois da limpeza” tem parâmetro acima do limite da linha (Portaria GM/MS nº 888/2021 por padrão) ou “Presente” em coliformes/E. coli.",
+  },
+  recorrencia: {
+    titulo: "Próximos serviços recorrentes",
+    texto: "Clientes marcados como “Serviço recorrente”. Vencimento = fim da última execução do cliente (o maior entre o último dia do agendamento de execução ativo e o dia do encerramento, entre as OSs ativas) + a periodicidade (3, 6 ou 12 meses; dia que não existe no mês vira o último dia). Em breve = a partir da antecedência do cliente (padrão 30 dias antes); Vencido = depois do vencimento; Sem histórico = nenhuma execução registrada; Próximo serviço aberto = já existe OS aberta criada depois da última execução. Em breve e Vencido geram UM lembrete (notificação) por cliente e vencimento para o Comercial e a Gerência. Só o filtro de cliente vale aqui. Estado atual.",
   },
   clientes: {
     titulo: "Clientes",

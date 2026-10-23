@@ -5,9 +5,10 @@ import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { TipoEnte } from "@/lib/orgaos/types";
 import { mesmaVersao } from "@/lib/asp/usuario-api";
 import { cidadesDaUf, clientesCadastrados, projetosParaExclusao } from "@/lib/orgaos/validacao-api";
+import { situacaoRecorrencia } from "@/lib/asp/recorrencia-api";
 import {
-  cnpjRepetido, conflitoRestauracao, decisaoExcluirCliente, msgVersaoCliente, normalizarCidade, normalizarCnpj, normalizarEspacos,
-  primeiroErro, ROTULOS_CLIENTE, temErros, validarCliente,
+  cnpjRepetido, conflitoRestauracao, decisaoExcluirCliente, mesclar, msgVersaoCliente, normalizarCidade, normalizarCnpj, normalizarEspacos,
+  primeiroErro, recorrenciaParaGravar, ROTULOS_CLIENTE, ROTULOS_RECORRENCIA, temErros, validarCliente, validarRecorrencia,
 } from "@/lib/validacao";
 
 export const runtime = "nodejs";
@@ -73,8 +74,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       : null,
   }));
 
+  // Cliente recorrente: próximo serviço (vencimento e status).
+  let recorrencia = null;
+  if ((orgao as any).recorrente === true) {
+    try { recorrencia = (await situacaoRecorrencia([params.id])).get(params.id)?.proximo || null; } catch { /* complementar */ }
+  }
+
   return NextResponse.json({
     ok: true,
+    recorrencia,
     orgao: { ...orgao, contatos: contatos || [] },
     processos: processosMapeados,
     souAdmin: ehAdmin,
@@ -92,6 +100,10 @@ interface EditarOrgaoBody {
   endereco?: string;
   /** updated_at lido ao abrir a edição (concorrência otimista). */
   versao?: string;
+  /** Serviço recorrente: periodicidade obrigatória quando marcado. */
+  recorrente?: boolean;
+  periodicidadeMeses?: number | string | null;
+  avisoAntecedenciaDias?: number | string | null;
 }
 
 /** Edita os dados cadastrais do órgão (tipo, razão social, CNPJ, cidade, UF,
@@ -147,12 +159,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     cidades: await cidadesDaUf(body.uf, params.id),
     razaoSocialAtual: atual.razao_social,
   };
-  const resultado = validarCliente({ ...body, endereco: body.endereco ?? "" }, ctx);
+  const resultado = mesclar(validarCliente({ ...body, endereco: body.endereco ?? "" }, ctx), validarRecorrencia(body));
   if (!body.tipoEnte) resultado.erros.tipoEnte = ["Informe o tipo do ente."];
   if (temErros(resultado)) {
     const conflito = cnpjRepetido(body.cnpj, ctx);
     return NextResponse.json(
-      { erro: primeiroErro(resultado, ROTULOS_CLIENTE), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { erro: primeiroErro(resultado, { ...ROTULOS_CLIENTE, ...ROTULOS_RECORRENCIA }), erros: resultado.erros, avisos: resultado.avisos, conflito },
       { status: conflito ? 409 : 400 }
     );
   }
@@ -170,6 +182,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       cidade: normalizarCidade(body.cidade),
       uf: body.uf.trim().toUpperCase(),
       endereco: normalizarEspacos(body.endereco) || null,
+      // Recorrência: só com a coluna no banco (migração) e quando a tela mandou.
+      ...("recorrente" in atual && typeof body.recorrente === "boolean" ? recorrenciaParaGravar(body) : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", params.id)
