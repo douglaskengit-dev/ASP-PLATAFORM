@@ -63,7 +63,9 @@ import UltimaInspecao from "@/app/components/UltimaInspecao";
 import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
 import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
-import { podeAprovarColeta, podeEditarRevisao } from "@/lib/asp/permissoes";
+import {
+  podeAprovarColeta, podeEditarRevisao, podePrepararRdo, podeRegistrarFotos, podeRegistrarMedicao,
+} from "@/lib/asp/permissoes";
 import { carregarPermissoesFuncao } from "@/lib/asp/funcoes";
 import type { FuncaoRef, PermissoesFuncao } from "@/lib/validacao/funcao";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
@@ -662,7 +664,16 @@ export default function InspecaoDetalhePage() {
       ...faixaVolume(volume),
     };
   }, [insp, coletas, agDoBloco, bloco, revisaoRelatorio, codigoProjetoOS, contatoCliente, procedimentos]);
-  const podeColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
+  /** Excluir coleta/RDO (lixeira): só os perfis da coleta — as funções com
+   *  "Registrar medições"/"Preparar RDO" criam e editam, mas não excluem. */
+  const podeExcluirColeta = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
+  /** Registrar medições / batimetria e preparar RDO: perfil (Admin/Gerência/
+   *  Operações) OU a função do usuário com a marca (Permissões por função). A
+   *  coleta de fotos decide sozinha (o GET de /api/inspecoes/[id]/fotos já
+   *  devolve podeEditar com a mesma regra). */
+  const perfilFuncao = { perfil, funcao, permissoesFuncao };
+  const podeColeta = podeRegistrarMedicao(perfilFuncao) && !encerrada;
+  const podeRdo = podePrepararRdo(perfilFuncao) && !encerrada;
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "") && !encerrada;
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
   const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "") && !encerrada;
@@ -2059,7 +2070,7 @@ export default function InspecaoDetalhePage() {
                         {aprovandoColeta === c.id ? "…" : c.aprovada_em ? "✓ Aprovada" : "Aprovar"}
                       </button>
                     )}
-                    {podeColeta && (
+                    {podeExcluirColeta && (
                       <button className="btn-dl btn-sec btn-perigo"
                         title={c.aprovada_em ? "Excluir (lixeira de 30 dias) — a aprovação é retirada" : "Excluir (lixeira de 30 dias)"}
                         disabled={excluindoColeta === c.id} onClick={() => excluirColeta(c)}>
@@ -2206,11 +2217,11 @@ export default function InspecaoDetalhePage() {
               </>
             )
             : resumoRdos(rdosInsp)}
-          acoesCabecalho={podeColeta && <button className="btn-azul" onClick={() => setPedidoNovoRdo((n) => n + 1)}>+ Novo RDO</button>}>
+          acoesCabecalho={podeRdo && <button className="btn-azul" onClick={() => setPedidoNovoRdo((n) => n + 1)}>+ Novo RDO</button>}>
           <Rdos projetoId={insp.projeto.id} inspecaoId={id}
             codigoProjeto={insp.projeto.codigo_projeto || insp.projeto.pedido_compra}
             cliente={insp.projeto.cliente?.razao_social} clienteId={insp.projeto.cliente?.id}
-            podeEditar={podeColeta} somenteLeitura={encerrada} embutido pedidoNovo={pedidoNovoRdo}
+            podeEditar={podeRdo} podeExcluir={podeExcluirColeta} somenteLeitura={encerrada} embutido pedidoNovo={pedidoNovoRdo}
             onMudar={setRdosInsp} onErro={setErroRdos} />
         </SecaoRecolhivel>
       )}
