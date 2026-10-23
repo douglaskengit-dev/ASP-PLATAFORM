@@ -78,7 +78,6 @@ const linha: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
   padding: "10px 0", borderBottom: "1px solid var(--borda)", flexWrap: "wrap",
 };
-const vermelho: React.CSSProperties = { color: "#dc2626", borderColor: "#dc2626" };
 
 type Tipo = "equipamento" | "procedimento";
 
@@ -497,7 +496,7 @@ export default function CatalogoPage() {
                 {podeEditar ? "Editar" : "Ver"}
               </button>
               {podeEditar && (
-                <button className="btn-dl btn-sec" style={vermelho} onClick={() => excluir("procedimento", p)}>Excluir</button>
+                <button className="btn-dl btn-sec btn-perigo" onClick={() => excluir("procedimento", p)}>Excluir</button>
               )}
             </span>
           </div>
@@ -514,7 +513,7 @@ export default function CatalogoPage() {
                 <span style={{ display: "flex", gap: 6 }}>
                   <button className="btn-dl btn-sec" onClick={() => abrir("procedimento", { ...p })}>Ver</button>
                   {podeEditar && <button className="btn-dl btn-sec" onClick={() => desativar("procedimento", p, true)}>Reativar</button>}
-                  {podeEditar && <button className="btn-dl btn-sec" style={vermelho} onClick={() => excluir("procedimento", p)}>Excluir</button>}
+                  {podeEditar && <button className="btn-dl btn-sec btn-perigo" onClick={() => excluir("procedimento", p)}>Excluir</button>}
                 </span>
               </div>
             ))}
@@ -552,7 +551,7 @@ export default function CatalogoPage() {
                 {podeEditar ? "Editar" : "Ver"}
               </button>
               {podeEditar && (
-                <button className="btn-dl btn-sec" style={vermelho} onClick={() => excluir("equipamento", e)}>Excluir</button>
+                <button className="btn-dl btn-sec btn-perigo" onClick={() => excluir("equipamento", e)}>Excluir</button>
               )}
             </span>
           </div>
@@ -569,7 +568,7 @@ export default function CatalogoPage() {
                 <span style={{ display: "flex", gap: 6 }}>
                   <button className="btn-dl btn-sec" onClick={() => abrir("equipamento", { ...e })}>Ver</button>
                   {podeEditar && <button className="btn-dl btn-sec" onClick={() => desativar("equipamento", e, true)}>Reativar</button>}
-                  {podeEditar && <button className="btn-dl btn-sec" style={vermelho} onClick={() => excluir("equipamento", e)}>Excluir</button>}
+                  {podeEditar && <button className="btn-dl btn-sec btn-perigo" onClick={() => excluir("equipamento", e)}>Excluir</button>}
                 </span>
               </div>
             ))}
@@ -656,7 +655,7 @@ export default function CatalogoPage() {
                     Modelo próprio: {edProc.template_path.split("/").pop()}
                   </span>
                   {editavel && (
-                    <button type="button" className="btn-dl btn-sec" style={vermelho}
+                    <button type="button" className="btn-dl btn-sec btn-perigo"
                       onClick={() => setEdProc({ ...edProc, template_path: null })}>Voltar ao padrão</button>
                   )}
                 </div>
@@ -868,7 +867,7 @@ export default function CatalogoPage() {
                       aria-label={`Valor da especificação ${i + 1}`}
                       onChange={(ev) => setEdEquip({ ...edEquip, especificacoes: edEquip.especificacoes.map((x, k) => k === i ? { ...x, valor: ev.target.value } : x) })} />
                     {editavel && (
-                      <button className="btn-dl btn-sec" style={{ ...vermelho, maxWidth: 110 }}
+                      <button className="btn-dl btn-sec btn-perigo" style={{ maxWidth: 110 }}
                         onClick={() => setEdEquip({ ...edEquip, especificacoes: edEquip.especificacoes.filter((_, k) => k !== i) })}>Remover</button>
                     )}
                   </div>
@@ -908,7 +907,7 @@ export default function CatalogoPage() {
                       value={f.legenda || ""} disabled={!editavel} aria-label={`Legenda da foto ${i + 1}`}
                       onChange={(ev) => setEdEquip({ ...edEquip, fotos: edEquip.fotos.map((x, k) => k === i ? { ...x, legenda: ev.target.value } : x) })} />
                     {editavel && (
-                      <button className="btn-dl btn-sec" style={{ ...vermelho, width: "100%", marginTop: 6 }}
+                      <button className="btn-dl btn-sec btn-perigo" style={{ width: "100%", marginTop: 6 }}
                         onClick={() => setEdEquip({ ...edEquip, fotos: edEquip.fotos.filter((_, k) => k !== i) })}>Remover</button>
                     )}
                     <MensagensCampo r={rEquip} campo={`fotos.${i}`} />

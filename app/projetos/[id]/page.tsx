@@ -261,25 +261,25 @@ export default function ProjetoDetalhePage() {
 
   return (
     <div className="page-larga">
-      <Link href="/projetos" style={{ color: "var(--primaria)", textDecoration: "none", fontSize: 13 }}>
+      <Link href="/projetos" className="link-voltar">
         ← Projetos
       </Link>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <h2 style={{ marginTop: 0, marginBottom: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h2 className="projeto-titulo">
             <span>{projeto.codigo_projeto || projeto.pedido_compra || "Projeto"}</span>
             {projeto.concluido_em && (
-              <span className="fu-badge" style={{ background: "#16a34a", color: "#fff", fontSize: 12 }}
+              <span className="fu-badge finalizado"
                 title="Todas as OSs ativas do projeto foram encerradas">
                 ✓ Concluído em {dataBrCompleta(projeto.concluido_em)}
               </span>
             )}
           </h2>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="btn-azul btn-sec" onClick={abrirEdicao}>✎ Editar projeto</button>
             {podeExcluir && (
-              <button className="btn-azul" style={{ background: "#dc2626" }} onClick={excluirProjeto} disabled={excluindo}>
+              <button className="btn-azul btn-perigo" onClick={excluirProjeto} disabled={excluindo}>
                 {excluindo ? "Excluindo…" : "🗑 Excluir"}
               </button>
             )}
@@ -299,7 +299,7 @@ export default function ProjetoDetalhePage() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "22px 0 12px", gap: 8, flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0, fontFamily: "var(--fonte-titulo)", color: "var(--texto)" }}>
+        <h3 style={{ margin: 0, fontSize: "var(--fs-xl)", color: "var(--texto)" }}>
           {verLixeiraInsp ? "Ordens de Serviço — Lixeira" : `Ordens de Serviço (${inspecoes.length})`}
         </h3>
         <div style={{ display: "flex", gap: 8 }}>
@@ -324,7 +324,7 @@ export default function ProjetoDetalhePage() {
                 <strong style={{ color: "var(--texto)" }}>{i.identificacao} <span className="detalhe" style={{ fontWeight: 400 }}>· fase {i.fase}</span></strong>
                 <span style={{ display: "flex", gap: 8 }}>
                   <button className="btn-dl btn-sec" onClick={() => restaurarInspecao(i.id)}>↩ Restaurar</button>
-                  <button className="btn-dl" style={{ background: "#dc2626" }} onClick={() => excluirInspDefinitivo(i.id)}>Excluir definitivamente</button>
+                  <button className="btn-dl btn-perigo" onClick={() => excluirInspDefinitivo(i.id)}>Excluir definitivamente</button>
                 </span>
               </div>
             ))}
@@ -343,7 +343,7 @@ export default function ProjetoDetalhePage() {
                   <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, paddingRight: podeExcluir ? 28 : 0 }}>
                     <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
                     <span className="detalhe" style={{ margin: 0 }}>
-                      {i.encerrada_em ? <strong style={{ color: "#16a34a" }}>🔒 Encerrada em {dataBrCompleta(i.encerrada_em)}</strong> : <>Fase {i.fase} · {tituloFase(i.fase)}</>}
+                      {i.encerrada_em ? <strong style={{ color: "var(--sucesso)" }}>🔒 Encerrada em {dataBrCompleta(i.encerrada_em)}</strong> : <>Fase {i.fase} · {tituloFase(i.fase)}</>}
                     </span>
                   </div>
                   {i.tanque && <span className="detalhe" style={{ margin: "4px 0 0" }}>🛢 {resumoTanque(i.tanque)}</span>}

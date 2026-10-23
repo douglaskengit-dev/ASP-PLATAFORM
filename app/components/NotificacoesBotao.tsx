@@ -125,14 +125,10 @@ export default function NotificacoesBotao() {
     <>
       <button type="button" onClick={abrir} title="Notificações"
         aria-label={total > 0 ? `Notificações (${total} novas)` : "Notificações"}
-        style={{ position: "relative", background: "none", border: "1px solid #3a3529", borderRadius: 8,
-          width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: "pointer", fontSize: 15, color: "#c9c4b6" }}>
+        className="barra-icone">
         🔔
         {total > 0 && (
-          <span style={{ position: "absolute", top: -5, right: -5, background: "var(--acento)", color: "var(--escuro)",
-            borderRadius: 999, fontSize: 10, fontWeight: 800, minWidth: 16, height: 16, padding: "0 3px",
-            display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
+          <span className="barra-icone-contador" aria-hidden="true">
             {total}
           </span>
         )}
@@ -142,7 +138,7 @@ export default function NotificacoesBotao() {
         <Modal titulo="🔔 Notificações" onFechar={() => setAberto(false)}>
           {push !== "indisponivel" && push !== "sem-chave" && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-              border: "1px solid #3a3529", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
+              border: "1px solid var(--borda)", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
               <div>
                 <strong style={{ fontSize: 13 }}>Notificações no aparelho</strong>
                 <span className="detalhe" style={{ display: "block" }}>

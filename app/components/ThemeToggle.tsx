@@ -26,27 +26,13 @@ export default function ThemeToggle({
     setEscuro(!escuro);
   }
 
-  const estiloHeader = { border: "1px solid #3a3529", color: "#c9c4b6" };
-  const estiloAuto = { border: "1px solid var(--borda)", color: "var(--texto)", background: "var(--bg-suave)" };
-
   return (
     <button
       type="button"
       onClick={alternar}
       title={escuro ? "Mudar para tema claro" : "Mudar para tema escuro"}
       aria-label={escuro ? "Mudar para tema claro" : "Mudar para tema escuro"}
-      style={{
-        background: "none",
-        borderRadius: 8,
-        width: 32,
-        height: 32,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        fontSize: 15,
-        ...(variante === "auto" ? estiloAuto : estiloHeader),
-      }}
+      className={variante === "auto" ? "btn-icone" : "barra-icone"}
     >
       {escuro ? "☀️" : "🌙"}
     </button>

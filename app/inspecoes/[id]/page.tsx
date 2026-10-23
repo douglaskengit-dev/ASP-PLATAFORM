@@ -185,7 +185,7 @@ const FERRAMENTAS_FUTURAS = ["Ultrassom", "Drone", "MFL"];
 // segurança sem marcar quando a execução começa).
 
 // Botões compactos da barra de Coletas (cabem melhor no card).
-const btnColeta: React.CSSProperties = { padding: "5px 9px", fontSize: 12, lineHeight: 1.2 };
+const btnColeta: React.CSSProperties = { padding: "4px 12px", fontSize: 13 };
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--borda)",
@@ -1810,7 +1810,7 @@ export default function InspecaoDetalhePage() {
                       width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       fontSize: 12, fontWeight: 700,
-                      background: estado === "feita" ? "#16a34a" : estado === "atual" ? "var(--primaria)" : "var(--track)",
+                      background: estado === "feita" ? "var(--sucesso-solido)" : estado === "atual" ? "var(--primaria)" : "var(--track)",
                       color: estado === "futura" ? "var(--cinza)" : "#fff",
                     }}
                   >
@@ -1926,7 +1926,7 @@ export default function InspecaoDetalhePage() {
                     {" · "}{c.data_coleta ? formatarData(c.data_coleta) : formatar(c.criado_em)}
                     {resp ? ` · ${resp}` : ""}
                     {c.aprovada_em && (
-                      <strong style={{ display: "block", color: "#16a34a" }}>
+                      <strong style={{ display: "block", color: "var(--sucesso)" }}>
                         ✓ Em uso no relatório — aprovada em {formatar(c.aprovada_em)}
                       </strong>
                     )}
@@ -1946,7 +1946,7 @@ export default function InspecaoDetalhePage() {
                     {podeAprovarMedicao && temMedicao && (
                       <button className="btn-dl btn-sec"
                         style={c.aprovada_em
-                          ? { color: "#16a34a", borderColor: "#16a34a" }
+                          ? { color: "var(--sucesso)", borderColor: "var(--sucesso)" }
                           : undefined}
                         title={c.aprovada_em ? "Desmarcar esta medição" : naoAprovavel || "Marcar como a medição válida para o relatório"}
                         disabled={aprovandoColeta === c.id || !!naoAprovavel} onClick={() => aprovarColeta(c)}>
@@ -1954,7 +1954,7 @@ export default function InspecaoDetalhePage() {
                       </button>
                     )}
                     {podeColeta && (
-                      <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                      <button className="btn-dl btn-sec btn-perigo"
                         title={c.aprovada_em ? "Excluir (lixeira de 30 dias) — a aprovação é retirada" : "Excluir (lixeira de 30 dias)"}
                         disabled={excluindoColeta === c.id} onClick={() => excluirColeta(c)}>
                         {excluindoColeta === c.id ? "Excluindo…" : "Excluir"}
@@ -2195,7 +2195,7 @@ export default function InspecaoDetalhePage() {
                       <button className="btn-dl btn-sec"
                         title={r.dados ? "Reabrir o formulário com os dados salvos" : "Refazer o documento (gera uma nova versão)"}
                         onClick={() => { setRascunhoEmEdicao({ id: r.id, dados: r.dados || null }); setModalRelatorio(true); }}>Editar</button>
-                      <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                      <button className="btn-dl btn-sec btn-perigo"
                         disabled={excluindoRelatorio === r.id} onClick={() => excluirRascunho(r.id)}>
                         {excluindoRelatorio === r.id ? "…" : "Excluir"}
                       </button>
@@ -2500,7 +2500,7 @@ export default function InspecaoDetalhePage() {
           <div className="medidor-shell">
             <div className="medidor-barra" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--borda)", background: "var(--bg-suave)", flexShrink: 0 }}>
               <span className="detalhe" style={{ margin: 0 }}>
-                {msgMedidor ? <strong style={{ color: "#16a34a" }}>✓ {msgMedidor}</strong>
+                {msgMedidor ? <strong style={{ color: "var(--sucesso)" }}>✓ {msgMedidor}</strong>
                   : coletaEditando ? "Editando o registro salvo — salvar atualiza esta medição (e o PDF dela)."
                   : "A medição é salva como Relatório Técnico interno (editável). “Salvar relatório (PDF)” salva a medição com o PDF anexado."}
               </span>
@@ -2911,7 +2911,7 @@ function rotuloStatus(s: string) {
   return ROTULO_STATUS_RELATORIO[s] || s;
 }
 function corStatus(s: string) {
-  return ({ em_aprovacao: "#c2410c", aprovado: "#16a34a", ajustar: "#dc2626", assinado: "#7c3aed" } as Record<string, string>)[s] || "var(--texto-suave)";
+  return ({ em_aprovacao: "var(--pendente)", aprovado: "var(--sucesso)", ajustar: "var(--perigo)", assinado: "var(--destaque)" } as Record<string, string>)[s] || "var(--texto-suave)";
 }
 /** Etapa do agendamento por extenso ("inspecao" → "inspeção"). */
 function rotuloEtapa(t: string) {

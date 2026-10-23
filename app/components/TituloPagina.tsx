@@ -4,11 +4,11 @@ import Image from "next/image";
 
 export default function TituloPagina({ titulo, subtitulo }: { titulo: string; subtitulo?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-      <Image src="/assets/asp-mascote.svg" alt="Mascote ASP" width={46} height={53} priority style={{ flexShrink: 0 }} />
-      <div>
-        <h1 style={{ margin: 0, fontFamily: "var(--fonte-titulo)", color: "var(--texto)" }}>{titulo}</h1>
-        {subtitulo && <p className="detalhe" style={{ margin: "2px 0 0" }}>{subtitulo}</p>}
+    <div className="titulo-pagina">
+      <Image src="/assets/asp-mascote.svg" alt="" aria-hidden="true" width={46} height={53} priority className="titulo-pagina-mascote" />
+      <div style={{ minWidth: 0 }}>
+        <h1>{titulo}</h1>
+        {subtitulo && <p>{subtitulo}</p>}
       </div>
     </div>
   );

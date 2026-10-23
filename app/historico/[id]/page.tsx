@@ -457,7 +457,7 @@ export default function HistoricoDetalhePage() {
                 <div style={{ marginTop: 8, borderTop: "1px dashed #d8dee3", paddingTop: 8 }}>
                   {carregandoHistorico[row.id] && <p style={{ fontSize: 12 }}>Carregando...</p>}
                   {!carregandoHistorico[row.id] && (historicoDados[row.id]?.length ?? 0) === 0 && (
-                    <p style={{ fontSize: 12, color: "#667085" }}>Nenhuma edição registrada ainda.</p>
+                    <p style={{ fontSize: 12, color: "var(--cinza)" }}>Nenhuma edição registrada ainda.</p>
                   )}
                   {(historicoDados[row.id] || []).map((v) => (
                     <div
@@ -469,11 +469,11 @@ export default function HistoricoDetalhePage() {
                         {new Date(v.editado_em).toLocaleString("pt-BR")}
                       </strong>
                       <div>Justificativa: {v.justificativa_edicao}</div>
-                      <div style={{ color: "#667085" }}>
+                      <div style={{ color: "var(--cinza)" }}>
                         Ciência: {v.ciente_anterior ? "sim" : "não"} → {v.ciente_novo ? "sim" : "não"}
                       </div>
                       {(v.comentario_anterior || v.comentario_novo) && (
-                        <div style={{ color: "#667085" }}>
+                        <div style={{ color: "var(--cinza)" }}>
                           Comentário: &quot;{v.comentario_anterior || "(vazio)"}&quot; → &quot;
                           {v.comentario_novo || "(vazio)"}&quot;
                         </div>

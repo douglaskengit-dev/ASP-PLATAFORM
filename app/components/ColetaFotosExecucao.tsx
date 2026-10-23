@@ -47,7 +47,7 @@ interface FotoLocal { chave: string; slot: string; url: string; hash?: string }
 
 const mb = (n: number) => (n / 1048576).toFixed(1).replace(".", ",");
 
-const btn: React.CSSProperties = { padding: "6px 10px", fontSize: 12.5, lineHeight: 1.2, cursor: "pointer", border: "none" };
+const btn: React.CSSProperties = { cursor: "pointer" };
 const campo: React.CSSProperties = {
   width: "100%", padding: "7px 9px", borderRadius: 8, border: "1px solid var(--borda)",
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 13,
@@ -277,12 +277,12 @@ export default function ColetaFotosExecucao({
     const ocupado = (enviando[slot.id] || 0) > 0;
     return (
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <label className="btn-dl" style={{ ...btn, opacity: ocupado ? 0.6 : 1 }}>
+        <label className="btn-dl btn-sm" style={{ ...btn, opacity: ocupado ? 0.6 : 1 }}>
           📷 {slot.minimo ? "Foto" : temFoto ? "Trocar" : "Foto"}
           <input type="file" accept="image/*" capture="environment" disabled={ocupado} style={{ display: "none" }}
             onChange={(e) => { enviarFotos(slot, e.target.files); e.target.value = ""; }} />
         </label>
-        <label className="btn-dl btn-sec" style={{ ...btn, opacity: ocupado ? 0.6 : 1 }}>
+        <label className="btn-dl btn-sec btn-sm" style={{ ...btn, opacity: ocupado ? 0.6 : 1 }}>
           🖼 Galeria
           <input type="file" accept="image/*" multiple={!!slot.minimo} disabled={ocupado} style={{ display: "none" }}
             onChange={(e) => { enviarFotos(slot, e.target.files); e.target.value = ""; }} />
@@ -437,7 +437,7 @@ export default function ColetaFotosExecucao({
       </p>
       {erro && <p className="erro-texto" style={{ margin: "6px 0 0" }}>{erro}</p>}
       {locais.length > 0 && (
-        <p className="detalhe" style={{ margin: "6px 0 0", color: "#c2410c" }}>
+        <p className="detalhe" style={{ margin: "6px 0 0", color: "var(--pendente)" }}>
           Sem conexão — {locais.length} foto(s) na fila deste aparelho, enviadas ao reconectar.
         </p>
       )}

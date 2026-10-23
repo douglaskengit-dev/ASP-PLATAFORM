@@ -566,7 +566,7 @@ export default function AdminUsuariosConteudo() {
                 <button type="button" className="btn-doc" onClick={() => abrirSenha(u)}>
                   🔑 Redefinir senha
                 </button>
-                <button type="button" className="btn-doc" disabled={!!travaExcluir} title={travaExcluir?.erro}
+                <button type="button" className="btn-dl btn-sec btn-perigo" disabled={!!travaExcluir} title={travaExcluir?.erro}
                   onClick={() => excluirUsuario(u)}>
                   🗑️ Excluir usuário
                 </button>

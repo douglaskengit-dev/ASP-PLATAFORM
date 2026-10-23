@@ -174,7 +174,7 @@ export default function OrgaosConteudo() {
               </div>
               <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                 <button className="btn-dl btn-sec" onClick={() => restaurarCliente(c.id)}>↩ Restaurar</button>
-                <button className="btn-dl" style={{ background: "#dc2626" }} onClick={() => excluirClienteDefinitivo(c.id)}>Excluir definitivamente</button>
+                <button className="btn-dl btn-perigo" onClick={() => excluirClienteDefinitivo(c.id)}>Excluir definitivamente</button>
               </span>
             </div>
           ))

@@ -76,9 +76,9 @@ export default function AvisoCliente({ clienteId, compacto = false, faixa = fals
   }
 
   const moldura: React.CSSProperties = {
-    border: "1px solid #dc2626",
-    borderLeft: "5px solid #dc2626",
-    background: "rgba(220, 38, 38, 0.07)",
+    border: "1px solid var(--perigo)",
+    borderLeft: "5px solid var(--perigo)",
+    background: "var(--perigo-bg)",
     borderRadius: 10,
     padding: compacto ? "10px 12px" : "12px 14px",
     marginTop: compacto ? 10 : 16,
@@ -87,11 +87,11 @@ export default function AvisoCliente({ clienteId, compacto = false, faixa = fals
   return (
     <div style={moldura}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-        <strong style={{ color: "#dc2626", fontSize: compacto ? 13 : 14 }}>
+        <strong style={{ color: "var(--perigo)", fontSize: compacto ? 13 : 14 }}>
           ⚠ Avisos do cliente
         </strong>
         {podeEditar && !editando && (
-          <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626", padding: "5px 10px", fontSize: 12 }}
+          <button className="btn-dl btn-sec btn-perigo btn-sm"
             onClick={() => { setRascunho(avisos); setEditando(true); }}>
             {avisos ? "Editar" : "Adicionar aviso"}
           </button>
@@ -107,14 +107,14 @@ export default function AvisoCliente({ clienteId, compacto = false, faixa = fals
             placeholder="Ex.: Entrada somente pelo portão 3. Exige crachá provisório na portaria. Trabalho em altura precisa de ASO válido."
             style={{
               width: "100%", minHeight: 90, padding: "9px 11px", borderRadius: 8,
-              border: "1px solid #dc2626", background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
+              border: "1px solid var(--perigo)", background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
             }}
           />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", margin: "4px 0 8px" }}>
             <p className="detalhe" style={{ margin: 0 }}>
               ℹ️ Este aviso aparece em <strong>todas</strong> as OSs deste cliente.
             </p>
-            <span className="detalhe" style={{ margin: 0, color: erroTamanho ? "#dc2626" : undefined }}>
+            <span className="detalhe" style={{ margin: 0, color: erroTamanho ? "var(--perigo)" : undefined }}>
               {tamanho}/{AVISO_CLIENTE_MAX}
             </span>
           </div>

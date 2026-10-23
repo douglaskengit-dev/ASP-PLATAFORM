@@ -692,7 +692,7 @@ export default function GerarRelatorio({
           Fotos da coleta de execução <span className="detalhe">— {minhas.length} carregada(s) automaticamente</span>
         </strong>
         {pendColeta.length > 0 && (
-          <div className="detalhe" style={{ margin: "6px 0 0", color: "#c2410c" }}>
+          <div className="detalhe" style={{ margin: "6px 0 0", color: "var(--pendente)" }}>
             ⚠ A coleta de fotos da execução está incompleta ({pendColeta.length} pendência(s)):
             <ul style={{ margin: "4px 0 4px 18px", padding: 0 }}>
               {pendColeta.map((p) => <li key={p}>{p}</li>)}
@@ -730,7 +730,7 @@ export default function GerarRelatorio({
                 )}
                 <MensagensCampo r={r} campo={`fotos.${i}`} />
               </div>
-              <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+              <button className="btn-dl btn-sec btn-perigo"
                 onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
             </div>
           );
@@ -1099,7 +1099,7 @@ export default function GerarRelatorio({
         <input style={campo} list="sug-fonte-figura" placeholder="Fonte (padrão: ASP)"
           value={f.fonte ?? ""}
           onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, fonte: e.target.value } : x))} />
-        <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+        <button className="btn-dl btn-sec btn-perigo"
           onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
         <div style={{ gridColumn: "1 / -1" }}><MensagensCampo r={r} campo={`fotos.${i}`} /></div>
       </div>
@@ -1127,7 +1127,7 @@ export default function GerarRelatorio({
               <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {ordem + 1}. {x.f.coleta || x.f.arquivo.name}
               </span>
-              <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+              <button className="btn-dl btn-sec btn-perigo"
                 onClick={() => setFotos((p) => p.filter((_, k) => k !== x.i))}>Remover</button>
             </div>
             <MensagensCampo r={r} campo={`fotos.${x.i}`} />
@@ -1174,7 +1174,7 @@ export default function GerarRelatorio({
                 {anexo && ` — ${anexo.f.coleta || anexo.f.arquivo.name}`}
               </span>
               {anexo && (
-                <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                <button className="btn-dl btn-sec btn-perigo"
                   onClick={() => setFotos((p) => p.filter((_, k) => k !== anexo.i))}>Remover</button>
               )}
               {anexo && <MensagensCampo r={r} campo={`fotos.${anexo.i}`} />}
@@ -1441,7 +1441,7 @@ export default function GerarRelatorio({
             </select>
           )}
           {coletas.length > 0 && !coletas.some((c) => c.aprovada_em) && (
-            <p className="detalhe" style={{ margin: "6px 0 0", color: "#c2410c" }}>
+            <p className="detalhe" style={{ margin: "6px 0 0", color: "var(--pendente)" }}>
               ⚠ Nenhuma medição foi aprovada nesta OS. Você pode gerar assim mesmo, mas convém
               aprovar a medição válida no card de Coletas antes de enviar.
             </p>
@@ -1760,7 +1760,7 @@ export default function GerarRelatorio({
                   <input style={{ ...campo, flex: 1, minWidth: 160 }} placeholder="Título do subtópico * (ex.: Teto)"
                     value={st.titulo}
                     onChange={(e) => setSubs8((p) => p.map((x, k) => k === i ? { titulo: e.target.value } : x))} />
-                  <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                  <button type="button" className="btn-dl btn-sec btn-perigo"
                     onClick={() => {
                       // remove o subtópico e as fotos dele; reindexa os seguintes
                       setFotos((p) => p.filter((f) => f.ancora !== `sub8-${i}`)
@@ -1859,7 +1859,7 @@ export default function GerarRelatorio({
                     <input type="file" accept="application/pdf,.pdf" hidden disabled={enviandoLaudo}
                       onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
                   </label>
-                  <button type="button" className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                  <button type="button" className="btn-dl btn-sec btn-perigo"
                     disabled={enviandoLaudo} onClick={() => { setLaudoPdf(null); setMsgLaudo(null); }}>Remover</button>
                 </div>
               ) : (
@@ -1924,7 +1924,7 @@ export default function GerarRelatorio({
         <ResumoValidacao r={r} rotulos={rotulosResumo} mostrarErros={tentou || temErros(r)} />
         {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
         {pendColeta.length > 0 && (
-          <p className="detalhe" style={{ margin: 0, color: "#c2410c", textAlign: "right" }}>
+          <p className="detalhe" style={{ margin: 0, color: "var(--pendente)", textAlign: "right" }}>
             ⚠ Coleta de fotos da execução incompleta — {pendColeta.length} pendência(s), listadas no início do formulário.
           </p>
         )}
