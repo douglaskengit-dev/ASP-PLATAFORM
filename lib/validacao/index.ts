@@ -8,7 +8,8 @@
  * checklist.ts = Fase 3; relatorio.ts = Fase 4; aprovacao.ts = Fases 5/9 (+ aprovacaoExecucao.ts, Fase 9);
  * periodo.ts + execucao.ts = Fase 6; fotosExecucao.ts + as regras do RDO
  * em lib/asp/rdo.ts = Fase 7; relatorioExecucao.ts = Fase 8; encerramento.ts =
- * Fase 10; catalogo.ts = Catálogo de procedimentos e equipamentos). */
+ * Fase 10; catalogo.ts = Catálogo de procedimentos e equipamentos;
+ * usuario.ts = Administração de usuários). */
 export * from "./resultado";
 export * from "./texto";
 export * from "./formatos";
@@ -30,3 +31,4 @@ export * from "./relatorioExecucao";
 export * from "./aprovacaoExecucao";
 export * from "./encerramento";
 export * from "./catalogo";
+export * from "./usuario";

@@ -2,15 +2,24 @@
 
 /** Conteúdo de "Meu perfil" (D17) — reaproveitado pela página /perfil e pelo
  * modal aberto a partir do header (D18). */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { corPerfil, NOMES_PERFIL, textoAvatarPerfil } from "@/lib/perfil";
+import { MensagensCampo } from "@/app/components/MensagensCampo";
+import { mesclar, novoResultado, normalizarEspacos, temErros, validarUsuario, type ResultadoValidacao, type UsuarioRef } from "@/lib/validacao";
 
 export default function PerfilConteudo() {
   const [carregando, setCarregando] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
 
   const [nome, setNome] = useState("");
+  /** Nome gravado (aviso de renomear e "nada mudou"). */
+  const [nomeGravado, setNomeGravado] = useState("");
+  /** Outros usuários ativos — homônimo e iniciais (⚠️). */
+  const [outros, setOutros] = useState<UsuarioRef[]>([]);
+  const [tentouNome, setTentouNome] = useState(false);
+  /** Resposta da API (erros/avisos que a tela não tinha como saber). */
+  const [rApiNome, setRApiNome] = useState<ResultadoValidacao>(novoResultado());
   const [tipoPerfil, setTipoPerfil] = useState<string | null>(null);
   const [emailAtual, setEmailAtual] = useState("");
   const [email, setEmail] = useState("");
@@ -39,23 +48,45 @@ export default function PerfilConteudo() {
         .eq("id", data.user.id)
         .single();
       setNome(perfil?.nome_completo || "");
+      setNomeGravado(perfil?.nome_completo || "");
+      fetch("/api/usuarios").then((r) => (r.ok ? r.json() : {})).then((d: any) => {
+        setOutros((d.usuarios || []).map((u: any) => ({
+          id: u.id, email: u.email || "", nome_completo: u.nome === u.email ? null : u.nome, perfil: u.perfil, ativo: true,
+        })));
+      }).catch(() => undefined);
       setTipoPerfil(perfil?.perfil || null);
       setCarregando(false);
     })();
   }, []);
 
+  const rNome = useMemo(() => mesclar(
+    validarUsuario({ nomeCompleto: nome }, { usuarios: outros, modo: "editar", id: userId, nomeAnterior: nomeGravado }),
+    rApiNome,
+  ), [nome, outros, userId, nomeGravado, rApiNome]);
+
   async function salvarNome(e: React.FormEvent) {
     e.preventDefault();
     if (!userId) return;
     setMsg(null);
+    setTentouNome(true);
+    if (temErros(rNome)) return;
     setSalvandoNome(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("gp_profiles")
-        .update({ nome_completo: nome.trim(), updated_at: new Date().toISOString() })
-        .eq("id", userId);
-      if (error) throw new Error(error.message);
+      // Pela API: as mesmas regras da Administração valem no servidor.
+      const resp = await fetch("/api/perfil", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nomeCompleto: normalizarEspacos(nome) }),
+      });
+      const dados = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        if (dados.erros) setRApiNome({ erros: dados.erros, avisos: dados.avisos || {} });
+        throw new Error(dados.erro || "Falha ao salvar o nome.");
+      }
+      const gravado = dados.usuario?.nome_completo ?? normalizarEspacos(nome);
+      setNome(gravado);
+      setNomeGravado(gravado);
+      setTentouNome(false);
       setMsg({ tipo: "ok", texto: "Nome atualizado." });
     } catch (err: any) {
       setMsg({ tipo: "erro", texto: err.message || "Falha ao salvar o nome." });
@@ -144,16 +175,18 @@ export default function PerfilConteudo() {
             <label>Nome completo</label>
             <input
               value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              placeholder="Seu nome"
+              onChange={(e) => { setNome(e.target.value); setRApiNome(novoResultado()); }}
+              placeholder="Nome e sobrenome"
+              className={tentouNome && rNome.erros.nomeCompleto?.length ? "val-invalido" : undefined}
               name="nome_completo"
               autoComplete="off"
               data-lpignore="true"
               data-1p-ignore
             />
+            <MensagensCampo r={rNome} campo="nomeCompleto" mostrarErros={tentouNome} />
           </div>
           <div className="actions">
-            <button className="btn" type="submit" disabled={salvandoNome}>
+            <button className="btn" type="submit" disabled={salvandoNome || normalizarEspacos(nome) === normalizarEspacos(nomeGravado)}>
               {salvandoNome ? "Salvando..." : "Salvar nome"}
             </button>
           </div>

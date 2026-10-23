@@ -85,7 +85,7 @@ import {
 import { arquivosDaOS, enviarLaudoPdf, examinarLaudoLocal } from "@/lib/asp/laudo-pdf";
 import EncerramentoOS from "@/app/components/EncerramentoOS";
 import EntregasCliente from "@/app/components/EntregasCliente";
-import { ativoNoCatalogo, textoEncerrada } from "@/lib/validacao";
+import { agendamentoFuturo, ativoNoCatalogo, textoEncerrada } from "@/lib/validacao";
 
 interface Projeto {
   id: string;
@@ -1997,6 +1997,13 @@ export default function InspecaoDetalhePage() {
                 </div>
                 {a.data_execucao && <div className="detalhe" style={{ margin: 0 }}>🛠 Execução prevista: {formatarData(a.data_execucao)}</div>}
                 {a.equipe?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipe: {a.equipe.map((m) => m.nome).join(", ")}</div>}
+                {/* Equipe vazia (ex.: o único membro foi desativado): só avisa —
+                    o ⛔ de "escolha a equipe" vale ao salvar o agendamento. */}
+                {!(a.equipe?.length > 0) && agendamentoFuturo(a, hojeBrasil()) && (
+                  <div className="val-campo" aria-live="polite">
+                    <p className="val-msg val-aviso">⚠️ Agendamento sem equipe — escale alguém{podeAgenda ? " (✎ Editar)" : ""}.</p>
+                  </div>
+                )}
                 {a.equipamentos?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipamentos: {a.equipamentos.join(", ")}</div>}
                 {a.checklist?.length > 0 && (
                   <div className="detalhe" style={{ margin: "2px 0 0" }}>
