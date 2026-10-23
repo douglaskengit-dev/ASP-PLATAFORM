@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { PRIMEIRA_FASE_INSPECAO } from "@/lib/asp/fases";
+import { faseInicial } from "@/lib/asp/fases";
 import { normalizarTanque } from "@/lib/asp/tanque";
 import { ehViolacaoUnica, validarOSNoServidor } from "@/lib/asp/os-validacao-api";
 import { normalizarEspacos, primeiroErro, ROTULOS_OS, temErros } from "@/lib/validacao";
@@ -21,6 +21,9 @@ interface NovaInspecaoBody {
   /** Cadastro do tanque: dimensões, capacidade e material. Obrigatório — é
    *  o que alimenta a identificação do tanque em todo relatório da inspeção. */
   tanque?: unknown;
+  /** "Haverá inspeção?" desta OS. Ausente = o padrão do projeto
+   *  (gp_projetos.com_inspecao_padrao; sem a coluna, Sim). */
+  comInspecao?: boolean;
 }
 
 /** Lista inspeções de um projeto. ?lixeira=1 lista as excluídas. Limpeza
@@ -46,7 +49,8 @@ export async function GET(req: NextRequest) {
 }
 
 /** Cria uma OS dentro de um projeto (ex.: "Tanque TQ-01"). Nasce na fase 2
- * (Agendamento). As regras de lib/validacao/ordemServico.ts são repetidas
+ * (Agendamento da inspeção) — ou na 6 (Agendamento de Execução) quando é SEM
+ * inspeção (comInspecao = false; padrão = o do projeto). As regras de lib/validacao/ordemServico.ts são repetidas
  * aqui — a tela não é confiável: identificação única no projeto (409 com a
  * OS que já a usa), procedimento do Catálogo e tanque completo. */
 export async function POST(req: NextRequest) {
@@ -72,13 +76,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // "Haverá inspeção?": o escolhido na tela; sem escolha, o padrão do projeto.
+  let comInspecao = true;
+  if (typeof body.comInspecao === "boolean") comInspecao = body.comInspecao;
+  else {
+    const { data: proj } = await getSupabaseAdmin().from("gp_projetos").select("*").eq("id", body.projetoId).maybeSingle();
+    comInspecao = (proj as any)?.com_inspecao_padrao !== false;
+  }
+
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
     .from("gp_inspecoes")
     .insert({
       projeto_id: body.projetoId,
       identificacao,
-      fase: PRIMEIRA_FASE_INSPECAO,
+      fase: faseInicial(comInspecao),
+      // Só grava a coluna quando é Não: sem a migração, a OS com inspeção
+      // segue sendo criada como antes.
+      ...(comInspecao ? {} : { com_inspecao: false }),
       ferramenta_coleta: body.ferramentaColeta?.trim() || "sedimento",
       procedimento: dados.procedimento,
       tanque: normalizarTanque(body.tanque),

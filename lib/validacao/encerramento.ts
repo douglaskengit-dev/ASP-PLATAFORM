@@ -100,6 +100,9 @@ export interface ContextoPendencias {
   hoje: string;
   /** Coleta de fotos da execução (null = nada gravado → tudo pendente). */
   coleta: RegistroFotosExecucao | null;
+  /** false = OS sem inspeção: relatório de inspeção (assinatura, rascunho
+   *  ou aprovação esquecidos de antes da troca) não é pendência. */
+  comInspecao?: boolean;
 }
 
 const ROT_TIPO: Record<string, string> = { inspecao: "inspeção", execucao: "execução" };
@@ -115,7 +118,8 @@ export function relatorioAtual(rels: RelatorioEncerramento[], tipo: string): Rel
 /** Tudo que impede o encerramento normal (vazio = pode encerrar). */
 export function pendenciasEncerramento(c: ContextoPendencias): PendenciaEncerramento[] {
   const out: PendenciaEncerramento[] = [];
-  const rels = c.relatorios || [];
+  // OS sem inspeção: relatórios de inspeção (de antes da troca) são só histórico.
+  const rels = (c.relatorios || []).filter((r) => c.comInspecao !== false || r.tipo !== "inspecao");
 
   // 1) Relatório de execução assinado
   const exec = relatorioAtual(rels, "execucao");

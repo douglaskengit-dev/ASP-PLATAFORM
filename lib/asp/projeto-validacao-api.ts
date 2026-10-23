@@ -7,7 +7,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { ULTIMA_FASE } from "@/lib/asp/fases";
 import {
   anoDoCodigo, codigoRepetido, ContatoRef, ContextoProjeto, DadosProjeto, hojeBrasil,
-  iniciaisDoNome, normalizarCodigoProjeto, ProjetoRef, ResultadoValidacao, validarProjeto,
+  iniciaisDoNome, inspecaoPadraoDoProjeto, normalizarCodigoProjeto, ProjetoRef, ResultadoValidacao, validarProjeto,
 } from "@/lib/validacao";
 
 export const PERFIS_ESCRITA = ["admin", "comercial", "gerencia"];
@@ -88,4 +88,27 @@ export async function validarProjetoNoServidor(
 ): Promise<{ resultado: ResultadoValidacao; conflito: ProjetoRef | null }> {
   const ctx = await contextoDoBanco({ codigo: dados.codigoProjeto, clienteId: dados.clienteId, ...opts });
   return { resultado: validarProjeto(dados, ctx), conflito: codigoRepetido(dados.codigoProjeto, ctx) };
+}
+
+/** "Haverá inspeção?" padrão de um projeto novo do cliente: Não quando o
+ *  cliente é recorrente e já tem projeto ativo (fora da lixeira; o projeto
+ *  em edição não conta); senão Sim. Sem as colunas (migração), Sim. */
+export async function inspecaoPadraoNoServidor(
+  clienteId: string | null | undefined,
+  excluirId?: string | null,
+): Promise<{ recorrente: boolean; periodicidadeMeses: number | null; projetosAtivos: number; inspecaoPadrao: boolean }> {
+  if (!clienteId) return { recorrente: false, periodicidadeMeses: null, projetosAtivos: 0, inspecaoPadrao: true };
+  const admin = getSupabaseAdmin();
+  const [{ data: cli }, { data: projs }] = await Promise.all([
+    admin.from("gp_orgaos").select("*").eq("id", clienteId).maybeSingle(),
+    admin.from("gp_projetos").select("id").eq("cliente_id", clienteId).is("excluido_em", null),
+  ]);
+  const recorrente = (cli as any)?.recorrente === true;
+  const projetosAtivos = (projs || []).filter((p: any) => p.id !== excluirId).length;
+  return {
+    recorrente,
+    periodicidadeMeses: (cli as any)?.periodicidade_meses ?? null,
+    projetosAtivos,
+    inspecaoPadrao: inspecaoPadraoDoProjeto({ recorrente, projetosAtivos }),
+  };
 }

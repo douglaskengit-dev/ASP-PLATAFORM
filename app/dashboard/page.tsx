@@ -19,6 +19,7 @@ import { DEFINICOES } from "./definicoes";
 import {
   Base, ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, Mais, num, pct, plural, ROT_TIPO, Secao, Tabela, useVisao, Vazio,
 } from "./componentes";
+import { ROTULO_STATUS_RECORRENCIA } from "@/lib/validacao";
 import s from "./dashboard.module.css";
 
 const PERIODOS: { chave: ChavePeriodo; rotulo: string }[] = [
@@ -206,11 +207,12 @@ function Conteudo({ p }: { p: Dashboard }) {
     <>
       <div className={s.kpis}>
         <Kpi def="osAndamento" valor={num(k.osAndamento)}
-          sub={<>{plural(k.osAbertasPeriodo, "aberta", "abertas")} no período · {plural(k.paradas, "parada", "paradas")}</>} />
+          sub={<>{plural(k.osAbertasPeriodo, "aberta", "abertas")} no período · {plural(k.paradas, "parada", "paradas")}{k.osSemInspecao ? <> · {num(k.osSemInspecao)} sem inspeção</> : null}</>} />
         <Kpi def="osEncerradas" periodo valor={num(k.osEncerradasPeriodo)}
           sub={<>{plural(k.encerradasManualPeriodo, "manual", "manuais")} · {plural(k.entregasPeriodo, "entrega", "entregas")} no período</>} />
         <Kpi def="leadTime" periodo valor={k.leadTime ? dec(k.leadTime.media) : "—"} unidade={k.leadTime ? "dias" : undefined}
-          sub={k.leadTime ? <>mediana {dec(k.leadTime.mediana)} d · {plural(k.leadTime.n, "OS", "OSs")}</> : "nenhuma OS encerrada no período"} />
+          sub={k.leadTime ? <>mediana {dec(k.leadTime.mediana)} d · {plural(k.leadTime.n, "OS", "OSs")}
+            {k.leadTimePorTipo.semInspecao ? <> · com inspeção {dec(k.leadTimePorTipo.comInspecao?.media)} d · sem {dec(k.leadTimePorTipo.semInspecao.media)} d</> : null}</> : "nenhuma OS encerrada no período"} />
         <Kpi def="projetosConcluidos" periodo valor={num(k.projetosConcluidosPeriodo)} sub={<>{plural(k.projetosAtivos, "projeto ativo", "projetos ativos")}</>} />
         <Kpi def="reprovacao" periodo valor={pct(k.reprovacao.total.taxa)} alerta={(k.reprovacao.total.taxa ?? 0) >= 0.3}
           sub={<>Inspeção {pct(k.reprovacao.inspecao.taxa)} ({num(k.reprovacao.inspecao.reprovacoes)}/{num(k.reprovacao.inspecao.avaliacoes)}) · Execução {pct(k.reprovacao.execucao.taxa)} ({num(k.reprovacao.execucao.reprovacoes)}/{num(k.reprovacao.execucao.avaliacoes)})</>} />
@@ -251,6 +253,7 @@ function Conteudo({ p }: { p: Dashboard }) {
       </div>
 
       <h2 className={s.grupoTitulo}>Clientes</h2>
+      <div className={s.cheio}><Recorrencia p={p} /></div>
       <div className={s.cheio}><Clientes p={p} /></div>
     </>
   );
@@ -265,12 +268,12 @@ function Funil({ p }: { p: Dashboard }) {
   return (
     <Secao def="funil" acoes={botao} contador={total}>
       {tabela ? (
-        <Tabela legenda="OSs não encerradas por fase" colunas={["Fase", "OSs", "Paradas", "Idade mediana (dias)"]}
-          linhas={p.funil.map((x) => [`${x.fase}. ${x.titulo}`, num(x.abertas), num(x.paradas), x.idadeMediana == null ? "—" : dec(x.idadeMediana)])} />
+        <Tabela legenda="OSs não encerradas por fase" colunas={["Fase", "OSs", "Sem inspeção", "Paradas", "Idade mediana (dias)"]}
+          linhas={p.funil.map((x) => [`${x.fase}. ${x.titulo}`, num(x.abertas), num(x.semInspecao), num(x.paradas), x.idadeMediana == null ? "—" : dec(x.idadeMediana)])} />
       ) : (
         <BarrasHorizontais dados={dados} rotuloAria="OSs não encerradas por fase" vazio="Nenhuma OS em andamento."
           selecionado={sel} aoClicar={(_, i) => setSel((v) => (v === i ? null : i))}
-          detalhe={(d) => d.x.abertas ? <>{d.x.area !== "—" ? `${d.x.area} · ` : ""}mediana {dias(d.x.idadeMediana == null ? null : Math.round(d.x.idadeMediana))} na fase{d.x.paradas ? <> · <strong style={{ color: "var(--cor-aviso)" }}>{plural(d.x.paradas, "parada", "paradas")}</strong></> : null}</> : (d.x.area !== "—" ? d.x.area : "nenhuma OS")} />
+          detalhe={(d) => d.x.abertas ? <>{d.x.area !== "—" ? `${d.x.area} · ` : ""}mediana {dias(d.x.idadeMediana == null ? null : Math.round(d.x.idadeMediana))} na fase{d.x.semInspecao ? ` · ${num(d.x.semInspecao)} sem inspeção` : ""}{d.x.paradas ? <> · <strong style={{ color: "var(--cor-aviso)" }}>{plural(d.x.paradas, "parada", "paradas")}</strong></> : null}</> : (d.x.area !== "—" ? d.x.area : "nenhuma OS")} />
       )}
       {ativo && !tabela && (
         <div className={s.drill} aria-live="polite">
@@ -280,7 +283,10 @@ function Funil({ p }: { p: Dashboard }) {
               {ativo.oss.map((o) => (
                 <li key={o.id} className={s.linha}>
                   <LinkOS os={o} />
-                  <span className={`${s.chip}${o.dias > 15 ? ` ${s.chipAlerta}` : ""}`}>{dias(o.dias)}</span>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {!o.comInspecao && <span className={s.chip}>sem inspeção</span>}
+                    <span className={`${s.chip}${o.dias > 15 ? ` ${s.chipAlerta}` : ""}`}>{dias(o.dias)}</span>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -575,6 +581,43 @@ function Campo({ p }: { p: Dashboard }) {
           )}
       </Secao>
     </>
+  );
+}
+
+/** Próximos serviços dos clientes recorrentes: o que pede ação primeiro
+ *  (vencido, em breve), com atalho para abrir o próximo projeto. */
+function Recorrencia({ p }: { p: Dashboard }) {
+  const r = p.recorrencia;
+  return (
+    <Secao def="recorrencia" contador={r.total}>
+      {r.total === 0 ? (
+        <Vazio>Nenhum cliente com serviço recorrente{p.filtros.cliente ? " neste filtro" : ""}. Marque “Serviço recorrente” no cadastro do cliente.</Vazio>
+      ) : (
+        <>
+          <p className={s.sub} style={{ margin: "0 0 6px" }}>
+            {plural(r.vencidos, "vencido", "vencidos")} · {num(r.emBreve)} em breve · {num(r.semHistorico)} sem histórico
+          </p>
+          <ListaCurta itens={r.itens} total={r.total} inicial={8} chave={(x) => x.clienteId} render={(x) => (
+            <div className={s.linha}>
+              <span>
+                <Link className={s.link} href={`/orgaos/${x.clienteId}`}>{x.cliente}</Link>
+                <span className={s.sub}>
+                  {x.periodicidadeMeses ? `a cada ${x.periodicidadeMeses} meses` : "sem periodicidade"}
+                  {x.ultimaExecucao ? ` · última execução ${ddmmaa(x.ultimaExecucao)}` : ""}
+                  {x.vencimento ? ` · vence ${ddmmaa(x.vencimento)}` : ""}
+                  {x.status === "vencido" || x.status === "em_breve" || x.status === "sem_historico" ? (
+                    <> · <Link className={s.link} href={`/projetos?novo=1&cliente=${x.clienteId}`}>+ Novo projeto</Link></>
+                  ) : null}
+                </span>
+              </span>
+              <span className={`${s.chip}${x.status === "vencido" || x.status === "em_breve" ? ` ${s.chipAlerta}` : ""}`}>
+                {ROTULO_STATUS_RECORRENCIA[x.status]}{x.status === "vencido" && x.dias != null ? ` há ${dias(-x.dias)}` : x.status === "em_breve" && x.dias != null ? ` · ${dias(x.dias)}` : ""}
+              </span>
+            </div>
+          )} />
+        </>
+      )}
+    </Secao>
   );
 }
 

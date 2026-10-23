@@ -32,3 +32,4 @@ export * from "./aprovacaoExecucao";
 export * from "./encerramento";
 export * from "./catalogo";
 export * from "./usuario";
+export * from "./recorrencia";

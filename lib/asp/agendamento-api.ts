@@ -69,6 +69,8 @@ export interface InfoOS {
   dataAbertura: string | null;
   /** Código do procedimento da OS. */
   procedimento: string | null;
+  /** false = OS sem inspeção (sem agendamento/relatório de inspeção). */
+  comInspecao: boolean;
 }
 
 function paraRef(a: any): AgendamentoRef {
@@ -90,7 +92,8 @@ function daLixeira(a: any): boolean {
 export async function infoDaOS(inspecaoId: string): Promise<InfoOS | null> {
   const { data } = await getSupabaseAdmin()
     .from("gp_inspecoes")
-    .select("id, identificacao, procedimento, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, cliente:gp_orgaos(razao_social))")
+    // "*": com_inspecao sem quebrar antes da migração.
+    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, cliente:gp_orgaos(razao_social))")
     .eq("id", inspecaoId)
     .maybeSingle();
   if (!data) return null;
@@ -100,6 +103,7 @@ export async function infoDaOS(inspecaoId: string): Promise<InfoOS | null> {
     projetoId: p?.id || null, projLabel: p?.codigo_projeto || p?.pedido_compra || "",
     endereco: p?.endereco || "", clienteNome: p?.cliente?.razao_social || "", dataAbertura: p?.data_abertura || null,
     procedimento: (data as any).procedimento || null,
+    comInspecao: (data as any).com_inspecao !== false,
   };
 }
 
@@ -150,7 +154,9 @@ export async function contextoAgendamento(opts: {
     // Sugestões ("seria …?"): só equipamentos ativos no Catálogo.
     catalogo: equipCatalogo.filter((e: any) => e.ativo !== false).map((e: any) => e.nome).filter(Boolean),
     funcoes: Object.fromEntries((ativos.data || []).map((u: any) => [u.id, u.funcao || null])),
-    relatoriosInspecao: relInsp.error ? undefined : (relInsp.data || []).map((r: any) => ({ versao: r.versao, status: r.status })),
+    // OS sem inspeção: o relatório de inspeção não é cobrado na execução.
+    relatoriosInspecao: info && !info.comInspecao ? []
+      : relInsp.error ? undefined : (relInsp.data || []).map((r: any) => ({ versao: r.versao, status: r.status })),
     equipamentosProcedimento,
     procedimento: info?.procedimento || null,
   };

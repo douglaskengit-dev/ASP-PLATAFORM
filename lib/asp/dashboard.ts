@@ -11,11 +11,11 @@
  *    período) e "no período" (eventos com data dentro do período). */
 import {
   dataIsoValida, diaBrasilia, diasSemRdo, execucaoAtiva, foraDoLimite, hojeBrasil, intersecao, mesmoLocal,
-  normalizarEquipamento, pendenciasEncerramento, periodoDe, procedimentoUsaLaudo, relatorioAtual,
-  rotuloCategoria, somarDias, type Periodo, type SecaoPendencia,
+  normalizarEquipamento, pendenciasEncerramento, periodoDe, procedimentoUsaLaudo, proximoServico, relatorioAtual,
+  rotuloCategoria, somarDias, type OSRecorrencia, type Periodo, type SecaoPendencia, type StatusRecorrencia,
 } from "../validacao";
 import { pendenciasColeta, progressoColeta, registroVazio, type RegistroFotosExecucao } from "./fotos-execucao";
-import { FASES, PRIMEIRA_FASE_INSPECAO, ULTIMA_FASE } from "./fases";
+import { faseInicial, FASES, ULTIMA_FASE } from "./fases";
 
 // ── Entrada (o que o loader traz) ────────────────────────────────────────────
 
@@ -40,6 +40,16 @@ export interface OsBruta {
   /** Data (dia) do encerramento — escolhida por quem encerra. */
   encerrada_em: string | null;
   encerramento_manual?: boolean | null;
+  /** false = OS sem inspeção (nasce na fase 6; as fases 2–5 não existem). */
+  com_inspecao?: boolean | null;
+}
+/** Cliente com a configuração de serviço recorrente. */
+export interface OrgaoBruto {
+  id: string;
+  razao_social: string;
+  recorrente?: boolean | null;
+  periodicidade_meses?: number | null;
+  aviso_antecedencia_dias?: number | null;
 }
 export interface HistoricoBruto {
   inspecao_id: string;
@@ -114,6 +124,8 @@ export interface DadosDashboard {
   coletas: ColetaBruta[];
   entregas: EntregaBruta[];
   procedimentos: ProcedimentoBruto[];
+  /** Clientes ativos (recorrência). Ausente = quadro de recorrência vazio. */
+  orgaos?: OrgaoBruto[];
 }
 
 // ── Filtros e período ────────────────────────────────────────────────────────
@@ -209,18 +221,23 @@ export interface Permanencia {
 }
 
 /** Entrada na fase atual e as permanências já encerradas de uma OS, a partir
- *  do histórico. A OS nasce na fase 2 (criado_em). Cada linha com mudança de
+ *  do histórico. A OS nasce na fase 2 (criado_em) — ou na 6, se é sem
+ *  inspeção; com histórico, vale a fase_de da primeira linha (a OS pode ter
+ *  trocado "Haverá inspeção?" depois: 'alterar_inspecao' 3 → 6 é uma
+ *  mudança de fase como outra qualquer). Cada linha com mudança de
  *  fase (fase_de ≠ fase_para) fecha a permanência na fase_de; "encerrar" fecha
  *  a fase 10 e "reabrir" a reabre. Se a corrente quebra (fase_de diferente da
  *  fase em que a OS estava, dado legado), a permanência é descartada — não dá
  *  para saber quando ela começou — e a contagem recomeça dali. */
 export function permanenciasDaOS(
-  os: Pick<OsBruta, "fase" | "criado_em" | "encerrada_em">,
+  os: Pick<OsBruta, "fase" | "criado_em" | "encerrada_em"> & { com_inspecao?: boolean | null },
   hist: Pick<HistoricoBruto, "fase_de" | "fase_para" | "acao" | "criado_em">[],
 ): { fechadas: Permanencia[]; entradaAtual: string } {
   const ord = [...hist].sort((a, b) => a.criado_em.localeCompare(b.criado_em));
   const fechadas: Permanencia[] = [];
-  let cur: { fase: number; desde: string } | null = { fase: PRIMEIRA_FASE_INSPECAO, desde: os.criado_em };
+  const primeira = ord.find((h) => h.fase_de != null && Number.isFinite(Number(h.fase_de)));
+  const nasceu = primeira ? Number(primeira.fase_de) : faseInicial(os.com_inspecao);
+  let cur: { fase: number; desde: string } | null = { fase: nasceu, desde: os.criado_em };
   for (const h of ord) {
     const de = Number(h.fase_de), para = Number(h.fase_para);
     if (h.acao === "encerrar") {
@@ -264,6 +281,8 @@ export interface RefOS {
   id: string;
   identificacao: string;
   fase: number;
+  /** false = OS sem inspeção. */
+  comInspecao: boolean;
   projetoId: string;
   projeto: string;
   cliente: string | null;
@@ -325,6 +344,10 @@ export interface Dashboard {
     projetosConcluidosPeriodo: number;
     projetosAtivos: number;
     leadTime: Estatistica | null;
+    /** Lead time separado: OSs com e sem inspeção (a sem pula as fases 2–5). */
+    leadTimePorTipo: { comInspecao: Estatistica | null; semInspecao: Estatistica | null };
+    /** OSs não encerradas sem inspeção (estado atual). */
+    osSemInspecao: number;
     reprovacao: { inspecao: Taxa; execucao: Taxa; total: Taxa };
     aguardandoAprovacao: { total: number; maisAntigoDias: number | null };
     aguardandoAssinatura: { total: number; maisAntigoDias: number | null };
@@ -339,6 +362,8 @@ export interface Dashboard {
     abertas: number;
     paradas: number;
     idadeMediana: number | null;
+    /** Quantas das OSs da fase são sem inspeção (só fases 6–10). */
+    semInspecao: number;
     oss: (RefOS & { dias: number })[];
   }[];
   duracaoFases: { fase: number; titulo: string; n: number; media: number | null; mediana: number | null }[];
@@ -372,6 +397,62 @@ export interface Dashboard {
     id: string | null; nome: string; projetos: number; osAbertas: number;
     osAbertasPeriodo: number; osEncerradasPeriodo: number; entregasPeriodo: number;
   }[];
+  /** Próximos serviços dos clientes recorrentes (estado atual). */
+  recorrencia: {
+    total: number;
+    vencidos: number;
+    emBreve: number;
+    semHistorico: number;
+    itens: ItemRecorrencia[];
+  };
+}
+
+export interface ItemRecorrencia {
+  clienteId: string;
+  cliente: string;
+  periodicidadeMeses: number | null;
+  ultimaExecucao: string | null;
+  vencimento: string | null;
+  abreEm: string | null;
+  dias: number | null;
+  status: StatusRecorrencia;
+}
+
+/** Ordem do quadro de recorrência: o que pede ação primeiro. */
+const PESO_RECORRENCIA: Record<StatusRecorrencia, number> = { vencido: 0, em_breve: 1, sem_historico: 2, em_andamento: 3, em_dia: 4 };
+
+/** Próximo serviço de cada cliente recorrente, com os dados já carregados
+ *  (mesma regra de lib/validacao/recorrencia.ts que os lembretes usam). O
+ *  filtro de cliente vale; procedimento e pessoa não (é do cliente). */
+export function montarRecorrencia(
+  d: Pick<DadosDashboard, "orgaos" | "projetos" | "oss" | "agendamentos">, hoje: string, clienteFiltro?: string | null,
+): Dashboard["recorrencia"] {
+  const recorrentes = (d.orgaos || []).filter((o) => o.recorrente === true && (!clienteFiltro || o.id === clienteFiltro));
+  const clienteDoProjeto = new Map(d.projetos.map((p) => [p.id, p.cliente_id]));
+  const agsPorOS = porChave(d.agendamentos, (a) => a.inspecao_id);
+  const ossPorCliente = new Map<string, OSRecorrencia[]>();
+  for (const o of d.oss) {
+    const cli = clienteDoProjeto.get(o.projeto_id);
+    if (!cli) continue;
+    const l = ossPorCliente.get(cli) || [];
+    l.push({ id: o.id, criadaEm: diaBrasilia(o.criado_em), encerradaEm: o.encerrada_em, agendamentos: agsPorOS.get(o.id) || [] });
+    ossPorCliente.set(cli, l);
+  }
+  const itens: ItemRecorrencia[] = recorrentes.map((o) => {
+    const p = proximoServico({ periodicidadeMeses: o.periodicidade_meses, avisoAntecedenciaDias: o.aviso_antecedencia_dias }, ossPorCliente.get(o.id) || [], hoje);
+    return {
+      clienteId: o.id, cliente: o.razao_social || "Cliente sem nome", periodicidadeMeses: o.periodicidade_meses ?? null,
+      ultimaExecucao: p.ultimaExecucao, vencimento: p.vencimento, abreEm: p.abreEm, dias: p.dias, status: p.status,
+    };
+  }).sort((a, b) => PESO_RECORRENCIA[a.status] - PESO_RECORRENCIA[b.status]
+    || (a.vencimento || "9999").localeCompare(b.vencimento || "9999") || a.cliente.localeCompare(b.cliente, "pt-BR"));
+  return {
+    total: itens.length,
+    vencidos: itens.filter((x) => x.status === "vencido").length,
+    emBreve: itens.filter((x) => x.status === "em_breve").length,
+    semHistorico: itens.filter((x) => x.status === "sem_historico").length,
+    itens: itens.slice(0, MAX_LISTA),
+  };
 }
 
 const taxa = (avaliacoes: number, reprovacoes: number): Taxa => ({ avaliacoes, reprovacoes, taxa: avaliacoes ? reprovacoes / avaliacoes : null });
@@ -430,7 +511,7 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
   const ref = (o: OsBruta): RefOS => {
     const p = projetos.get(o.projeto_id)!;
     return {
-      id: o.id, identificacao: o.identificacao, fase: o.fase, projetoId: p.id,
+      id: o.id, identificacao: o.identificacao, fase: o.fase, comInspecao: o.com_inspecao !== false, projetoId: p.id,
       projeto: p.codigo_projeto || p.pedido_compra || "Projeto", cliente: p.cliente_nome,
     };
   };
@@ -469,6 +550,7 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
     const est = estatistica(naFase.map((x) => x.dias));
     return {
       fase: fd.numero, titulo: fd.titulo, area: fd.area, abertas: naFase.length,
+      semInspecao: naFase.filter((x) => !x.comInspecao).length,
       paradas: naFase.filter((x) => x.dias > LIMITE_PARADA_DIAS).length,
       idadeMediana: est ? est.mediana : null, oss: naFase.slice(0, MAX_LISTA),
     };
@@ -480,7 +562,10 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
 
   // ── Encerradas / lead time (no período) ───────────────────────────────────
   const encerradasPeriodo = oss.filter((o) => noIntervalo(diaBrasilia(o.encerrada_em), periodo));
-  const leads = encerradasPeriodo.map((o) => diferencaDias(diaBrasilia(o.criado_em)!, diaBrasilia(o.encerrada_em)!)).filter((x) => x >= 0);
+  const leadDe = (lista: OsBruta[]) => lista.map((o) => diferencaDias(diaBrasilia(o.criado_em)!, diaBrasilia(o.encerrada_em)!)).filter((x) => x >= 0);
+  const leads = leadDe(encerradasPeriodo);
+  const leadsCom = leadDe(encerradasPeriodo.filter((o) => o.com_inspecao !== false));
+  const leadsSem = leadDe(encerradasPeriodo.filter((o) => o.com_inspecao === false));
 
   // ── Reprovação (no período, pelo histórico) ───────────────────────────────
   let avI = 0, repI = 0, avE = 0, repE = 0;
@@ -512,7 +597,9 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
   const filaAprov: ItemFila[] = [];
   const filaAssin: ItemFila[] = [];
   for (const o of abertas) {
-    const rels = relsPorOS.get(o.id) || [];
+    // OS sem inspeção: relatório de inspeção (de antes da troca) é só
+    // histórico — ninguém o aprova nem assina (as fases 2–5 não existem).
+    const rels = (relsPorOS.get(o.id) || []).filter((r) => o.com_inspecao !== false || r.tipo !== "inspecao");
     for (const r of rels) {
       if (r.status === "em_aprovacao") {
         const desde = r.enviado_em || r.criado_em;
@@ -544,6 +631,7 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
       })),
       periodo: execucaoDe(o.id), hoje,
       coleta: fotosPorOS.get(o.id) || registroVazio(!!proc?.agua_potavel),
+      comInspecao: o.com_inspecao !== false,
     });
     return {
       os: ref(o), dias: idadePorOS.get(o.id) ?? 0, entregas: (entregasPorOS.get(o.id) || []).length,
@@ -713,6 +801,8 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
       projetosConcluidosPeriodo: projetosRecorte.filter((p) => noIntervalo(diaBrasilia(p.concluido_em), periodo)).length,
       projetosAtivos: projetosRecorte.filter((p) => !p.concluido_em).length,
       leadTime: estatistica(leads),
+      leadTimePorTipo: { comInspecao: estatistica(leadsCom), semInspecao: estatistica(leadsSem) },
+      osSemInspecao: abertas.filter((o) => o.com_inspecao === false).length,
       reprovacao: { inspecao: taxa(avI, repI), execucao: taxa(avE, repE), total: taxa(avI + avE, repI + repE) },
       aguardandoAprovacao: { total: filaAprov.length, maisAntigoDias: filaAprov[0]?.dias ?? null },
       aguardandoAssinatura: { total: filaAssin.length, maisAntigoDias: filaAssin[0]?.dias ?? null },
@@ -745,5 +835,6 @@ export function montarDashboard(d: DadosDashboard, f: FiltrosDashboard, hoje: st
       totais: { rdo: rdoFaltando.length, fotos: fotosIncompletas.length, medicoes: medicoesSemAprovacao.length, laudos: laudosForaDoLimite.length },
     },
     clientes: clientes.slice(0, 20),
+    recorrencia: montarRecorrencia(d, hoje, f.cliente),
   };
 }

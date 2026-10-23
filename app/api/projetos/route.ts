@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
-import { iniciaisDoPerfil, PERFIS_ESCRITA, validarProjetoNoServidor } from "@/lib/asp/projeto-validacao-api";
+import { iniciaisDoPerfil, inspecaoPadraoNoServidor, PERFIS_ESCRITA, validarProjetoNoServidor } from "@/lib/asp/projeto-validacao-api";
 import { hojeBrasil, normalizarCodigoProjeto, normalizarEspacos, primeiroErro, ROTULOS_PROJETO, temErros } from "@/lib/validacao";
 
 export const runtime = "nodejs";
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const projetos = (data || []).map((p: any) => {
     const inspecoes = (p.inspecoes || []).filter((i: any) => !i.excluido_em)
-      .map((i: any) => ({ id: i.id, fase: i.fase, encerrada_em: i.encerrada_em || null }));
+      .map((i: any) => ({ id: i.id, fase: i.fase, encerrada_em: i.encerrada_em || null, com_inspecao: i.com_inspecao !== false }));
     return { ...p, concluido_em: p.concluido_em || null, inspecoes, inspecoes_total: inspecoes.length };
   });
   return NextResponse.json({ ok: true, projetos, podeExcluir: podeExcluirProjeto(profile), diasLixeira: DIAS_LIXEIRA });
@@ -51,6 +51,9 @@ interface NovoProjetoBody {
   /** "Usar dados do contato do cliente?" = Sim. */
   usarContato?: boolean;
   contatoId?: string | null;
+  /** "Haverá inspeção?" — padrão das OSs do projeto. Ausente = a regra do
+   *  cliente recorrente (inspecaoPadraoDoProjeto). */
+  comInspecaoPadrao?: boolean;
 }
 
 /** Abre um novo projeto (fase 1 — Comercial). Todas as regras ⛔ de
@@ -75,10 +78,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const comInspecaoPadrao = typeof body.comInspecaoPadrao === "boolean"
+    ? body.comInspecaoPadrao
+    : (await inspecaoPadraoNoServidor(dados.clienteId)).inspecaoPadrao;
+
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase
     .from("gp_projetos")
     .insert({
+      // Só grava quando é Não: sem a migração, o projeto segue como antes.
+      ...(comInspecaoPadrao ? {} : { com_inspecao_padrao: false }),
       cliente_id: dados.clienteId,
       codigo_projeto: normalizarCodigoProjeto(dados.codigoProjeto),
       pedido_compra: normalizarEspacos(dados.pedidoCompra),

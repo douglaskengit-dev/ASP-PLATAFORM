@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { contextoDoBanco, iniciaisDoPerfil, PERFIS_ESCRITA } from "@/lib/asp/projeto-validacao-api";
+import { contextoDoBanco, iniciaisDoPerfil, inspecaoPadraoNoServidor, PERFIS_ESCRITA } from "@/lib/asp/projeto-validacao-api";
 
 export const runtime = "nodejs";
 
@@ -35,12 +35,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const ctx = await contextoDoBanco({
-    codigo: sp.get("codigo"),
-    clienteId: sp.get("clienteId"),
-    excluirId,
-    iniciaisCriador,
-    clienteAtual,
-  });
-  return NextResponse.json({ ok: true, ...ctx });
+  const [ctx, recorrencia] = await Promise.all([
+    contextoDoBanco({
+      codigo: sp.get("codigo"),
+      clienteId: sp.get("clienteId"),
+      excluirId,
+      iniciaisCriador,
+      clienteAtual,
+    }),
+    // "Haverá inspeção?" padrão (cliente recorrente com projeto ativo → Não).
+    inspecaoPadraoNoServidor(sp.get("clienteId"), excluirId),
+  ]);
+  return NextResponse.json({ ok: true, ...ctx, recorrencia });
 }

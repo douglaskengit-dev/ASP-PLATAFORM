@@ -5,13 +5,15 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Contato, NovoContatoInput, OrgaoComContatos, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
-import { ULTIMA_FASE } from "@/lib/asp/fases";
-import { SugestoesCidade, useCidadesDaUf, useClientesConflitantes } from "@/app/components/FormularioOrgao";
+import { progressoFase } from "@/lib/asp/fases";
+import {
+  CamposRecorrencia, RECORRENCIA_VAZIA, recorrenciaDoForm, SugestoesCidade, useCidadesDaUf, useClientesConflitantes, type FormRecorrencia,
+} from "@/app/components/FormularioOrgao";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import AvisoCliente from "@/app/components/AvisoCliente";
 import {
-  mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao, ROTULOS_CLIENTE,
-  temErros, validarCliente, validarContato,
+  mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao, ROTULOS_CLIENTE, ROTULOS_RECORRENCIA,
+  ROTULO_STATUS_RECORRENCIA, temErros, validarCliente, validarContato, validarRecorrencia, type ProximoServico,
 } from "@/lib/validacao";
 
 interface ProjetoCliente {
@@ -19,8 +21,14 @@ interface ProjetoCliente {
   codigo_projeto: string | null;
   pedido_compra: string | null;
   cliente: { id: string } | null;
-  inspecoes: { id: string; fase: number }[];
+  inspecoes: { id: string; fase: number; com_inspecao?: boolean }[];
 }
+
+/** Chip de cada status do próximo serviço (paleta única de status). */
+const CHIP_RECORRENCIA: Record<string, string> = {
+  vencido: "chip-perigo", em_breve: "chip-aviso", sem_historico: "chip-neutro", em_andamento: "chip-info", em_dia: "chip-sucesso",
+};
+const dataBr = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "—");
 
 /** Formulário de contato: novo (sem id) ou edição de um existente. */
 type FormContato = NovoContatoInput & { id?: string; versao?: string };
@@ -47,6 +55,9 @@ export default function OrgaoDetalhePage() {
   const [cidade, setCidade] = useState("");
   const [endereco, setEndereco] = useState("");
   const [uf, setUf] = useState("");
+  const [recorrencia, setRecorrencia] = useState<FormRecorrencia>({ ...RECORRENCIA_VAZIA });
+  /** Próximo serviço (cliente recorrente), calculado pela API. */
+  const [proximo, setProximo] = useState<ProximoServico | null>(null);
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [mensagemEdicao, setMensagemEdicao] = useState<Msg | null>(null);
 
@@ -69,9 +80,10 @@ export default function OrgaoDetalhePage() {
         { razaoSocial, cnpj, cidade, uf, endereco },
         { clientes: conflitantes, excluirId: params.id, cidades: cidadesUf, razaoSocialAtual: orgao?.razao_social }
       ),
+      validarRecorrencia(recorrenciaDoForm(recorrencia)),
       servidorEdicao
     ),
-    [razaoSocial, cnpj, cidade, uf, endereco, conflitantes, cidadesUf, params.id, orgao?.razao_social, servidorEdicao]
+    [razaoSocial, cnpj, cidade, uf, endereco, recorrencia, conflitantes, cidadesUf, params.id, orgao?.razao_social, servidorEdicao]
   );
   // Desativados contam para repetidos (a mensagem sugere reativar).
   const existentesContato = useMemo(
@@ -90,6 +102,11 @@ export default function OrgaoDetalhePage() {
     setCidade(o.cidade);
     setEndereco((o as any).endereco || "");
     setUf(o.uf);
+    setRecorrencia({
+      recorrente: (o as any).recorrente === true,
+      periodicidadeMeses: (o as any).periodicidade_meses ? String((o as any).periodicidade_meses) : "",
+      avisoAntecedenciaDias: String((o as any).aviso_antecedencia_dias ?? RECORRENCIA_VAZIA.avisoAntecedenciaDias),
+    });
   }
 
   async function carregar() {
@@ -100,6 +117,7 @@ export default function OrgaoDetalhePage() {
       const dados = await resp.json();
       if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao carregar o cliente.");
       setOrgao(dados.orgao);
+      setProximo(dados.recorrencia || null);
       preencherEdicao(dados.orgao);
       setPodeExcluirContato(["admin", "comercial", "gerencia"].includes(dados.perfil));
 
@@ -142,7 +160,7 @@ export default function OrgaoDetalhePage() {
       const resp = await fetch(`/api/orgaos/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, versao: orgao?.updated_at }),
+        body: JSON.stringify({ tipoEnte, razaoSocial, cnpj, cidade, uf, endereco, ...recorrenciaDoForm(recorrencia), versao: orgao?.updated_at }),
       });
       const dados = await resp.json();
       if (!resp.ok || !dados.ok) {
@@ -157,6 +175,8 @@ export default function OrgaoDetalhePage() {
       preencherEdicao({ ...(orgao as OrgaoComContatos), ...dados.orgao });
       setEditando(false);
       setTentouEdicao(false);
+      // O vencimento depende da recorrência: recalcula pela API.
+      fetch(`/api/orgaos/${params.id}`).then((r) => (r.ok ? r.json() : null)).then((d) => d && setProximo(d.recorrencia || null)).catch(() => {});
     } catch (err: any) {
       setMensagemEdicao({ tipo: "erro", texto: err.message || "Erro inesperado ao salvar." });
     } finally {
@@ -313,6 +333,11 @@ export default function OrgaoDetalhePage() {
               <strong>Endereço:</strong> {(orgao as any).endereco || "— não informado"}
               <br />
               <strong>Cadastrado em:</strong> {new Date(orgao.created_at).toLocaleString("pt-BR")}
+              <br />
+              <strong>Serviço recorrente:</strong>{" "}
+              {(orgao as any).recorrente
+                ? `Sim — a cada ${(orgao as any).periodicidade_meses} meses (aviso ${(orgao as any).aviso_antecedencia_dias ?? 30} dias antes)`
+                : "Não"}
             </p>
           ) : (
             <div style={{ borderTop: "1px solid #d8dee3", marginTop: 12, paddingTop: 12 }}>
@@ -361,8 +386,10 @@ export default function OrgaoDetalhePage() {
                   </select>
                   <MensagensCampo r={resultadoEdicao} campo="uf" mostrarErros={tentouEdicao} />
                 </div>
+                <CamposRecorrencia valor={recorrencia} onChange={(v) => { setRecorrencia(v); setServidorEdicao(novoResultado()); }}
+                  r={resultadoEdicao} mostrarErros={tentouEdicao} />
               </div>
-              <ResumoValidacao r={resultadoEdicao} rotulos={ROTULOS_CLIENTE} mostrarErros={tentouEdicao} />
+              <ResumoValidacao r={resultadoEdicao} rotulos={{ ...ROTULOS_CLIENTE, ...ROTULOS_RECORRENCIA }} mostrarErros={tentouEdicao} />
               <div className="actions">
                 <button className="btn" onClick={salvarEdicao} disabled={salvandoEdicao}>
                   {salvandoEdicao ? "Salvando..." : "Salvar alterações"}
@@ -374,6 +401,22 @@ export default function OrgaoDetalhePage() {
                   </span>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Cliente recorrente: próximo serviço (vencimento e status). */}
+          {(orgao as any).recorrente && !editando && (
+            <div className="val-campo" style={{ marginTop: 8 }} aria-live="polite">
+              <p style={{ margin: 0, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <strong>Próximo serviço:</strong>
+                {proximo?.vencimento ? <span>{dataBr(proximo.vencimento)}</span> : <span className="detalhe" style={{ margin: 0 }}>sem data</span>}
+                {proximo && <span className={`chip ${CHIP_RECORRENCIA[proximo.status] || "chip-neutro"}`}>{ROTULO_STATUS_RECORRENCIA[proximo.status]}</span>}
+              </p>
+              <p className="detalhe" style={{ margin: "2px 0 0" }}>
+                {proximo?.ultimaExecucao
+                  ? `Última execução em ${dataBr(proximo.ultimaExecucao)}; lembrete ao Comercial a partir de ${dataBr(proximo.abreEm)}.`
+                  : "Nenhuma execução registrada ainda — o vencimento conta a partir da primeira execução."}
+              </p>
             </div>
           )}
 
@@ -501,7 +544,7 @@ export default function OrgaoDetalhePage() {
         <section className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <h2>Projetos deste cliente ({projetos.length})</h2>
-            <Link href="/projetos" className="btn secondary" style={{ display: "inline-block", textDecoration: "none" }}>
+            <Link href={`/projetos?novo=1&cliente=${orgao.id}`} className="btn secondary" style={{ display: "inline-block", textDecoration: "none" }}>
               + Novo projeto
             </Link>
           </div>
@@ -511,9 +554,9 @@ export default function OrgaoDetalhePage() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
               {projetos.map((p) => {
-                const fases = p.inspecoes.map((i) => i.fase);
-                const media = fases.length ? fases.reduce((a, b) => a + b, 0) / fases.length : 1;
-                const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
+                // Progresso de cada OS sobre as fases que valem para ela.
+                const pct = p.inspecoes.length
+                  ? Math.round(p.inspecoes.reduce((a, i) => a + progressoFase(i.fase, i.com_inspecao).pct, 0) / p.inspecoes.length) : 0;
                 return (
                   <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
                     <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>

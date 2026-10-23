@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { acoesDisponiveis, AcaoFase, ULTIMA_FASE } from "@/lib/asp/fases";
+import { acoesDisponiveis, AcaoFase, faseMinima, ULTIMA_FASE } from "@/lib/asp/fases";
 import { ehUuid } from "@/lib/asp/coleta-api";
 import { ehViolacaoUnica } from "@/lib/asp/os-validacao-api";
 import {
@@ -96,9 +96,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
   }
 
+  // "*": com_inspecao sem quebrar antes da migração.
   const { data: inspecao, error: erroBusca } = await supabase
     .from("gp_inspecoes")
-    .select("id, fase")
+    .select("*")
     .eq("id", params.id)
     .single();
   if (erroBusca || !inspecao) {
@@ -109,11 +110,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const travada = await garantirOsAberta(params.id);
   if (travada) return travada;
   const faseAtual: number = inspecao.fase;
+  // OS sem inspeção: nenhuma ação a leva para as fases 2–5.
+  const comInspecao = (inspecao as any).com_inspecao !== false;
   // A tela via outra fase: alguém (ou o 1º clique) já moveu a OS.
   if (typeof body.faseDe === "number" && body.faseDe !== faseAtual) {
     return respostaJaAvaliado(params.id, body.relatorioId);
   }
-  const opcoes = acoesDisponiveis(profile.perfil, faseAtual);
+  const opcoes = acoesDisponiveis(profile.perfil, faseAtual, { comInspecao });
   const opcao = opcoes.find((o) => o.acao === body.acao);
   if (!opcao) {
     // Aprovar/reprovar fora das fases 5/9, por quem aprova: a OS já saiu da
@@ -135,7 +138,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
   }
 
-  const novaFase = Math.min(Math.max(opcao.destino, 2), ULTIMA_FASE);
+  const novaFase = Math.min(Math.max(opcao.destino, faseMinima(comInspecao)), ULTIMA_FASE);
   const agora = new Date().toISOString();
   let alvo: { id: string; versao: number } | null = null;
 

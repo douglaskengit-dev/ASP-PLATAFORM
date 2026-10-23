@@ -27,12 +27,13 @@ async function todas<T>(montar: () => any): Promise<T[]> {
 }
 
 export async function carregarDadosDashboard(supabase: any): Promise<DadosDashboard> {
-  const [projetos, oss, historico, relatorios, agendamentos, rdos, coletas, entregas, procedimentos] = await Promise.all([
+  const [projetos, oss, historico, relatorios, agendamentos, rdos, coletas, entregas, procedimentos, orgaos] = await Promise.all([
     todas<any>(() => supabase.from("gp_projetos")
       .select("id, codigo_projeto, pedido_compra, endereco, cliente_id, data_abertura, criado_em, concluido_em, cliente:gp_orgaos(razao_social)")
       .is("excluido_em", null).order("id")),
+    // "*": com_inspecao sem quebrar antes da migração.
     todas<any>(() => supabase.from("gp_inspecoes")
-      .select("id, projeto_id, identificacao, fase, procedimento, criado_em, encerrada_em, encerramento_manual")
+      .select("*")
       .is("excluido_em", null).order("id")),
     todas<any>(() => supabase.from("gp_fase_historico")
       .select("inspecao_id, fase_de, fase_para, acao, motivo_categoria, criado_em").order("id")),
@@ -48,6 +49,8 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
     todas<any>(() => supabase.from("gp_coletas").select("inspecao_id, tipo, aprovada_em").is("excluido_em", null).order("id")),
     todas<any>(() => supabase.from("gp_entregas").select("inspecao_id, data").is("excluido_em", null).order("id")),
     todas<any>(() => supabase.from("gp_procedimentos").select("codigo, nome, agua_potavel, limpeza_robotizada").order("codigo")),
+    // Clientes (recorrência). "*": sem as colunas novas, ninguém é recorrente.
+    todas<any>(() => supabase.from("gp_orgaos").select("*").is("excluido_em", null).order("id")),
   ]);
 
   // Fotos: só das OSs abertas da fase 7 em diante, em lotes (URL curta).
@@ -65,7 +68,11 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
       cliente_id: p.cliente_id, cliente_nome: p.cliente?.razao_social || null, data_abertura: p.data_abertura,
       criado_em: p.criado_em, concluido_em: p.concluido_em || null,
     })),
-    oss: oss.map((o: any) => ({ ...o, fase: Number(o.fase) || 2, encerrada_em: o.encerrada_em || null })),
+    oss: oss.map((o: any) => ({
+      id: o.id, projeto_id: o.projeto_id, identificacao: o.identificacao, fase: Number(o.fase) || 2,
+      procedimento: o.procedimento ?? null, criado_em: o.criado_em, encerrada_em: o.encerrada_em || null,
+      encerramento_manual: !!o.encerramento_manual, com_inspecao: o.com_inspecao !== false,
+    })),
     historico,
     relatorios: relatorios.map((r: any) => ({ ...r, versao: Number(r.versao) || 0 })),
     agendamentos: agendamentos.map((a: any) => ({
@@ -77,5 +84,9 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
     coletas,
     entregas,
     procedimentos,
+    orgaos: orgaos.map((o: any) => ({
+      id: o.id, razao_social: o.razao_social, recorrente: o.recorrente === true,
+      periodicidade_meses: o.periodicidade_meses ?? null, aviso_antecedencia_dias: o.aviso_antecedencia_dias ?? null,
+    })),
   };
 }

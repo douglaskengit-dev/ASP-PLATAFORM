@@ -9,6 +9,9 @@
  *    escolhe o contato e "Usar como está" / "Atualizar contato" / "+ Novo
  *    contato" (gravados no cadastro do cliente). Não → digita livre, com
  *    sugestão se o nome parecer um contato existente.
+ *  - "Haverá inspeção?" (Sim/Não): padrão das OSs do projeto. Nasce da regra
+ *    do cliente recorrente (recorrente + já tem projeto ativo → Não; senão
+ *    Sim) e segue a troca de cliente até o usuário escolher.
  *  - Nada do que o usuário digitou é sobrescrito sem ele clicar. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/app/components/Modal";
@@ -47,6 +50,16 @@ export interface DadosFormProjeto {
   endereco: string;
   responsavelProjeto: string;
   dataAbertura: string;
+  /** "Haverá inspeção?" — padrão das OSs novas do projeto. */
+  comInspecaoPadrao?: boolean;
+}
+
+/** O que /api/projetos/verificar diz da recorrência do cliente escolhido. */
+interface RecorrenciaCliente {
+  recorrente: boolean;
+  periodicidadeMeses: number | null;
+  projetosAtivos: number;
+  inspecaoPadrao: boolean;
 }
 
 const rotulo: React.CSSProperties = { fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 };
@@ -54,7 +67,7 @@ const rotulo: React.CSSProperties = { fontWeight: 600, fontSize: 13, display: "b
 /** Contexto do banco (/api/projetos/verificar), com debounce e descartando
  *  respostas fora de ordem. */
 function useVerificacao(codigo: string, clienteId: string, excluirId?: string) {
-  const [ctx, setCtx] = useState<Partial<ContextoProjeto>>({});
+  const [ctx, setCtx] = useState<Partial<ContextoProjeto> & { recorrencia?: RecorrenciaCliente }>({});
   const seq = useRef(0);
   const cod = normalizarCodigoProjeto(codigo);
   useEffect(() => {
@@ -102,13 +115,20 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
   const [servidor, setServidor] = useState<ResultadoValidacao>(novoResultado());
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  /** "Haverá inspeção?": null = segue o padrão do cliente (ainda não escolheu). */
+  const [comInspecao, setComInspecao] = useState<boolean | null>(
+    modo === "editar" && typeof inicial?.comInspecaoPadrao === "boolean" ? inicial.comInspecaoPadrao : null,
+  );
 
   const ctxBanco = useVerificacao(form.codigoProjeto, form.clienteId, projetoId);
   const hoje = hojeBrasil();
+  const recorrencia = form.clienteId && ctxBanco.recorrencia ? ctxBanco.recorrencia : null;
+  /** Valor em vigor: o escolhido, senão a regra do cliente (Sim sem cliente). */
+  const inspecaoEfetiva = comInspecao ?? (recorrencia ? recorrencia.inspecaoPadrao : true);
 
   useEffect(() => {
     fetch("/api/orgaos").then((r) => r.json()).then((d) => setOrgaos(d.orgaos || [])).catch(() => {});
-    if (inicial?.clienteId) carregarContatos(inicial.clienteId, true);
+    if (inicial?.clienteId) carregarContatos(inicial.clienteId, modo === "editar");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -278,7 +298,7 @@ Salvar e atualizar o responsável desses projetos?`)) await salvarContato(true);
   }, [editor, contatos]);
 
   /** Erro só aparece depois de mexer no campo, se ele já tem valor, ou na tentativa de salvar. */
-  const mostrar = (campo: keyof DadosFormProjeto) => tentou || tocados.has(campo) || !!form[campo]?.trim();
+  const mostrar = (campo: Exclude<keyof DadosFormProjeto, "comInspecaoPadrao">) => tentou || tocados.has(campo) || !!form[campo]?.trim();
   const parecidos = usarContato === false ? contatosParecidos(form.responsavelProjeto, contatosEscolha) : [];
 
   async function salvar() {
@@ -290,7 +310,7 @@ Salvar e atualizar o responsável desses projetos?`)) await salvarContato(true);
       const r = await fetch(modo === "novo" ? "/api/projetos" : `/api/projetos/${projetoId}`, {
         method: modo === "novo" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, usarContato: usarContato === true, contatoId: contatoUsado }),
+        body: JSON.stringify({ ...form, usarContato: usarContato === true, contatoId: contatoUsado, comInspecaoPadrao: inspecaoEfetiva }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -478,6 +498,28 @@ Salvar e atualizar o responsável desses projetos?`)) await salvarContato(true);
             className={mostrar("pedidoCompra") && resultado.erros.pedidoCompra ? "val-invalido" : undefined} />
           <MensagensCampo r={resultado} campo="pedidoCompra" mostrarErros={mostrar("pedidoCompra")} />
         </div>
+      </div>
+
+      {/* "Haverá inspeção?" — padrão das OSs; cada OS pode ser diferente. */}
+      <div>
+        <label style={rotulo} id="rot-inspecao">Haverá inspeção? *</label>
+        <div className="val-escolha" role="group" aria-labelledby="rot-inspecao">
+          <button type="button" aria-pressed={inspecaoEfetiva} onClick={() => setComInspecao(true)}>Sim</button>
+          <button type="button" aria-pressed={!inspecaoEfetiva} onClick={() => setComInspecao(false)}>Não</button>
+        </div>
+        <p className="detalhe" style={{ margin: "4px 0 0" }}>
+          {inspecaoEfetiva
+            ? "As OSs começam na fase 2 (Agendamento da inspeção)."
+            : "As OSs começam na fase 6 (Agendamento de Execução) — as fases de inspeção (2 a 5) não existem para elas."}
+          {" "}Cada OS pode ser diferente{modo === "editar" ? "; mudar aqui vale só para as OSs novas" : ""}.
+        </p>
+        {recorrencia?.recorrente && comInspecao === null && modo === "novo" && (
+          <p className="val-msg aviso-plano" style={{ margin: "4px 0 0" }}>
+            {recorrencia.inspecaoPadrao
+              ? "Cliente com serviço recorrente, ainda sem projeto ativo — padrão: com inspeção."
+              : `Cliente com serviço recorrente${recorrencia.periodicidadeMeses ? ` (a cada ${recorrencia.periodicidadeMeses} meses)` : ""} e com projeto anterior — padrão: sem inspeção. Troque se esta vez precisar inspecionar.`}
+          </p>
+        )}
       </div>
 
       <div>

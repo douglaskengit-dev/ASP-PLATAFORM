@@ -309,10 +309,13 @@ export function erroEnvioAssinado(e: {
 /** Avisos ao mover a OS (nunca bloqueiam): fase 6 → 7 sem o relatório de
  *  inspeção assinado (se houve um aprovado); chegar à fase 10 sem o de
  *  execução assinado. `rels` = relatórios ativos da OS. */
-export function avisosAssinatura(fase: number, acao: string, rels: { tipo: string; status: string; versao: number }[]): string[] {
+export function avisosAssinatura(
+  fase: number, acao: string, rels: { tipo: string; status: string; versao: number }[], comInspecao: boolean = true,
+): string[] {
   const out: string[] = [];
   const doTipo = (t: string) => rels.filter((r) => r.tipo === t);
-  if (fase === 6 && acao === "avancar") {
+  // OS sem inspeção: o relatório de inspeção não é cobrado (6 → 7).
+  if (fase === 6 && acao === "avancar" && comInspecao !== false) {
     const insp = doTipo("inspecao");
     const aprovado = insp.find((r) => r.status === "aprovado");
     if (aprovado && !insp.some((r) => r.status === "assinado")) {

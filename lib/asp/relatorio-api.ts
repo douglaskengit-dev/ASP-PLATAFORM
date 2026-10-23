@@ -22,6 +22,8 @@ export const PERFIS_RELATORIO = ["admin", "operacoes", "gerencia"];
 export interface InfoOSRelatorio {
   id: string;
   fase: number;
+  /** false = OS sem inspeção (recusa relatório de inspeção). */
+  comInspecao: boolean;
   /** Valores do cadastro que o relatório mostra (só leitura no formulário). */
   cadastro: { cliente: string; endereco: string; tag: string; procedimento: string; codigoProjeto: string };
 }
@@ -30,13 +32,15 @@ export interface InfoOSRelatorio {
 export async function infoOSRelatorio(inspecaoId: string): Promise<InfoOSRelatorio | null> {
   if (!ehUuid(inspecaoId)) return null;
   const { data } = await getSupabaseAdmin().from("gp_inspecoes")
-    .select("id, fase, identificacao, procedimento, excluido_em, projeto:gp_projetos(codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(razao_social))")
+    // "*": com_inspecao sem quebrar antes da migração.
+    .select("*, projeto:gp_projetos(codigo_projeto, pedido_compra, endereco, cliente:gp_orgaos(razao_social))")
     .eq("id", inspecaoId).maybeSingle();
   if (!data || (data as any).excluido_em) return null;
   const p: any = (data as any).projeto || {};
   return {
     id: data.id,
     fase: Number((data as any).fase) || 2,
+    comInspecao: (data as any).com_inspecao !== false,
     cadastro: {
       cliente: p.cliente?.razao_social || "",
       endereco: p.endereco || "",

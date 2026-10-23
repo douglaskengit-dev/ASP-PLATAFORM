@@ -4,9 +4,10 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { NovoContatoInput, TipoEnte } from "@/lib/orgaos/types";
 import { cidadesDaUf, clientesCadastrados } from "@/lib/orgaos/validacao-api";
+import { situacaoRecorrencia } from "@/lib/asp/recorrencia-api";
 import {
   cnpjRepetido, contatoParaGravar, contatoVazio, mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, primeiroErro,
-  ROTULOS_CLIENTE, temErros, validarCliente, validarContatos,
+  recorrenciaParaGravar, ROTULOS_CLIENTE, ROTULOS_RECORRENCIA, temErros, validarCliente, validarContatos, validarRecorrencia,
 } from "@/lib/validacao";
 
 export const runtime = "nodejs";
@@ -21,6 +22,10 @@ interface NovoOrgaoBody {
   uf: string;
   endereco?: string;
   contatos?: NovoContatoInput[];
+  /** Serviço recorrente: periodicidade obrigatória quando marcado. */
+  recorrente?: boolean;
+  periodicidadeMeses?: number | string | null;
+  avisoAntecedenciaDias?: number | string | null;
 }
 
 async function limparLixeiraVencida() {
@@ -85,6 +90,14 @@ export async function GET(req: NextRequest) {
     })),
   }));
 
+  // Próximo serviço dos clientes recorrentes (lista mostra o vencimento).
+  if (!lixeira) {
+    try {
+      const sit = await situacaoRecorrencia(orgaos.filter((o: any) => o.recorrente === true).map((o: any) => o.id));
+      orgaos.forEach((o: any) => { o.proximo_servico = sit.get(o.id)?.proximo || null; });
+    } catch { /* complementar */ }
+  }
+
   return NextResponse.json({ ok: true, orgaos, podeExcluir: podeExcluirProjeto(profile) });
 }
 
@@ -103,13 +116,15 @@ export async function POST(req: NextRequest) {
   // inteiro. Regras em lib/validacao/cliente.ts (as mesmas da tela); a lista
   // vai inteira para o índice das mensagens casar com o bloco na tela.
   const ctx = { clientes: await clientesCadastrados(), cidades: await cidadesDaUf(body.uf) };
-  const resultado = mesclar(validarCliente({ ...body, endereco: body.endereco ?? "" }, ctx), validarContatos(body.contatos || []));
+  const resultado = mesclar(
+    validarCliente({ ...body, endereco: body.endereco ?? "" }, ctx), validarContatos(body.contatos || []), validarRecorrencia(body),
+  );
   const contatos = (body.contatos || []).filter((c) => !contatoVazio(c));
   if (!body.tipoEnte) resultado.erros.tipoEnte = ["Informe o tipo do ente."];
   if (temErros(resultado)) {
     const conflito = cnpjRepetido(body.cnpj, ctx);
     return NextResponse.json(
-      { erro: primeiroErro(resultado, ROTULOS_CLIENTE), erros: resultado.erros, avisos: resultado.avisos, conflito },
+      { erro: primeiroErro(resultado, { ...ROTULOS_CLIENTE, ...ROTULOS_RECORRENCIA }), erros: resultado.erros, avisos: resultado.avisos, conflito },
       { status: conflito ? 409 : 400 }
     );
   }
@@ -127,6 +142,9 @@ export async function POST(req: NextRequest) {
       cidade: normalizarCidade(body.cidade),
       uf: body.uf.trim().toUpperCase(),
       endereco: normalizarEspacos(body.endereco) || null,
+      // Só grava a recorrência quando marcada: sem a migração, o cadastro
+      // comum segue funcionando.
+      ...(body.recorrente ? recorrenciaParaGravar(body) : {}),
     })
     .select("*")
     .single();
