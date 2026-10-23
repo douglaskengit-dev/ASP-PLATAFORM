@@ -374,10 +374,12 @@ export default function InspecaoDetalhePage() {
   const [pedidoNovoRdo, setPedidoNovoRdo] = useState(0);
   /** Lista completa das 10 fases no cabeçalho (recolhida por padrão). */
   const [verFases, setVerFases] = useState(false);
+  /** Modal com o seletor de procedimento (antes ficava sempre aberto no topo). */
+  const [editandoProc, setEditandoProc] = useState(false);
   /** Sobe a cada recarga: o card do encerramento e as entregas reconsultam. */
   const [versaoDados, setVersaoDados] = useState(0);
   const [resumoEntregas, setResumoEntregas] = useState("");
-  /** Card "Ações desta fase" — recebe o foco depois de aplicar uma ação. */
+  /** Barra "Ações desta fase" (no cabeçalho) — recebe o foco depois de aplicar uma ação. */
   const cardAcoesRef = useRef<HTMLDivElement>(null);
 
   const carregar = useCallback(() => {
@@ -1626,6 +1628,10 @@ export default function InspecaoDetalhePage() {
     );
 
   const def = definicaoFase(insp.fase);
+  const procAtual = procedimentos.find((p) => p.codigo === insp.procedimento);
+  const rotuloProcedimento = insp.procedimento
+    ? `${insp.procedimento}${procAtual?.nome ? ` — ${procAtual.nome}` : ""}`
+    : "não definido (escolha um)";
   const pct = Math.round(((insp.fase - 1) / (ULTIMA_FASE - 1)) * 100);
 
   // Resumos de uma linha das seções recolhidas.
@@ -1674,33 +1680,16 @@ export default function InspecaoDetalhePage() {
 
   return (
     <div className="page-larga">
-      {insp.projeto && (
-        <Link href={`/projetos/${insp.projeto.id}`} style={{ color: "var(--primaria)", textDecoration: "none", fontSize: 13 }}>
-          ← {insp.projeto.codigo_projeto || insp.projeto.pedido_compra || "Projeto"}
-        </Link>
-      )}
-
-      <AvisoCliente clienteId={insp.projeto?.cliente?.id} />
-
-      {encerrada && (
-        <div className="card" role="status" style={{ marginTop: 12, borderLeft: "4px solid #16a34a", display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <span aria-hidden="true" style={{ fontSize: 20 }}>🔒</span>
-          <div style={{ minWidth: 0 }}>
-            <strong style={{ color: "var(--texto)" }}>
-              {textoEncerrada(insp.encerrada_em, nomeDe(insp.encerrada_por) || null, insp.encerramento_manual)}
-            </strong>
-            {insp.encerramento_manual && insp.encerramento_justificativa && (
-              <p className="detalhe" style={{ margin: "2px 0 0" }}>Justificativa: {insp.encerramento_justificativa}</p>
-            )}
-            <p className="detalhe" style={{ margin: "2px 0 0" }}>
-              Só consulta: coletas, fotos, RDOs, relatórios, agendamentos, checklist e cadastro não podem ser alterados. Downloads e entregas ao cliente seguem liberados.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+      {/* Cabeçalho ÚNICO da OS: título e metadados, avisos, fase e a barra de
+          ações. Antes eram até 4 cards empilhados (aviso do cliente, OS
+          encerrada, cabeçalho e "Ações desta fase"). */}
+      <header className="card os-cab">
+        {insp.projeto && (
+          <Link href={`/projetos/${insp.projeto.id}`} className="os-cab-voltar">
+            ← {insp.projeto.codigo_projeto || insp.projeto.pedido_compra || "Projeto"}
+          </Link>
+        )}
+        <div className="os-cab-topo">
           <div style={{ minWidth: 0, flex: "1 1 260px" }}>
             {editandoTitulo ? (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -1726,170 +1715,182 @@ export default function InspecaoDetalhePage() {
                 </div>
               </div>
             ) : (
-              <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <h1 className="os-titulo">
                 <span>{insp.identificacao}</span>
                 {podeRenomear && (
-                  <button className="fu-icone-btn" title="Renomear a OS" onClick={abrirEdicaoTitulo}>✎</button>
+                  <button className="fu-icone-btn" title="Renomear a OS" aria-label="Renomear a OS" onClick={abrirEdicaoTitulo}>✎</button>
                 )}
-              </h2>
+              </h1>
             )}
-            <p className="detalhe" style={{ marginTop: 4 }}>
+            <p className="os-sub">
               {insp.projeto?.cliente?.razao_social || ""}
               {insp.projeto?.endereco ? ` · ${insp.projeto.endereco}` : ""}
             </p>
-            {/* Procedimento: define o formato do relatório (tópicos, seções
-                próprias e modelo). Fica aqui, no topo, porque é o que
-                caracteriza o serviço desta inspeção. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-              <span className="detalhe" style={{ margin: 0 }}>Procedimento:</span>
-              {podeRenomear ? (
-                <select value={insp.procedimento || ""} disabled={salvandoProc}
-                  onChange={(e) => salvarProcedimento(e.target.value)}
-                  style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--borda)",
-                    background: "var(--bg-card)", color: "var(--texto)", fontSize: 13, maxWidth: 320 }}>
-                  {/* Procedimento é obrigatório: "não definido" só aparece em
-                      OS antiga sem procedimento, e não pode ser escolhido. */}
-                  {!insp.procedimento && <option value="" disabled>— não definido (escolha um) —</option>}
-                  {/* Procedimento sem código não pode ser escolhido: o valor
-                      vazio se confunde com "não definido" e nada seria salvo. */}
-                  {/* Desativado no Catálogo: só aparece se for o desta OS
-                      (continua valendo, mas não pode ser escolhido de novo). */}
-                  {procedimentos.filter((p) => ativoNoCatalogo(p) || p.codigo === insp.procedimento).map((p) => (
-                    <option key={p.id} value={p.codigo || ""} disabled={!p.codigo}>
-                      {p.codigo ? `${p.codigo} — ${p.nome}` : `${p.nome} (sem código — corrija no Catálogo)`}
-                      {ativoNoCatalogo(p) ? "" : " (desativado no Catálogo)"}
-                    </option>
-                  ))}
-                  {/* Valor salvo que não existe mais no Catálogo continua visível. */}
-                  {insp.procedimento && !procedimentos.some((p) => p.codigo === insp.procedimento) && (
-                    <option value={insp.procedimento}>{insp.procedimento} (fora do Catálogo)</option>
-                  )}
-                </select>
-              ) : (
-                <strong style={{ fontSize: 13 }}>{insp.procedimento || "não definido"}</strong>
-              )}
-              {salvandoProc && <span className="detalhe" style={{ margin: 0 }}>salvando…</span>}
-              {erroProc && (
-                <span className="erro-texto" style={{ margin: 0, flexBasis: "100%" }}>{erroProc}</span>
-              )}
-            </div>
-            {/* Tanque: cadastrado na criação da inspeção. Fica junto do
-                procedimento porque os dois dizem o que está sendo inspecionado. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-              <span className="detalhe" style={{ margin: 0 }}>Tanque:</span>
-              <strong style={{ fontSize: 13 }}>
-                {insp.tanque ? resumoTanque(insp.tanque) : "não cadastrado"}
-              </strong>
-              {podeRenomear && (
-                <button className="fu-icone-btn" title="Editar o cadastro do tanque"
-                  onClick={() => { setTanqueForm(tanqueParaForm(insp.tanque)); setErroTanque(null); setEditandoTanque(true); }}>✎</button>
-              )}
-            </div>
           </div>
-          <span className={`fu-badge ${def?.bloco === "execucao" ? "manual" : "auto"}`}>
+          <span className={`fu-badge ${def?.bloco === "execucao" ? "manual" : "auto"}`} style={{ marginLeft: 0 }}>
             Fase {insp.fase} · {def?.area || "—"}
           </span>
         </div>
 
-        {/* Fase atual em uma linha; a lista das 10 fases abre sob demanda. */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 12 }}>
-          <strong style={{ fontSize: 13.5, color: "var(--texto)" }}>
-            Fase {insp.fase} de {ULTIMA_FASE} · {nomeFase(insp.fase)}
-          </strong>
-          <button type="button" className="secao-link" aria-expanded={verFases} aria-controls="lista-fases"
-            onClick={() => setVerFases((v) => !v)}>
-            {verFases ? "ocultar fases" : "ver todas as fases"}
-          </button>
+        {/* Procedimento e tanque: metadados em linha. Editar abre um modal
+            (procedimento) ou o cadastro do tanque — nada de formulário
+            sempre aberto no topo. */}
+        <div className="os-meta">
+          {podeRenomear ? (
+            <button type="button" className="os-meta-item" aria-haspopup="dialog" disabled={salvandoProc}
+              title="Trocar o procedimento da OS" onClick={() => setEditandoProc(true)}>
+              <span className="os-meta-rotulo">Procedimento</span>
+              <span className="os-meta-valor">{rotuloProcedimento}</span>
+              <span className="os-meta-lapis" aria-hidden="true">✎</span>
+            </button>
+          ) : (
+            <span className="os-meta-item">
+              <span className="os-meta-rotulo">Procedimento</span>
+              <span className="os-meta-valor">{insp.procedimento || "não definido"}</span>
+            </span>
+          )}
+          {salvandoProc && <span className="os-meta-status">salvando…</span>}
+          {podeRenomear ? (
+            <button type="button" className="os-meta-item" aria-haspopup="dialog" title="Editar o cadastro do tanque"
+              onClick={() => { setTanqueForm(tanqueParaForm(insp.tanque)); setErroTanque(null); setEditandoTanque(true); }}>
+              <span className="os-meta-rotulo">Tanque</span>
+              <span className="os-meta-valor">{insp.tanque ? resumoTanque(insp.tanque) : "não cadastrado"}</span>
+              <span className="os-meta-lapis" aria-hidden="true">✎</span>
+            </button>
+          ) : (
+            <span className="os-meta-item">
+              <span className="os-meta-rotulo">Tanque</span>
+              <span className="os-meta-valor">{insp.tanque ? resumoTanque(insp.tanque) : "não cadastrado"}</span>
+            </span>
+          )}
         </div>
-        <div className="fu-progresso" style={{ marginTop: 4 }} title={`Fase ${insp.fase} de ${ULTIMA_FASE}`}>
-          <div className="fu-barra" style={{ width: `${pct}%` }} />
-        </div>
+        {erroProc && <p className="erro-texto" style={{ margin: "2px 0 0" }}>{erroProc}</p>}
 
-        <div id="lista-fases" hidden={!verFases}
-          style={{ display: verFases ? "flex" : undefined, flexDirection: "column", gap: 4, marginTop: 12 }}>
-          {TODAS_FASES.map((n) => {
-            const estado = n < insp.fase ? "feita" : n === insp.fase ? "atual" : "futura";
-            return (
-              <div key={n} className="fase-linha" style={{ opacity: estado === "futura" ? 0.5 : 1 }}>
-                <span
-                  style={{
-                    width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 12, fontWeight: 700,
-                    background: estado === "feita" ? "#16a34a" : estado === "atual" ? "var(--primaria)" : "var(--track)",
-                    color: estado === "futura" ? "var(--cinza)" : "#fff",
-                  }}
-                >
-                  {estado === "feita" ? "✓" : n}
-                </span>
-                <span className="fase-nome" style={{ fontWeight: estado === "atual" ? 700 : 500, color: "var(--texto)" }}>
-                  {nomeFase(n)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div ref={cardAcoesRef} tabIndex={-1} className="card card-acoes" style={{ marginTop: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Ações desta fase</h3>
-        {reprovacao && (
-          <p className="erro-texto" style={{ margin: "0 0 10px" }}>
-            Reprovado{reprovacao.motivo ? `: ${formatarMotivo(reprovacao.motivo_categoria, reprovacao.motivo)}` : ""}
-            {reprovacao.autor_perfil ? ` (por ${reprovacao.autor_perfil.nome_completo || reprovacao.autor_perfil.email}, ${formatar(reprovacao.data_autenticacao || reprovacao.criado_em)})` : ""} — ajuste o relatório.
-          </p>
-        )}
-        {insp.fase >= ULTIMA_FASE ? (
-          <EncerramentoOS inspecaoId={id} perfil={perfil} versao={versaoDados} onMudou={carregar} />
-        ) : acoes.length === 0 ? (
-          <p className="vazio" style={{ margin: 0 }}>
-            {insp.fase >= ULTIMA_FASE ? "OS encerrada."
-              : perfil && !perfilAtuaNaFase(perfil, insp.fase) ? `Fase com ${def?.area || "outra área"} — você está em modo consulta.`
-              : "Nenhuma ação disponível para o seu perfil nesta fase."}
-          </p>
-        ) : (
-          <>
-          {(insp.fase === 5 || insp.fase === 9) && (
-            <p className="detalhe" style={{ margin: "0 0 10px" }}>
-              {relEmAvaliacao ? (
-                <>Relatório em avaliação: <strong>{ROTULO_TIPO[relEmAvaliacao.tipo as TipoRelatorio]} v{relEmAvaliacao.versao}</strong>{" "}
-                  {relAval?.enviado_em ? `(enviado${relAval.enviado_por ? ` por ${nomeDe(relAval.enviado_por)}` : ""} em ${formatar(relAval.enviado_em)}) ` : ""}
-                  — <a href={`/api/relatorios/${relEmAvaliacao.id}/download`} target="_blank" rel="noopener noreferrer"
-                    onClick={() => marcarBaixado(relEmAvaliacao.id)}>baixar</a>.
-                  Aprovar/reprovar vale só para esta versão.</>
-              ) : (
-                <span className="val-msg val-erro" style={{ display: "inline" }}>
-                  ⛔ Nenhum relatório de {ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação — não há o que aprovar nem reprovar. Operações precisa enviar o relatório.
-                </span>
+        {encerrada && (
+          <div className="faixa-alerta ok" role="status">
+            <p className="faixa-alerta-texto" style={{ margin: 0 }}>
+              <span className="faixa-alerta-rotulo">
+                🔒 {textoEncerrada(insp.encerrada_em, nomeDe(insp.encerrada_por) || null, insp.encerramento_manual)}
+              </span>
+              {insp.encerramento_manual && insp.encerramento_justificativa && (
+                <span style={{ display: "block" }}>Justificativa: {insp.encerramento_justificativa}</span>
               )}
+              <span className="detalhe" style={{ margin: "2px 0 0" }}>
+                Só consulta: coletas, fotos, RDOs, relatórios, agendamentos, checklist e cadastro não podem ser alterados. Downloads e entregas ao cliente seguem liberados.
+              </span>
+            </p>
+          </div>
+        )}
+
+        <AvisoCliente clienteId={insp.projeto?.cliente?.id} faixa />
+
+        {/* Fase atual em uma linha; a lista das 10 fases abre sob demanda. */}
+        <div className="os-fase">
+          <div className="os-fase-linha">
+            <strong className="os-fase-nome">
+              Fase {insp.fase} de {ULTIMA_FASE} · {nomeFase(insp.fase)}
+            </strong>
+            <button type="button" className="secao-link" aria-expanded={verFases} aria-controls="lista-fases"
+              onClick={() => setVerFases((v) => !v)}>
+              {verFases ? "ocultar fases" : "ver todas as fases"}
+            </button>
+          </div>
+          <div className="fu-progresso" title={`Fase ${insp.fase} de ${ULTIMA_FASE}`}>
+            <div className="fu-barra" style={{ width: `${pct}%` }} />
+          </div>
+
+          <div id="lista-fases" hidden={!verFases}
+            style={{ display: verFases ? "flex" : undefined, flexDirection: "column", gap: 4, marginTop: 12 }}>
+            {TODAS_FASES.map((n) => {
+              const estado = n < insp.fase ? "feita" : n === insp.fase ? "atual" : "futura";
+              return (
+                <div key={n} className="fase-linha" style={{ opacity: estado === "futura" ? 0.5 : 1 }}>
+                  <span
+                    style={{
+                      width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 12, fontWeight: 700,
+                      background: estado === "feita" ? "#16a34a" : estado === "atual" ? "var(--primaria)" : "var(--track)",
+                      color: estado === "futura" ? "var(--cinza)" : "#fff",
+                    }}
+                  >
+                    {estado === "feita" ? "✓" : n}
+                  </span>
+                  <span className="fase-nome" style={{ fontWeight: estado === "atual" ? 700 : 500, color: "var(--texto)" }}>
+                    {nomeFase(n)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Barra de ações da fase, logo abaixo da fase. Recebe o foco depois de
+            uma ação de fase (antes era o card "Ações desta fase"). */}
+        <div ref={cardAcoesRef} tabIndex={-1} className="os-acoes" role="region" aria-labelledby="titulo-acoes">
+          <h2 id="titulo-acoes" className="os-acoes-titulo">Ações desta fase</h2>
+          {reprovacao && (
+            <p className="erro-texto" style={{ margin: 0 }}>
+              Reprovado{reprovacao.motivo ? `: ${formatarMotivo(reprovacao.motivo_categoria, reprovacao.motivo)}` : ""}
+              {reprovacao.autor_perfil ? ` (por ${reprovacao.autor_perfil.nome_completo || reprovacao.autor_perfil.email}, ${formatar(reprovacao.data_autenticacao || reprovacao.criado_em)})` : ""} — ajuste o relatório.
             </p>
           )}
-          {relAval && <ResumoValidacao r={avisosAprov} />}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {acoes.map((o) => (
-              <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)}
-                disabled={processando || ((insp.fase === 5 || insp.fase === 9) && (o.acao === "aprovar" || o.acao === "reprovar") && !relEmAvaliacao)}>
-                {processando ? "Enviando…" : o.rotulo}
-              </button>
-            ))}
-          </div>
-          </>
-        )}
-        {erro && <p className="erro-texto" style={{ marginBottom: 0 }}>{erro}</p>}
-      </div>
+          {insp.fase >= ULTIMA_FASE ? (
+            <EncerramentoOS inspecaoId={id} perfil={perfil} versao={versaoDados} onMudou={carregar} />
+          ) : acoes.length === 0 ? (
+            <p className="vazio" style={{ margin: 0 }}>
+              {insp.fase >= ULTIMA_FASE ? "OS encerrada."
+                : perfil && !perfilAtuaNaFase(perfil, insp.fase) ? `Fase com ${def?.area || "outra área"} — você está em modo consulta.`
+                : "Nenhuma ação disponível para o seu perfil nesta fase."}
+            </p>
+          ) : (
+            <>
+            {(insp.fase === 5 || insp.fase === 9) && (
+              <p className="detalhe" style={{ margin: 0 }}>
+                {relEmAvaliacao ? (
+                  <>Relatório em avaliação: <strong>{ROTULO_TIPO[relEmAvaliacao.tipo as TipoRelatorio]} v{relEmAvaliacao.versao}</strong>{" "}
+                    {relAval?.enviado_em ? `(enviado${relAval.enviado_por ? ` por ${nomeDe(relAval.enviado_por)}` : ""} em ${formatar(relAval.enviado_em)}) ` : ""}
+                    — <a href={`/api/relatorios/${relEmAvaliacao.id}/download`} target="_blank" rel="noopener noreferrer"
+                      onClick={() => marcarBaixado(relEmAvaliacao.id)}>baixar</a>.
+                    Aprovar/reprovar vale só para esta versão.</>
+                ) : (
+                  <span className="val-msg val-erro" style={{ display: "inline" }}>
+                    ⛔ Nenhum relatório de {ROTULO_TIPO[tipoDaFase(insp.fase)]} em aprovação — não há o que aprovar nem reprovar. Operações precisa enviar o relatório.
+                  </span>
+                )}
+              </p>
+            )}
+            {relAval && <ResumoValidacao r={avisosAprov} recolhivel />}
+            <div className="os-acoes-botoes">
+              {acoes.map((o) => (
+                <button key={o.acao} className={`btn-azul ${o.acao === "reprovar" ? "btn-sec" : ""}`} onClick={() => clicarAcao(o)}
+                  disabled={processando || ((insp.fase === 5 || insp.fase === 9) && (o.acao === "aprovar" || o.acao === "reprovar") && !relEmAvaliacao)}>
+                  {processando ? "Enviando…" : o.rotulo}
+                </button>
+              ))}
+            </div>
+            </>
+          )}
+          {erro && <p className="erro-texto" style={{ margin: 0 }}>{erro}</p>}
+        </div>
+      </header>
 
-      {/* Seções recolhíveis: o padrão vem da fase (lib/asp/fases.ts); a
-          escolha do usuário fica guardada por inspeção e fase. */}
-      <div className="secoes-controles">
-        <button type="button" className="secao-link" onClick={secoes.expandirTudo}>Expandir tudo</button>
-        <button type="button" className="secao-link" onClick={secoes.recolherTudo}>Recolher tudo</button>
-        {secoes.alterado && (
-          <button type="button" className="secao-link" onClick={secoes.restaurar}>Restaurar padrão da fase</button>
-        )}
+      {/* Seções recolhíveis numa superfície só, separadas por divisória. O
+          padrão vem da fase (lib/asp/fases.ts); a escolha do usuário fica
+          guardada por inspeção e fase. */}
+      <div className="card os-secoes">
+      <div className="os-secoes-topo">
+        <h2 className="os-secoes-rotulo">Seções da OS</h2>
+        <div className="secoes-controles">
+          <button type="button" className="secao-link" onClick={secoes.expandirTudo}>Expandir tudo</button>
+          <button type="button" className="secao-link" onClick={secoes.recolherTudo}>Recolher tudo</button>
+          {secoes.alterado && (
+            <button type="button" className="secao-link" onClick={secoes.restaurar}>Restaurar padrão da fase</button>
+          )}
+        </div>
       </div>
 
       {/* Coleta (Operações) + Agendamento (Comercial) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
         <SecaoRecolhivel id="coletas" titulo={`Coletas (${coletas.length})`}
           aberta={secoes.aberta("coletas")} onAlternar={() => secoes.alternar("coletas")}
           resumo={resumoColetas}
@@ -1913,12 +1914,13 @@ export default function InspecaoDetalhePage() {
           {coletas.length === 0 ? (
             <p className="vazio" style={{ margin: 0 }}>Nenhuma coleta registrada.</p>
           ) : (
-            coletas.map((c) => {
+            <div className="os-lista">
+            {coletas.map((c) => {
               const temMedicao = c.tipo !== "anexo" && medicaoPreenchida(c.dados);
               const naoAprovavel = c.aprovada_em ? null : motivoNaoAprovavel(c);
               const resp = temMedicao && typeof c.dados?.reportResponsavel === "string" ? c.dados.reportResponsavel : "";
               return (
-                <div key={c.id} className="linha-item">
+                <div key={c.id} className="linha-item os-linha">
                   <span className="detalhe linha-texto" style={{ margin: 0 }}>
                     {temMedicao ? "📋 Relatório Técnico interno" : `📎 Anexo — ${c.descricao || c.tipo}`}
                     {" · "}{c.data_coleta ? formatarData(c.data_coleta) : formatar(c.criado_em)}
@@ -1961,7 +1963,8 @@ export default function InspecaoDetalhePage() {
                   </span>
                 </div>
               );
-            })
+            })}
+            </div>
           )}
         </SecaoRecolhivel>
 
@@ -1972,10 +1975,11 @@ export default function InspecaoDetalhePage() {
           {agAtivos.length === 0 ? (
             <p className="vazio" style={{ margin: "8px 0 0" }}>Nenhum agendamento.</p>
           ) : (
-            agAtivos.map((a) => (
-              <div key={a.id} style={{ borderLeft: `3px solid ${a.a_definir ? "#c2410c" : "var(--primaria)"}`, paddingLeft: 12, marginTop: 10 }}>
+            <div className="os-lista">
+            {agAtivos.map((a) => (
+              <div key={a.id} className="os-linha">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                  <div style={{ color: "var(--texto)", fontWeight: 700 }}>
+                  <div className={`os-linha-titulo${a.a_definir ? " pendente" : ""}`} style={{ minWidth: 0 }}>
                     📅 {a.data_visita
                       ? (a.data_fim && a.data_fim > a.data_visita ? `${formatarData(a.data_visita)} a ${formatarData(a.data_fim)}` : formatarData(a.data_visita))
                       : a.a_definir ? "Data a definir" : "sem data"}{a.hora ? ` às ${a.hora}` : ""}
@@ -2001,7 +2005,7 @@ export default function InspecaoDetalhePage() {
                     o ⛔ de "escolha a equipe" vale ao salvar o agendamento. */}
                 {!(a.equipe?.length > 0) && agendamentoFuturo(a, hojeBrasil()) && (
                   <div className="val-campo" aria-live="polite">
-                    <p className="val-msg val-aviso">⚠️ Agendamento sem equipe — escale alguém{podeAgenda ? " (✎ Editar)" : ""}.</p>
+                    <p className="val-msg val-aviso aviso-plano">⚠️ Agendamento sem equipe — escale alguém{podeAgenda ? " (✎ Editar)" : ""}.</p>
                   </div>
                 )}
                 {a.equipamentos?.length > 0 && <div className="detalhe" style={{ margin: 0 }}>Equipamentos: {a.equipamentos.join(", ")}</div>}
@@ -2012,7 +2016,7 @@ export default function InspecaoDetalhePage() {
                 )}
                 {/* Fase 6: avisos da execução (não impedem nada). */}
                 {agExec?.id === a.id && avisosExec.mensagens.length > 0 && (
-                  <div className="val-campo" aria-live="polite" style={{ marginTop: 4 }}>
+                  <div className="val-campo aviso-plano" aria-live="polite" style={{ marginTop: 4 }}>
                     {avisosExec.mensagens.map((m) => <p key={m} className="val-msg val-aviso">⚠️ {m}</p>)}
                     {podeAgenda && avisosExec.faltamEquipamentos.length > 0 && (
                       <button type="button" className="val-acao" disabled={adicionandoEquip === a.id}
@@ -2023,7 +2027,8 @@ export default function InspecaoDetalhePage() {
                   </div>
                 )}
               </div>
-            ))
+            ))}
+            </div>
           )}
           {/* Remarcações: a data antiga não some — fica aqui, recolhida. */}
           {agRemarcados.length > 0 && (
@@ -2036,7 +2041,7 @@ export default function InspecaoDetalhePage() {
                 const de = a.data_visita ? textoPeriodo(periodoDe(a)) : "data a definir";
                 const para = novo?.data_visita ? textoPeriodo(periodoDe(novo)) : novo?.a_definir ? "data a definir" : "—";
                 return (
-                  <div key={a.id} className="detalhe" style={{ display: "flex", justifyContent: "space-between", gap: 8, margin: "6px 0 0", paddingLeft: 12, borderLeft: "3px solid var(--borda)" }}>
+                  <div key={a.id} className="detalhe os-linha" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, margin: 0, padding: "6px 0" }}>
                     <span>
                       ↪ Remarcado de <s>{de}</s> para <strong>{para}</strong> ({rotuloEtapa(a.tipo)})
                       {a.substituido_em ? ` · em ${formatar(a.substituido_em)}` : ""}
@@ -2050,9 +2055,8 @@ export default function InspecaoDetalhePage() {
             </details>
           )}
         </SecaoRecolhivel>
-      </div>
 
-      <SecaoRecolhivel id="checklist" titulo="Checklist de equipamentos" style={{ marginTop: 16 }}
+      <SecaoRecolhivel id="checklist" titulo="Checklist de equipamentos"
         aberta={secoes.aberta("checklist")} onAlternar={() => secoes.alternar("checklist")}
         resumo={resumoChecklist}>
         <ChecklistEquipamentos
@@ -2070,7 +2074,7 @@ export default function InspecaoDetalhePage() {
       {/* Fotos só existem no bloco de execução. Recolhida, segue montada:
           alimenta o aviso ao concluir a Execução e as fotos do relatório. */}
       {bloco === "execucao" && (
-        <SecaoRecolhivel id="fotos" titulo="Coleta de fotos da execução" style={{ marginTop: 16 }}
+        <SecaoRecolhivel id="fotos" titulo="Coleta de fotos da execução"
           aberta={secoes.aberta("fotos")} onAlternar={() => secoes.alternar("fotos")}
           resumo={resumoFotos}>
           <ColetaFotosExecucao key={encerrada ? "ro" : "rw"} inspecaoId={id} onMudar={setFotosExec} embutido
@@ -2082,7 +2086,7 @@ export default function InspecaoDetalhePage() {
       {/* RDO — Registro Diário de Operação: um por dia no projeto, preenchido
           na Execução. Recolhido segue montado: alimenta o aviso da fase 7. */}
       {insp.fase >= 6 && insp.projeto && (
-        <SecaoRecolhivel id="rdos" titulo={`RDOs — diário de operação${rdosInsp ? ` (${rdosInsp.length})` : ""}`} style={{ marginTop: 16 }}
+        <SecaoRecolhivel id="rdos" titulo={`RDOs — diário de operação${rdosInsp ? ` (${rdosInsp.length})` : ""}`}
           aberta={secoes.aberta("rdos")} onAlternar={() => secoes.alternar("rdos")}
           resumo={erroRdos ? <span className="alerta">Erro — abra a seção</span>
             : rdosInsp === null ? "Carregando…"
@@ -2106,7 +2110,7 @@ export default function InspecaoDetalhePage() {
       )}
 
       {/* Relatórios (Operações envia; Gerência aprova nas fases 5/9) */}
-      <SecaoRecolhivel id="relatorios" titulo={`Relatórios (${relatorios.length})`} style={{ marginTop: 16 }}
+      <SecaoRecolhivel id="relatorios" titulo={`Relatórios (${relatorios.length})`}
         aberta={secoes.aberta("relatorios")} onAlternar={() => secoes.alternar("relatorios")}
         resumo={resumoRelatorios}
         acoesCabecalho={podeRelatorio && (
@@ -2144,10 +2148,9 @@ export default function InspecaoDetalhePage() {
         {relatorios.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Nenhum relatório enviado.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="os-lista">
             {relatorios.map((r) => (
-              <div key={r.id} className="linha-item"
-                style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12, marginTop: 0 }}>
+              <div key={r.id} className="linha-item os-linha">
                 <div className="linha-texto">
                   <div style={{ color: "var(--texto)" }}>
                     <strong style={{ textTransform: "capitalize" }}>{ROTULO_TIPO[r.tipo as TipoRelatorio] || r.tipo}</strong> v{r.versao} —{" "}
@@ -2161,7 +2164,7 @@ export default function InspecaoDetalhePage() {
                   )}
                   {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {formatarMotivo(r.motivo_categoria, r.motivo_ajuste)}</div>}
                   {r.status === "rascunho" && r.tipo === "execucao" && exigeLaudoExecucao && !r.dados?.laudoPdf?.caminho && (
-                    <div className="val-msg val-aviso" style={{ margin: 0 }}>⚠️ Sem o PDF do laudo do laboratório — obrigatório para enviar para aprovação.</div>
+                    <div className="val-msg val-aviso aviso-plano" style={{ margin: "2px 0" }}>⚠️ Sem o PDF do laudo do laboratório — obrigatório para enviar para aprovação.</div>
                   )}
                   {r.enviado_em && (
                     <div className="detalhe" style={{ margin: 0 }}>
@@ -2231,7 +2234,7 @@ export default function InspecaoDetalhePage() {
 
       {/* Fase 10: entregas ao cliente (vale também com a OS encerrada). */}
       {insp.fase >= ULTIMA_FASE && (
-        <SecaoRecolhivel id="entregas" titulo="Entregas ao cliente" style={{ marginTop: 16 }}
+        <SecaoRecolhivel id="entregas" titulo="Entregas ao cliente"
           aberta={secoes.aberta("entregas")} onAlternar={() => secoes.alternar("entregas")}
           resumo={resumoEntregas}>
           <EntregasCliente inspecaoId={id} perfil={perfil} versao={versaoDados} onResumo={setResumoEntregas} />
@@ -2239,7 +2242,7 @@ export default function InspecaoDetalhePage() {
       )}
 
       {/* Arquivos do projeto inteiro, para consulta sem sair da inspeção. */}
-      <SecaoRecolhivel id="arquivos" titulo={`Arquivos do projeto (${arquivos.length})`} style={{ marginTop: 16 }}
+      <SecaoRecolhivel id="arquivos" titulo={`Arquivos do projeto (${arquivos.length})`}
         aberta={secoes.aberta("arquivos")} onAlternar={() => secoes.alternar("arquivos")}
         resumo={arquivos.length === 0 ? "Nenhum arquivo" : `${arquivos.length} arquivo${arquivos.length === 1 ? "" : "s"}`}>
         {arquivos.length === 0 ? (
@@ -2254,11 +2257,11 @@ export default function InspecaoDetalhePage() {
               : grupo === "rdo" ? "RDOs — diário de operação" : "Medições";
             return (
               <div key={grupo} style={{ marginTop: 14 }}>
-                <h4 style={{ margin: "0 0 8px", fontSize: 14, borderBottom: "1px solid var(--borda)", paddingBottom: 6 }}>
+                <h4 style={{ margin: "0 0 2px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--cinza)" }}>
                   {titulo} ({itens.length})
                 </h4>
                 {itens.map((a) => (
-                  <div key={a.href} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                  <div key={a.href} className="os-linha" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", flexWrap: "wrap" }}>
                     <span className="detalhe" style={{ margin: 0 }}>
                       <strong style={{ color: "var(--texto)" }}>{a.inspecao}</strong> · {a.rotulo}
                       {a.data ? ` · ${formatar(a.data)}` : ""}
@@ -2272,7 +2275,7 @@ export default function InspecaoDetalhePage() {
         )}
       </SecaoRecolhivel>
 
-      <SecaoRecolhivel id="historico" titulo="Histórico de fases" style={{ marginTop: 16 }}
+      <SecaoRecolhivel id="historico" titulo="Histórico de fases"
         aberta={secoes.aberta("historico")} onAlternar={() => secoes.alternar("historico")}
         resumo={ultimaMov
           ? `${descreverAcaoFase(ultimaMov.acao, ultimaMov.fase_de, ultimaMov.fase_para)} · ${formatar(ultimaMov.data_autenticacao || ultimaMov.criado_em)}`
@@ -2280,9 +2283,9 @@ export default function InspecaoDetalhePage() {
         {historico.length === 0 ? (
           <p className="vazio" style={{ margin: 0 }}>Sem movimentações ainda.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="os-lista">
             {historico.map((h) => (
-              <div key={h.id} style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12 }}>
+              <div key={h.id} className="os-linha">
                 <div style={{ fontSize: 14, color: "var(--texto)", fontWeight: 600 }}>
                   {descreverAcaoFase(h.acao, h.fase_de, h.fase_para)}
                 </div>
@@ -2299,6 +2302,7 @@ export default function InspecaoDetalhePage() {
           </div>
         )}
       </SecaoRecolhivel>
+      </div>
 
       {/* Modal: baixar modelo vazio (N vetores × m pontos) */}
       {modalModelo && (
@@ -2454,7 +2458,7 @@ export default function InspecaoDetalhePage() {
                 </p>
               )}
               {!envioExterno.erro && plano.substitui.map((x) => (
-                <p key={x.id} className="val-msg val-aviso" style={{ margin: 0 }}>
+                <p key={x.id} className="val-msg val-aviso aviso-plano" style={{ margin: 0 }}>
                   ⚠️ A versão v{x.versao} em aprovação será substituída (sai da fila da Gerência).
                 </p>
               ))}
@@ -2530,7 +2534,7 @@ export default function InspecaoDetalhePage() {
                 : confirmacao.modo === "pdf" ? "Salva a medição nesta OS com o relatório em PDF anexado." : "Salva a medição nesta OS."}
             </p>
             {retiraAprovacao && (
-              <p className="val-msg val-aviso">⚠️ Esta medição está aprovada; ao salvar, a aprovação será retirada (será preciso aprovar de novo).</p>
+              <p className="val-msg val-aviso aviso-plano">⚠️ Esta medição está aprovada; ao salvar, a aprovação será retirada (será preciso aprovar de novo).</p>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
@@ -2688,12 +2692,12 @@ export default function InspecaoDetalhePage() {
               {usuarios.length === 0 ? (
                 <p className="detalhe" style={{ margin: 0 }}>Nenhum usuário disponível.</p>
               ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 150, overflowY: "auto", border: "1px solid var(--borda)", borderRadius: 8, padding: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {usuarios.map((u) => {
                     const sel = agEquipeIds.includes(u.id);
                     return (
                       <button type="button" key={u.id} onClick={() => toggleEquipe(u.id)} aria-pressed={sel}
-                        style={{ padding: "5px 10px", borderRadius: 20, fontSize: 13, cursor: "pointer",
+                        style={{ padding: "5px 12px", minHeight: 36, borderRadius: 20, fontSize: 13, cursor: "pointer",
                           border: `1px solid ${sel ? "var(--primaria)" : "var(--borda)"}`,
                           background: sel ? "var(--primaria)" : "transparent", color: sel ? "#fff" : "var(--texto)" }}>
                         {sel ? "✓ " : ""}{u.nome}{u.funcao ? ` · ${u.funcao}` : ""}
@@ -2789,6 +2793,44 @@ export default function InspecaoDetalhePage() {
               <button className="btn-azul" onClick={salvarAgenda} disabled={salvandoAgenda || (agTentou && temErros(resultadoAgenda))}>
                 {salvandoAgenda ? "Salvando…" : substituidosAgenda.length > 0 || remarcandoAgenda ? "Remarcar" : "Salvar agendamento"}
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: procedimento da OS (antes era um seletor sempre aberto no
+          topo). Trocar salva na hora, como antes. */}
+      {editandoProc && podeRenomear && (
+        <Modal titulo="Procedimento da OS" onFechar={() => setEditandoProc(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              Define o formato do relatório (tópicos, seções próprias e modelo) e a lista do checklist. Trocar salva na hora.
+            </p>
+            <label htmlFor="os-procedimento" style={{ fontWeight: 600, fontSize: 13 }}>Procedimento *</label>
+            <select id="os-procedimento" value={insp.procedimento || ""} disabled={salvandoProc}
+              onChange={(e) => salvarProcedimento(e.target.value)} style={inputStyle}>
+              {/* Procedimento é obrigatório: "não definido" só aparece em
+                  OS antiga sem procedimento, e não pode ser escolhido. */}
+              {!insp.procedimento && <option value="" disabled>— não definido (escolha um) —</option>}
+              {/* Procedimento sem código não pode ser escolhido: o valor
+                  vazio se confunde com "não definido" e nada seria salvo. */}
+              {/* Desativado no Catálogo: só aparece se for o desta OS
+                  (continua valendo, mas não pode ser escolhido de novo). */}
+              {procedimentos.filter((p) => ativoNoCatalogo(p) || p.codigo === insp.procedimento).map((p) => (
+                <option key={p.id} value={p.codigo || ""} disabled={!p.codigo}>
+                  {p.codigo ? `${p.codigo} — ${p.nome}` : `${p.nome} (sem código — corrija no Catálogo)`}
+                  {ativoNoCatalogo(p) ? "" : " (desativado no Catálogo)"}
+                </option>
+              ))}
+              {/* Valor salvo que não existe mais no Catálogo continua visível. */}
+              {insp.procedimento && !procedimentos.some((p) => p.codigo === insp.procedimento) && (
+                <option value={insp.procedimento}>{insp.procedimento} (fora do Catálogo)</option>
+              )}
+            </select>
+            {salvandoProc && <span className="detalhe" style={{ margin: 0 }} aria-live="polite">Salvando…</span>}
+            {erroProc && <p className="erro-texto" style={{ margin: 0 }}>{erroProc}</p>}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn-azul" onClick={() => setEditandoProc(false)} disabled={salvandoProc}>Concluir</button>
             </div>
           </div>
         </Modal>

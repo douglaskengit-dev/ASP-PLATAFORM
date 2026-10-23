@@ -235,7 +235,8 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
       </p>
       {erro && <p className="erro-texto" style={{ margin: "6px 0 0" }}>{erro}</p>}
 
-      <AvisoCliente clienteId={clienteId} compacto />
+      {/* Embutido na OS, o aviso do cliente já aparece no cabeçalho da página. */}
+      {!embutido && <AvisoCliente clienteId={clienteId} compacto />}
 
       {!atual && !outro && <p className="vazio" style={{ margin: "8px 0 0" }}>Nenhum checklist montado.</p>}
       {atual && render(atual, true)}
