@@ -7,8 +7,10 @@ const nextConfig = {
   // Node) também precisa estar na lista — sem ele, o bundle da função na
   // Vercel fica sem o binário nativo e o pdf.js quebra com
   // "ReferenceError: DOMMatrix is not defined" ao processar o PDF.
+  // O nodemailer (e-mail via SMTP/Gmail, lib/email.ts) também fica fora do
+  // bundle: é carregado pelo Node.js como está (sockets/TLS nativos).
   experimental: {
-    serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"],
+    serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas", "nodemailer"],
     // O pdfjs-dist (Node) carrega o worker com `import(caminho)` usando uma
     // variável, não uma string fixa — o rastreador de arquivos da Vercel não
     // consegue ver essa dependência sozinho e deixa pdf.worker.mjs de fora
