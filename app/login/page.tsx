@@ -42,56 +42,60 @@ function LoginForm() {
 
   return (
     <div id="tela-login">
-      <div style={{ position: "fixed", top: 16, right: 16 }}>
+      <div className="login-tema">
         <ThemeToggle variante="auto" />
       </div>
       <div className="card-login">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
-          <img src="/assets/asp-badge.svg" alt="ASP" className="logo" style={{ margin: 0 }} />
-          <img src="/assets/asp-mascote.svg" alt="Mascote ASP" style={{ height: 64, width: "auto" }} />
+        <div className="login-marca">
+          <img src="/assets/asp-badge.svg" alt="ASP" className="logo" />
+          <img src="/assets/asp-mascote.svg" alt="" aria-hidden="true" className="login-mascote" />
         </div>
         <h1>Plataforma ASP</h1>
         <p className="sub">Acesse com seu e-mail e senha</p>
-        <form onSubmit={entrar}>
-          <input
-            type="email"
-            placeholder="E-mail"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
-            autoFocus
-            required
-          />
-          <div style={{ position: "relative", marginTop: 20 }}>
+        <form onSubmit={entrar} className="login-form">
+          <div className="login-campo">
+            <label htmlFor="login-email">E-mail</label>
             <input
-              type={mostrarSenha ? "text" : "password"}
-              placeholder="Senha"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              autoComplete="current-password"
+              id="login-email"
+              type="email"
+              placeholder="voce@empresa.com.br"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username"
+              autoFocus
               required
-              style={{ margin: 0, paddingRight: 46 }}
             />
-            <button
-              type="button"
-              onClick={() => setMostrarSenha((v) => !v)}
-              title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
-              aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
-              style={{
-                position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                width: "auto", minWidth: 0, margin: 0, padding: "4px 8px",
-                background: "none", border: "none", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "var(--cinza)",
-              }}
-            >
-              {mostrarSenha ? "🙈" : "👁️"}
-            </button>
           </div>
-          <button type="submit" disabled={entrando}>
+          <div className="login-campo">
+            <label htmlFor="login-senha">Senha</label>
+            <div className="login-senha">
+              <input
+                id="login-senha"
+                type={mostrarSenha ? "text" : "password"}
+                placeholder="Sua senha"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                className="login-olho"
+                onClick={() => setMostrarSenha((v) => !v)}
+                title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                aria-pressed={mostrarSenha}
+              >
+                {mostrarSenha ? "🙈" : "👁️"}
+              </button>
+            </div>
+          </div>
+          <button type="submit" className="btn-azul" disabled={entrando} aria-busy={entrando}>
             {entrando ? "Entrando..." : "Entrar"}
           </button>
-          {erro && <p className="erro-texto">{erro}</p>}
+          {erro && <p className="erro-texto" role="alert">{erro}</p>}
         </form>
-        <p style={{ fontSize: 12, color: "var(--cinza)", marginTop: 16 }}>
+        <p className="login-rodape">
           Não tem uma conta? Peça a um administrador do sistema para criar seu acesso.
         </p>
       </div>
