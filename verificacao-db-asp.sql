@@ -1658,6 +1658,90 @@ create policy gp_lembretes_recorrencia_select on public.gp_lembretes_recorrencia
 -- Sem policy de insert/update/delete: só a chave de serviço (API) grava.
 
 
+-- ============================================================================
+-- ASP — Acesso por e-mail: convite (24 h) e redefinição de senha (1 h).
+-- gp_links_acesso guarda só o SHA-256 do token do link (auditoria do envio
+-- e do uso); gp_acesso_tentativas = limite do "Esqueci minha senha".
+-- Sem policy: só a chave de serviço (API). Desativar invalida os links.
+-- ============================================================================
+-- 1) Links
+create table if not exists public.gp_links_acesso (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid references public.gp_profiles (id) on delete set null,
+  email text not null,
+  tipo text not null,
+  token_hash text not null,
+  criado_por uuid references public.gp_profiles (id) on delete set null,
+  criado_em timestamptz not null default now(),
+  expira_em timestamptz not null,
+  usado_em timestamptz,
+  uso_ip text,
+  invalidado_em timestamptz,
+  invalidado_motivo text,
+  destino text,
+  ip text,
+  user_agent text,
+  envio_status text not null default 'pendente',
+  envio_erro text,
+  enviado_em timestamptz
+);
+
+alter table public.gp_links_acesso add column if not exists uso_ip text;
+alter table public.gp_links_acesso add column if not exists invalidado_em timestamptz;
+alter table public.gp_links_acesso add column if not exists invalidado_motivo text;
+alter table public.gp_links_acesso add column if not exists destino text;
+alter table public.gp_links_acesso add column if not exists envio_status text not null default 'pendente';
+alter table public.gp_links_acesso add column if not exists envio_erro text;
+alter table public.gp_links_acesso add column if not exists enviado_em timestamptz;
+
+alter table public.gp_links_acesso drop constraint if exists ck_gp_links_acesso_tipo;
+alter table public.gp_links_acesso add constraint ck_gp_links_acesso_tipo
+  check (tipo in ('convite', 'redefinicao'));
+alter table public.gp_links_acesso drop constraint if exists ck_gp_links_acesso_envio;
+alter table public.gp_links_acesso add constraint ck_gp_links_acesso_envio
+  check (envio_status in ('pendente', 'enviado', 'nao_configurado', 'falhou'));
+-- Convite no máximo 24 h; redefinição no máximo 1 h (folga de 1 min).
+alter table public.gp_links_acesso drop constraint if exists ck_gp_links_acesso_prazo;
+alter table public.gp_links_acesso add constraint ck_gp_links_acesso_prazo
+  check (expira_em > criado_em and expira_em <= criado_em
+    + case when tipo = 'convite' then interval '24 hours 1 minute' else interval '1 hour 1 minute' end);
+
+create unique index if not exists uq_gp_links_acesso_token on public.gp_links_acesso (token_hash);
+create index if not exists idx_gp_links_acesso_usuario on public.gp_links_acesso (usuario_id, tipo, criado_em desc);
+create index if not exists idx_gp_links_acesso_email on public.gp_links_acesso (email);
+
+alter table public.gp_links_acesso enable row level security;
+revoke all on public.gp_links_acesso from anon, authenticated;
+-- Sem policy: só a chave de serviço (API) lê e grava.
+
+-- 2) Tentativas do "Esqueci minha senha"
+create table if not exists public.gp_acesso_tentativas (
+  id bigint generated always as identity primary key,
+  chave text not null,
+  criado_em timestamptz not null default now()
+);
+create index if not exists idx_gp_acesso_tentativas_chave on public.gp_acesso_tentativas (chave, criado_em desc);
+
+alter table public.gp_acesso_tentativas enable row level security;
+revoke all on public.gp_acesso_tentativas from anon, authenticated;
+
+-- 3) Desativar invalida os links pendentes
+create or replace function public.gp_links_acesso_invalida_desativado() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.ativo is distinct from true and old.ativo is true then
+    update public.gp_links_acesso
+       set invalidado_em = now(), invalidado_motivo = 'usuario_desativado'
+     where usuario_id = new.id and usado_em is null and invalidado_em is null;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_gp_links_acesso_desativado on public.gp_profiles;
+create trigger trg_gp_links_acesso_desativado
+  after update of ativo on public.gp_profiles
+  for each row execute function public.gp_links_acesso_invalida_desativado();
+
 -- PostgREST: recarrega o cache do schema.
 notify pgrst, 'reload schema';
 
@@ -1704,7 +1788,10 @@ with esperado(tabela, coluna) as (values
   ('gp_orgaos_contatos','updated_at'), ('gp_orgaos','updated_at'),
   ('gp_inspecoes','com_inspecao'), ('gp_projetos','com_inspecao_padrao'),
   ('gp_orgaos','recorrente'), ('gp_orgaos','periodicidade_meses'), ('gp_orgaos','aviso_antecedencia_dias'),
-  ('gp_lembretes_recorrencia','orgao_id'), ('gp_lembretes_recorrencia','vencimento'), ('gp_lembretes_recorrencia','notificado_em')
+  ('gp_lembretes_recorrencia','orgao_id'), ('gp_lembretes_recorrencia','vencimento'), ('gp_lembretes_recorrencia','notificado_em'),
+  ('gp_links_acesso','token_hash'), ('gp_links_acesso','expira_em'), ('gp_links_acesso','usado_em'),
+  ('gp_links_acesso','invalidado_em'), ('gp_links_acesso','envio_status'), ('gp_links_acesso','envio_erro'),
+  ('gp_acesso_tentativas','chave'), ('gp_acesso_tentativas','criado_em')
 )
 select * from (
   select e.tabela, e.coluna,
@@ -1928,5 +2015,29 @@ select * from (
   select 'gp_lembretes_recorrencia', 'RLS ligado',
     case when exists (select 1 from pg_class where oid = 'public.gp_lembretes_recorrencia'::regclass and relrowsecurity)
       then 'OK' else '*** FALTANDO ***' end
+  union all
+  -- Acesso por e-mail: token só em hash (único), prazos 24 h / 1 h, RLS sem
+  -- policy (só a chave de serviço) e desativar invalida links pendentes.
+  select 'gp_links_acesso', 'índice único token_hash',
+    case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'uq_gp_links_acesso_token')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_links_acesso', 'check prazo (convite 24 h / redefinição 1 h)',
+    case when exists (select 1 from pg_constraint where conname = 'ck_gp_links_acesso_prazo')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_links_acesso', 'RLS ligado sem policy (só service role)',
+    case when exists (select 1 from pg_class where oid = 'public.gp_links_acesso'::regclass and relrowsecurity)
+      and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'gp_links_acesso')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_acesso_tentativas', 'RLS ligado sem policy (só service role)',
+    case when exists (select 1 from pg_class where oid = 'public.gp_acesso_tentativas'::regclass and relrowsecurity)
+      and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'gp_acesso_tentativas')
+      then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_profiles', 'trigger desativar invalida links de acesso',
+    case when exists (select 1 from pg_trigger where tgname = 'trg_gp_links_acesso_desativado'
+      and tgrelid = 'public.gp_profiles'::regclass) then 'OK' else '*** FALTANDO ***' end
 ) r
 order by status desc, tabela, coluna;

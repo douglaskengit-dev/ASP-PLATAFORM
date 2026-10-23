@@ -8,15 +8,21 @@
  * repetidas e "documentos mantêm o nome antigo" (⚠️). Ninguém tira o próprio
  * acesso nem o do último admin ativo. Desativar tira a pessoa das equipes
  * dos agendamentos futuros (com confirmação listando quais). Cada linha
- * grava com a versão lida (updated_at): se outro admin alterou antes, 409. */
+ * grava com a versão lida (updated_at): se outro admin alterou antes, 409.
+ *
+ * Acesso por e-mail: criar NÃO pede senha — o usuário recebe o convite
+ * "Criar minha senha" (24 h). Cada linha mostra o último convite e oferece
+ * "Enviar link de redefinição" (1 h) e, para quem nunca entrou, "Reenviar
+ * convite". Se o e-mail não sair, aparece o motivo e "Copiar link" (o link
+ * só existe nesta tela, logo após gerar — no banco fica só o hash). */
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import Modal from "@/app/components/Modal";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import {
-  addAviso, addErro, checarAlteracaoAcesso, ehPerfilLegado, FUNCOES_USUARIO, mesclar, nomeCompletoValido,
-  normalizarEspacos, novoResultado, ROTULOS_USUARIO, SENHA_MINIMA, temErros, validarUsuario,
-  type ResultadoValidacao,
+  addAviso, addErro, checarAlteracaoAcesso, dataHoraCurta, ehPerfilLegado, FUNCOES_USUARIO, mesclar, nomeCompletoValido,
+  normalizarEspacos, novoResultado, ROTULOS_USUARIO, SENHA_MINIMA, temErros, validarUsuario, VALIDADE_LINK_TEXTO,
+  type ResultadoValidacao, type TipoLinkAcesso,
 } from "@/lib/validacao";
 
 interface Profile {
@@ -60,6 +66,88 @@ interface AgendamentoAfetado {
   ficaSemEquipe: boolean;
 }
 
+interface ResumoLink {
+  criadoEm: string;
+  status: "pendente" | "aceito" | "expirado" | "invalidado";
+  envio: string;
+  envioErro: string | null;
+}
+interface ResumoAcesso {
+  ultimoLogin: string | null;
+  loginConhecido: boolean;
+  convite: ResumoLink | null;
+  redefinicao: ResumoLink | null;
+}
+
+/** Resposta de emitir um link (criar usuário / reenviar / redefinição). */
+interface EnvioLink {
+  ok?: boolean;
+  tipo: TipoLinkAcesso;
+  enviado: boolean;
+  motivo: string | null;
+  /** Só quando o e-mail não saiu: para copiar (nunca gravado). */
+  link?: string;
+  erro?: string;
+}
+
+const STATUS_LINK: Record<ResumoLink["status"], string> = {
+  pendente: "pendente", aceito: "aceito", expirado: "expirado", invalidado: "substituído/cancelado",
+};
+
+/** "Convite enviado em 23/10 14:05 · pendente". */
+function textoConvite(a: ResumoAcesso | undefined): string | null {
+  const c = a?.convite;
+  if (!c) return null;
+  const status = c.status !== "aceito" && a?.ultimoLogin ? "aceito" : STATUS_LINK[c.status];
+  const verbo = c.envio === "enviado" ? "Convite enviado em" : "Convite gerado em";
+  return `${verbo} ${dataHoraCurta(c.criadoEm)} · ${status}${c.envio !== "enviado" && c.envio !== "pendente" ? " · e-mail não enviado" : ""}`;
+}
+
+/** Resultado do envio: ✓ enviado, ou ⚠️ motivo + Reenviar + Copiar link. */
+function AvisoEnvio({ envio, email, onReenviar, reenviando }: {
+  envio: EnvioLink; email: string; onReenviar?: () => void; reenviando?: boolean;
+}) {
+  const [copiado, setCopiado] = useState(false);
+  const nome = envio.tipo === "convite" ? "Convite" : "Link de redefinição";
+  if (envio.erro) return <p className="msg erro" style={{ margin: "6px 0 0" }}>⛔ {envio.erro}</p>;
+  if (envio.enviado) {
+    return (
+      <p className="msg ok" style={{ margin: "6px 0 0" }}>
+        ✉️ {nome} enviado para {email} (válido por {VALIDADE_LINK_TEXTO[envio.tipo]}).
+      </p>
+    );
+  }
+  async function copiar() {
+    if (!envio.link) return;
+    try {
+      await navigator.clipboard.writeText(envio.link);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      window.prompt("Copie o link (Ctrl+C):", envio.link);
+    }
+  }
+  return (
+    <div className="val-resumo" role="alert" style={{ marginTop: 8 }}>
+      <strong className="val-aviso">⚠️ E-mail não enviado: {envio.motivo || "falha no envio."}</strong>
+      <p className="detalhe" style={{ margin: "4px 0 8px" }}>
+        {envio.tipo === "convite" ? "O usuário ainda não recebeu o convite (a conta já existe)." : "A senha atual continua valendo."}{" "}
+        {envio.link ? `Você pode copiar o link (válido por ${VALIDADE_LINK_TEXTO[envio.tipo]}, uso único) e enviá-lo por outro meio — ele só aparece agora.` : ""}
+      </p>
+      <div className="actions" style={{ marginTop: 0 }}>
+        {onReenviar && (
+          <button type="button" className="btn secondary" onClick={onReenviar} disabled={reenviando}>
+            {reenviando ? "Enviando..." : envio.tipo === "convite" ? "Reenviar convite" : "Reenviar link"}
+          </button>
+        )}
+        {envio.link && (
+          <button type="button" className="btn-doc" onClick={copiar}>{copiado ? "✓ Link copiado" : "📋 Copiar link"}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 async function lerJson(resp: Response): Promise<any> {
   try { return await resp.json(); } catch { return {}; }
 }
@@ -86,12 +174,17 @@ export default function AdminUsuariosConteudo() {
   const [autorizado, setAutorizado] = useState<boolean | null>(null);
   const [meuId, setMeuId] = useState<string | null>(null);
   const [usuarios, setUsuarios] = useState<Profile[]>([]);
+  const [acesso, setAcesso] = useState<Record<string, ResumoAcesso>>({});
+  /** Último envio de link por usuário (nesta tela). */
+  const [envios, setEnvios] = useState<Record<string, EnvioLink & { email: string }>>({});
+  const [enviandoLink, setEnviandoLink] = useState<string | null>(null);
+  /** Convite do usuário recém-criado. */
+  const [conviteCriado, setConviteCriado] = useState<(EnvioLink & { id: string; email: string }) | null>(null);
   /** Erro/aviso geral (carregar a lista) — os de cada usuário ficam na linha. */
   const [erro, setErro] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
 
   const [novoEmail, setNovoEmail] = useState("");
-  const [novaSenha, setNovaSenha] = useState("");
   const [novoNome, setNovoNome] = useState("");
   const [novoPerfil, setNovoPerfil] = useState("operacoes");
   const [novaFuncao, setNovaFuncao] = useState("");
@@ -168,6 +261,7 @@ export default function AdminUsuariosConteudo() {
       const dados = await lerJson(resp);
       if (!resp.ok) throw new Error(dados.erro || "Falha ao carregar usuários.");
       setUsuarios(dados.usuarios || []);
+      setAcesso(dados.acesso || {});
       setNomes({});
       setLinhas({});
     } catch (err: any) {
@@ -184,17 +278,18 @@ export default function AdminUsuariosConteudo() {
   // ── Criar ──────────────────────────────────────────────────────────────────
   const rCriar = useMemo(() => mesclar(
     validarUsuario(
-      { email: novoEmail, senha: novaSenha, nomeCompleto: novoNome, perfil: novoPerfil, funcao: novaFuncao || null },
+      { email: novoEmail, nomeCompleto: novoNome, perfil: novoPerfil, funcao: novaFuncao || null },
       { usuarios, modo: "criar" }
     ),
     rApiCriar,
-  ), [novoEmail, novaSenha, novoNome, novoPerfil, novaFuncao, usuarios, rApiCriar]);
+  ), [novoEmail, novoNome, novoPerfil, novaFuncao, usuarios, rApiCriar]);
 
   const invalidoCriar = (campo: string) => (tentouCriar && rCriar.erros[campo]?.length ? "val-invalido" : undefined);
 
   async function criarUsuario() {
     setErroCriar(null);
     setMensagem(null);
+    setConviteCriado(null);
     setTentouCriar(true);
     if (temErros(rCriar)) return;
     setCriando(true);
@@ -204,7 +299,6 @@ export default function AdminUsuariosConteudo() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: novoEmail.trim().toLowerCase(),
-          senha: novaSenha,
           nomeCompleto: normalizarEspacos(novoNome),
           perfil: novoPerfil,
           funcao: novaFuncao || null,
@@ -216,9 +310,10 @@ export default function AdminUsuariosConteudo() {
         if (!dados.erros) setErroCriar(dados.erro || "Falha ao criar usuário.");
         return;
       }
-      setMensagem(`Usuário ${novoEmail.trim().toLowerCase()} criado.${dados.usuario && !dados.usuario.ativo ? " Marque \"Ativo\" na lista para liberar o acesso." : ""}`);
+      const emailCriado = novoEmail.trim().toLowerCase();
+      setMensagem(`Usuário ${emailCriado} criado.${dados.usuario && !dados.usuario.ativo ? " Marque \"Ativo\" na lista para liberar o acesso." : ""}`);
+      if (dados.convite) setConviteCriado({ ...dados.convite, id: dados.id, email: emailCriado });
       setNovoEmail("");
-      setNovaSenha("");
       setNovoNome("");
       setNovoPerfil("operacoes");
       setNovaFuncao("");
@@ -319,6 +414,32 @@ export default function AdminUsuariosConteudo() {
     setDesativar(null);
   }
 
+  // ── Links por e-mail ───────────────────────────────────────────────────────
+  async function enviarLink(u: { id: string; email: string }, tipo: TipoLinkAcesso, origem: "linha" | "criado" = "linha") {
+    setEnviandoLink(`${u.id}:${tipo}`);
+    let r: EnvioLink;
+    try {
+      const resp = await fetch(`/api/admin/users/${u.id}/acesso`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tipo }),
+      });
+      const dados = await lerJson(resp);
+      r = resp.ok ? dados : { tipo, enviado: false, motivo: null, erro: dados.erro || "Falha ao gerar o link." };
+    } catch {
+      r = { tipo, enviado: false, motivo: null, erro: "Sem conexão com o servidor. Tente de novo." };
+    }
+    setEnviandoLink(null);
+    if (origem === "criado") setConviteCriado({ ...r, id: u.id, email: u.email });
+    else setEnvios((prev) => ({ ...prev, [u.id]: { ...r, email: u.email } }));
+    // Atualiza o "Convite enviado em…" da linha (sem recarregar tudo).
+    if (!r.erro) {
+      try {
+        const resp = await fetch("/api/admin/users");
+        const dados = await lerJson(resp);
+        if (resp.ok) setAcesso(dados.acesso || {});
+      } catch { /* fica o que estava */ }
+    }
+  }
+
   // ── Senha ──────────────────────────────────────────────────────────────────
   function abrirSenha(u: Profile) {
     setSenhaAlvo(u);
@@ -405,13 +526,6 @@ export default function AdminUsuariosConteudo() {
             <MensagensCampo r={rCriar} campo="email" mostrarErros={tentouCriar} />
           </div>
           <div className="field">
-            <label>Senha provisória *</label>
-            <input value={novaSenha} onChange={(e) => { setNovaSenha(e.target.value); setRApiCriar(novoResultado()); }}
-              type="text" className={invalidoCriar("senha")} autoComplete="off" />
-            <small>Mínimo {SENHA_MINIMA} caracteres. Repasse ao usuário para o primeiro acesso.</small>
-            <MensagensCampo r={rCriar} campo="senha" mostrarErros={tentouCriar} />
-          </div>
-          <div className="field">
             <label>Nome completo *</label>
             <input value={novoNome} onChange={(e) => { setNovoNome(e.target.value); setRApiCriar(novoResultado()); }}
               placeholder="Nome e sobrenome" className={invalidoCriar("nomeCompleto")} />
@@ -437,6 +551,10 @@ export default function AdminUsuariosConteudo() {
           A <strong>Área</strong> (acesso) define as permissões no fluxo: Comercial (fases 1/2/6), Operações (3/4/7/8),
           Gerência (aprovações 5/9) e Administrador (tudo). A <strong>Função</strong> é o cargo do colaborador.
         </p>
+        <p className="detalhe" style={{ marginTop: 6 }}>
+          ✉️ O usuário recebe por e-mail o convite <strong>“Criar minha senha”</strong> (válido por 24 horas, uso único).
+          Ninguém — nem o administrador — fica sabendo a senha.
+        </p>
         <ResumoValidacao r={rCriar} rotulos={ROTULOS_USUARIO} mostrarErros={tentouCriar} />
         <div className="actions">
           <button className="btn" onClick={criarUsuario} disabled={criando}>
@@ -445,6 +563,11 @@ export default function AdminUsuariosConteudo() {
           {erroCriar && <span className="msg erro">{erroCriar}</span>}
           {mensagem && <span className="msg ok">{mensagem}</span>}
         </div>
+        {conviteCriado && (
+          <AvisoEnvio envio={conviteCriado} email={conviteCriado.email}
+            reenviando={enviandoLink === `${conviteCriado.id}:convite`}
+            onReenviar={() => enviarLink(conviteCriado, "convite", "criado")} />
+        )}
       </section>
 
       <section className="card">
@@ -506,6 +629,10 @@ export default function AdminUsuariosConteudo() {
           const bloqueioPerfil = checarAlteracaoAcesso({ alvo: u, autorId: meuId || "", alteracao: { perfil: "comercial" }, usuarios });
           const travaAtivo = u.ativo ? checarAlteracaoAcesso({ alvo: u, autorId: meuId || "", alteracao: { ativo: false }, usuarios }) : null;
           const travaExcluir = checarAlteracaoAcesso({ alvo: u, autorId: meuId || "", alteracao: { excluir: true }, usuarios });
+          const ac = acesso[u.id];
+          const statusConvite = textoConvite(ac);
+          const nuncaEntrou = !!ac?.loginConhecido && !ac.ultimoLogin;
+          const envio = envios[u.id];
           const explicacao = souEu
             ? "Você não pode mudar o próprio acesso, se desativar nem se excluir — peça a outro administrador."
             : bloqueioPerfil?.erro || travaAtivo?.erro || null;
@@ -521,6 +648,11 @@ export default function AdminUsuariosConteudo() {
                   {!u.ativo ? " · inativo" : ""}
                 </span>
               </div>
+              {(statusConvite || nuncaEntrou) && (
+                <p className="detalhe" style={{ margin: "6px 0 0" }}>
+                  {statusConvite ? `✉️ ${statusConvite}` : "Ainda não acessou o sistema."}
+                </p>
+              )}
               <div className="grid" style={{ marginTop: 8 }}>
                 <div className="field">
                   <label>Nome completo</label>
@@ -566,6 +698,18 @@ export default function AdminUsuariosConteudo() {
                 <button type="button" className="btn-doc" onClick={() => abrirSenha(u)}>
                   🔑 Redefinir senha
                 </button>
+                <button type="button" className="btn-doc" disabled={!u.ativo || enviandoLink === `${u.id}:redefinicao`}
+                  title={u.ativo ? "Envia um link (válido por 1 hora) para a pessoa escolher a nova senha" : "Usuário inativo"}
+                  onClick={() => enviarLink(u, "redefinicao")}>
+                  {enviandoLink === `${u.id}:redefinicao` ? "Enviando..." : "✉️ Enviar link de redefinição por e-mail"}
+                </button>
+                {nuncaEntrou && (
+                  <button type="button" className="btn-doc" disabled={!u.ativo || enviandoLink === `${u.id}:convite`}
+                    title={u.ativo ? "Novo convite (válido por 24 horas); o anterior deixa de valer" : "Usuário inativo"}
+                    onClick={() => enviarLink(u, "convite")}>
+                    {enviandoLink === `${u.id}:convite` ? "Enviando..." : "✉️ Reenviar convite"}
+                  </button>
+                )}
                 <button type="button" className="btn-dl btn-sec btn-perigo" disabled={!!travaExcluir} title={travaExcluir?.erro}
                   onClick={() => excluirUsuario(u)}>
                   🗑️ Excluir usuário
@@ -584,6 +728,10 @@ export default function AdminUsuariosConteudo() {
                 </div>
               )}
               {estado?.ok && <p className="msg ok" style={{ margin: "6px 0 0" }}>{estado.ok}</p>}
+              {envio && (
+                <AvisoEnvio envio={envio} email={envio.email} reenviando={enviandoLink === `${u.id}:${envio.tipo}`}
+                  onReenviar={() => enviarLink(u, envio.tipo)} />
+              )}
             </div>
           );
         })}

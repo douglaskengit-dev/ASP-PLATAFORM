@@ -133,7 +133,8 @@ export default function BarraUsuario() {
   // força o hambúrguer (.forcar-menu). A medição é síncrona (sem pintar o
   // estado intermediário). Também fecha a gaveta quando o ☰ deixa de existir
   // (janela alargada).
-  const visivel = !(pathname === "/" || pathname === "/login" || !email);
+  // Telas de acesso (login, definir/esqueci senha) ficam sem a barra.
+  const visivel = !(pathname === "/" || pathname === "/login" || pathname === "/definir-senha" || pathname === "/esqueci-senha" || !email);
   useEffect(() => {
     const barra = barraRef.current;
     if (!visivel || !barra) return;

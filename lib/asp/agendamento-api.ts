@@ -19,10 +19,11 @@ import { gerarIcsAgendamento } from "@/lib/ics";
 import { enviarPushParaUsuarios } from "@/lib/push/send";
 import {
   AgendamentoRef, ContextoAgendamento, DadosAgendamento, hojeBrasil, MembroEquipe, nomeDoCatalogo, nomesEquipamentosProcedimento,
-  normalizarEspacos, periodoDe, textoPeriodoLongo,
+  APP_URL_PADRAO, normalizarBaseUrl, normalizarEspacos, periodoDe, textoPeriodoLongo,
 } from "@/lib/validacao";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://asp-plataform.vercel.app";
+// Sem barra no fim (NEXT_PUBLIC_APP_URL pode vir "https://…app/" → "//inspecoes").
+const APP_URL = normalizarBaseUrl(process.env.NEXT_PUBLIC_APP_URL) || APP_URL_PADRAO;
 
 export const PERFIS_AGENDA = ["admin", "comercial", "gerencia"];
 

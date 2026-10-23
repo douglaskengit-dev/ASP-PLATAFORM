@@ -5,7 +5,9 @@
  *   ⛔ e-mail válido e único (sem diferença de caixa/espaço)
  *   ⛔ nome completo: nome + sobrenome (partículas não contam)
  *   ⛔ Área/Acesso e Função só das listas (perfis legados não se atribuem)
- *   ⛔ senha com pelo menos 6 caracteres
+ *   ⛔ senha (quando informada — ex.: modal "Redefinir senha") com pelo menos
+ *      6 caracteres. Criar NÃO pede senha: o usuário recebe por e-mail o
+ *      link "Criar minha senha" (lib/validacao/acesso.ts).
  *   ⛔ ninguém tira o próprio acesso de admin / se desativa / se exclui
  *   ⛔ o último administrador ativo não perde o acesso
  *   ⚠️ homônimo; iniciais (códigos de projeto) iguais às de outro ativo;
@@ -125,9 +127,9 @@ export function validarUsuario(d: DadosUsuario, ctx: ContextoUsuario): Resultado
     }
   }
 
-  if (presente("senha")) {
+  if (d.senha !== undefined && d.senha !== null) {
     const senha = typeof d.senha === "string" ? d.senha : "";
-    if (!senha) addErro(r, "senha", "Informe a senha provisória.");
+    if (!senha) addErro(r, "senha", "Informe a senha.");
     else if (senha.length < SENHA_MINIMA) addErro(r, "senha", `A senha deve ter ao menos ${SENHA_MINIMA} caracteres.`);
   }
 

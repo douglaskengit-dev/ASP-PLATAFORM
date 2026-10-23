@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 // D52: "/" é a página inicial pública (landing) — vem antes do login.
-const ROTAS_PUBLICAS = ["/", "/login"];
+// /definir-senha (link do convite / redefinição) e /esqueci-senha precisam
+// abrir deslogado; quem já está logado também pode usá-las.
+const ROTAS_PUBLICAS = ["/", "/login", "/definir-senha", "/esqueci-senha"];
 
 export async function middleware(request: NextRequest) {
   const { supabaseResponse, autenticado, contaInativa } = await updateSession(request);

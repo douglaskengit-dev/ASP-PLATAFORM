@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getProfileAtual } from "@/lib/supabase/route";
 import { carregarUsuarios, traduzirErroAuth, traduzirErroPerfil, CAMPOS_USUARIO } from "@/lib/asp/usuario-api";
+import { emitirLinkAcesso, mesmaOrigem, resumosDeAcesso, senhaAleatoria } from "@/lib/asp/acesso-api";
 import {
   normalizarEmail, normalizarEspacos, primeiroErro, ROTULOS_USUARIO, temErros, usuarioComEmail, validarUsuario,
 } from "@/lib/validacao";
@@ -21,13 +22,17 @@ export async function GET() {
 
   const { usuarios, erro } = await carregarUsuarios();
   if (erro) return NextResponse.json({ erro }, { status: 500 });
-  return NextResponse.json({ ok: true, usuarios, meuId: check.profile.id });
+  // Convite/redefinição (último link de cada tipo) e se já entrou alguma vez.
+  const acesso = await resumosDeAcesso(usuarios.map((u) => u.id)).catch(() => ({}));
+  return NextResponse.json({ ok: true, usuarios, acesso, meuId: check.profile.id });
 }
 
-/** Só estes campos são aceitos ao criar. */
-const CAMPOS_CRIAR = new Set(["email", "senha", "nomeCompleto", "perfil", "funcao"]);
+/** Só estes campos são aceitos ao criar. Sem senha: a conta nasce com uma
+ *  senha aleatória que ninguém vê, e o usuário cria a dele pelo convite. */
+const CAMPOS_CRIAR = new Set(["email", "nomeCompleto", "perfil", "funcao"]);
 
 export async function POST(req: NextRequest) {
+  if (!mesmaOrigem(req)) return NextResponse.json({ erro: "Origem não permitida." }, { status: 403 });
   const check = await exigirAdmin();
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
 
@@ -42,7 +47,7 @@ export async function POST(req: NextRequest) {
   }
   const extras = Object.keys(body).filter((k) => !CAMPOS_CRIAR.has(k));
   if (extras.length) return NextResponse.json({ erro: `Campo não permitido: ${extras.join(", ")}.` }, { status: 400 });
-  for (const k of ["email", "senha", "nomeCompleto", "perfil", "funcao"]) {
+  for (const k of ["email", "nomeCompleto", "perfil", "funcao"]) {
     if (body[k] !== undefined && body[k] !== null && typeof body[k] !== "string") {
       return NextResponse.json({ erro: `${ROTULOS_USUARIO[k] || k}: valor inválido.`, campo: k }, { status: 400 });
     }
@@ -50,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const email = normalizarEmail(body.email);
   const nome = normalizarEspacos(body.nomeCompleto);
-  const dados = { email, senha: body.senha || "", nomeCompleto: nome, perfil: body.perfil || "", funcao: body.funcao || null };
+  const dados = { email, nomeCompleto: nome, perfil: body.perfil || "", funcao: body.funcao || null };
 
   const { usuarios, erro: erroLista } = await carregarUsuarios();
   if (erroLista) return NextResponse.json({ erro: erroLista }, { status: 500 });
@@ -67,7 +72,7 @@ export async function POST(req: NextRequest) {
   const admin = getSupabaseAdmin();
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
-    password: dados.senha,
+    password: senhaAleatoria(),
     email_confirm: true,
   });
 
@@ -91,6 +96,9 @@ export async function POST(req: NextRequest) {
       nome_completo: nome,
       perfil: dados.perfil,
       funcao: dados.funcao,
+      // Criado por um admin daqui = acesso liberado (o convite precisa de
+      // conta ativa). Contas do outro sistema continuam nascendo inativas.
+      ativo: true,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" })
     .select(CAMPOS_USUARIO)
@@ -108,5 +116,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ok: true, id: created.user.id, usuario: linha, avisos: r.avisos });
+  // Convite "Bem-vindo à Plataforma ASP — crie sua senha" (24 h). Se o
+  // e-mail não sair, o usuário continua criado e a tela oferece "Reenviar
+  // convite" e "Copiar link".
+  const convite = await emitirLinkAcesso({
+    usuario: { id: created.user.id, email, nome_completo: nome }, tipo: "convite", criadoPor: check.profile.id, req, devolverLinkSeFalhar: true,
+  }).catch((e: any) => {
+    console.error("[admin/users] convite:", e?.message || e);
+    return { ok: false, tipo: "convite" as const, enviado: false, motivo: null, erro: "Não foi possível gerar o convite." };
+  });
+
+  return NextResponse.json({ ok: true, id: created.user.id, usuario: linha, avisos: r.avisos, convite });
 }
