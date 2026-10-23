@@ -5,13 +5,15 @@ import { dataIsoValida } from "@/lib/asp/rdo";
 import { CAMPOS_RDO as CAMPOS, PERFIS_RDO as PERFIS, UUID, MSG_DIA_DUPLICADO, bloqueiosDoRdo, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
 
 import { garantirOsAberta } from "@/lib/asp/os-encerrada";
+import { podePrepararRdo } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
 
 // RDO — Registro Diário de Operação (gp_rdos). Um por projeto por dia.
-// Operações (com admin e Gerência) grava; todos leem — mesmos perfis do
-// checklist e da coleta de fotos. O .docx é gerado no navegador e chega
-// depois em /api/rdos/[id]/arquivo.
+// Criar/editar/gerar o .docx: Operações, Admin e Gerência pelo perfil OU a
+// função com "Preparar RDO" (podePrepararRdo). Excluir/restaurar e a purga
+// da lixeira: só os perfis (PERFIS_RDO). Todos leem. O .docx é gerado no
+// navegador e chega depois em /api/rdos/[id]/arquivo.
 
 /** GET ?projetoId=… (todos do projeto) ou ?inspecaoId=… (os que a cobrem). */
 export async function GET(req: NextRequest) {
@@ -37,7 +39,9 @@ export async function GET(req: NextRequest) {
   if (inspecaoId) q = q.contains("inspecoes", [inspecaoId]);
   const { data, error } = await q;
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, podeEditar: PERFIS.includes(profile.perfil), rdos: data || [] });
+  return NextResponse.json({
+    ok: true, podeEditar: podePrepararRdo(profile), podeExcluir: PERFIS.includes(profile.perfil), rdos: data || [],
+  });
 }
 
 /** Cria o RDO do dia: { id?, projetoId, data, inspecoes, dados }.
@@ -48,8 +52,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "RDO é responsabilidade de Operações." }, { status: 403 });
+  if (!podePrepararRdo(profile)) {
+    return NextResponse.json({ erro: "RDO é com Operações, Gerência, Admin ou uma função com a permissão “Preparar RDO”." }, { status: 403 });
   }
   const b = await req.json().catch(() => ({}));
   const projetoId = String(b?.projetoId || "");

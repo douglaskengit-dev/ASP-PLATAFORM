@@ -4,8 +4,9 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { removerArquivos, uploadArquivo } from "@/lib/processos/arquivos";
 import {
-  contextoColeta, ehUuid, examinarPdf, hashMedicao, lerCorpoColeta, PERFIS_COLETA, validarColetaServidor,
+  contextoColeta, ehUuid, examinarPdf, hashMedicao, lerCorpoColeta, validarColetaServidor,
 } from "@/lib/asp/coleta-api";
+import { podeRegistrarMedicao } from "@/lib/asp/permissoes";
 import { ehViolacaoUnica } from "@/lib/asp/os-validacao-api";
 import {
   DadosColeta, medicaoPreenchida, normalizarEspacos, primeiroErro, ROTULOS_COLETA, temErros, TipoColeta,
@@ -32,8 +33,9 @@ export async function POST(req: NextRequest) {
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
-  if (!PERFIS_COLETA.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Coleta é responsabilidade de Operações." }, { status: 403 });
+  // Perfil (Admin/Gerência/Operações) OU função com "Registrar medições".
+  if (!podeRegistrarMedicao(profile)) {
+    return NextResponse.json({ erro: "Registrar medição é com Operações, Gerência, Admin ou uma função com a permissão “Registrar medições / batimetria”." }, { status: 403 });
   }
 
   const { corpo, erro } = await lerCorpoColeta(req);

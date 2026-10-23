@@ -9,14 +9,15 @@ import {
 import { erroValorColeta, formatoImagem, FOTO_MAX_BYTES } from "@/lib/validacao";
 
 import { garantirOsAberta, lerOS } from "@/lib/asp/os-encerrada";
+import { podeRegistrarFotos } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
 
 /** Coleta de fotos da execução (gp_fotos_execucao), uma por inspeção.
- *  Mesmos perfis do checklist de equipamentos: Operações (com admin e
- *  Gerência) grava; todos leem. Arquivos no bucket privado, via cliente
- *  admin, sempre sob `fotos-execucao/<inspeção>/`. */
-const PERFIS = ["admin", "operacoes", "gerencia"];
+ *  Grava (enviar/trocar/remover foto de uma vaga, valores, caixinhas):
+ *  Operações, Admin e Gerência pelo perfil OU a função com "Registrar coleta
+ *  de fotos" (podeRegistrarFotos); todos leem. Arquivos no bucket privado,
+ *  via cliente admin, sempre sob `fotos-execucao/<inspeção>/`. */
 const TABELA = "gp_fotos_execucao";
 
 type Supa = ReturnType<typeof getSupabaseRouteClient>;
@@ -113,7 +114,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
   // OS encerrada: a tela fica só leitura (a gravação também recusa).
   const encerrada = !!(await lerOS(params.id))?.encerrada_em;
-  return NextResponse.json({ ok: true, podeEditar: PERFIS.includes(profile.perfil) && !encerrada, encerrada, registro });
+  return NextResponse.json({ ok: true, podeEditar: podeRegistrarFotos(profile) && !encerrada, encerrada, registro });
 }
 
 const HASH = /^[0-9a-f]{64}$/;
@@ -128,8 +129,8 @@ const msgRepetida = (onde: string) => `Esta foto já está na coleta (${onde}). 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Coleta de fotos é responsabilidade de Operações." }, { status: 403 });
+  if (!podeRegistrarFotos(profile)) {
+    return NextResponse.json({ erro: "Coleta de fotos é com Operações, Gerência, Admin ou uma função com a permissão “Registrar coleta de fotos”." }, { status: 403 });
   }
   // ⛔ OS encerrada: só consulta.
   const travada = await garantirOsAberta(params.id);
@@ -203,8 +204,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Coleta de fotos é responsabilidade de Operações." }, { status: 403 });
+  if (!podeRegistrarFotos(profile)) {
+    return NextResponse.json({ erro: "Coleta de fotos é com Operações, Gerência, Admin ou uma função com a permissão “Registrar coleta de fotos”." }, { status: 403 });
   }
   // ⛔ OS encerrada: só consulta.
   const travada = await garantirOsAberta(params.id);
@@ -241,8 +242,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Coleta de fotos é responsabilidade de Operações." }, { status: 403 });
+  if (!podeRegistrarFotos(profile)) {
+    return NextResponse.json({ erro: "Coleta de fotos é com Operações, Gerência, Admin ou uma função com a permissão “Registrar coleta de fotos”." }, { status: 403 });
   }
   // ⛔ OS encerrada: só consulta.
   const travada = await garantirOsAberta(params.id);

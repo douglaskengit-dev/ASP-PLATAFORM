@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getProfileAtual } from "@/lib/supabase/route";
 import { carregarFuncoes } from "@/lib/asp/funcoes";
-import { usuariosComFuncao, type FuncaoRef } from "@/lib/validacao/funcao";
+import { usuariosComFuncao, type ChavePermissaoFuncao, type FuncaoRef } from "@/lib/validacao/funcao";
 
 export async function exigirAdminFuncoes() {
   const profile = await getProfileAtual();
@@ -23,6 +23,8 @@ export interface FuncaoComUso extends FuncaoRef {
 /** Funções + quantos usuários cada uma tem. */
 export async function carregarFuncoesComUso(): Promise<{
   funcoes: FuncaoComUso[]; perfis: { funcao: string | null }[]; erro: string | null; tabelaAusente: boolean;
+  /** Marcas cuja coluna ainda não existe (migração pendente). */
+  marcasAusentes: ChavePermissaoFuncao[];
 }> {
   const admin = getSupabaseAdmin();
   const [cad, perf] = await Promise.all([
@@ -31,7 +33,7 @@ export async function carregarFuncoesComUso(): Promise<{
   ]);
   if (cad.erro || perf.error) {
     if (perf.error) console.error("[admin/funcoes] perfis:", perf.error.message);
-    return { funcoes: [], perfis: [], erro: cad.erro || "Não foi possível contar os usuários por função.", tabelaAusente: false };
+    return { funcoes: [], perfis: [], erro: cad.erro || "Não foi possível contar os usuários por função.", tabelaAusente: false, marcasAusentes: [] };
   }
   const perfis = (perf.data || []) as { funcao: string | null }[];
   return {
@@ -39,8 +41,12 @@ export async function carregarFuncoesComUso(): Promise<{
     perfis,
     erro: null,
     tabelaAusente: cad.tabelaAusente,
+    marcasAusentes: cad.marcasAusentes,
   };
 }
+
+export const MSG_MARCAS_AUSENTES =
+  "As permissões de registro em campo (medições, fotos, RDO) ainda não existem no banco — rode a migração 20261106100000_asp_permissoes_campo.sql no SQL Editor.";
 
 export const MSG_TABELA_AUSENTE =
   "A tabela de funções ainda não existe no banco — rode a migração 20261105100000_asp_funcoes_permissoes.sql no SQL Editor.";

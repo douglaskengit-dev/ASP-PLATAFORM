@@ -37,6 +37,24 @@ export const PERMISSOES_FUNCAO = [
     perfisSempre: "Administrador e Gerência",
   },
   {
+    chave: "pode_registrar_medicao",
+    rotulo: "Registrar medições / batimetria",
+    ajuda: "Na coleta da OS: Nova medição, Digitar e Importar batimetria, Anexar PDF; edita a medição e escolhe data e responsável ao salvar. Não aprova nem exclui.",
+    perfisSempre: "Administrador, Gerência e Operações",
+  },
+  {
+    chave: "pode_registrar_fotos",
+    rotulo: "Registrar coleta de fotos",
+    ajuda: "Na coleta de fotos da execução: envia, troca e remove fotos, preenche pH/cloro e marca água antes/depois e limpeza confirmada.",
+    perfisSempre: "Administrador, Gerência e Operações",
+  },
+  {
+    chave: "pode_preparar_rdo",
+    rotulo: "Preparar RDO",
+    ajuda: "Cria e edita o RDO do dia e gera o arquivo .docx. Não exclui RDO.",
+    perfisSempre: "Administrador, Gerência e Operações",
+  },
+  {
     chave: "lideranca_equipe",
     rotulo: "Conta como liderança da equipe (aviso da execução)",
     ajuda: "Sem ninguém com esta marca na equipe da execução, o agendamento avisa “equipe sem liderança”.",
@@ -69,15 +87,22 @@ export const ROTULOS_FUNCAO: Record<string, string> = {
 };
 
 export function semPermissoes(): PermissoesFuncao {
-  return { pode_aprovar_medicao: false, pode_excluir_projetos: false, pode_editar_revisao: false, lideranca_equipe: false };
+  return {
+    pode_aprovar_medicao: false, pode_excluir_projetos: false, pode_editar_revisao: false,
+    pode_registrar_medicao: false, pode_registrar_fotos: false, pode_preparar_rdo: false,
+    lideranca_equipe: false,
+  };
 }
 
 /** Carga inicial da migração 20261105100000 — usada só se a tabela ainda não
  * existe no banco (código publicado antes de rodar a migração): mantém o
- * comportamento de antes (Coordenador = todas; Engenheiro = liderança). */
+ * comportamento de antes (Coordenador = aprovar/excluir/revisão/liderança;
+ * Engenheiro = liderança). As marcas de registro em campo (medição, fotos,
+ * RDO — migração 20261106100000) ficam desligadas aqui: sem a migração o
+ * banco (RLS) também não as reconhece. */
 export const FUNCOES_PADRAO: FuncaoRef[] = [
   { nome: "Coordenador", nome_rdo: "Coordenador de operações", ordem: 1, ativo: true,
-    pode_aprovar_medicao: true, pode_excluir_projetos: true, pode_editar_revisao: true, lideranca_equipe: true },
+    ...semPermissoes(), pode_aprovar_medicao: true, pode_excluir_projetos: true, pode_editar_revisao: true, lideranca_equipe: true },
   { nome: "Engenheiro", nome_rdo: "Engenheiro de operações", ordem: 2, ativo: true,
     ...semPermissoes(), lideranca_equipe: true },
   { nome: "Técnico", nome_rdo: "Técnico de operações", ordem: 3, ativo: true, ...semPermissoes() },
