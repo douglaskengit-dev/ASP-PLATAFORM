@@ -6,6 +6,7 @@ import {
   removerDasEquipesFuturas, traduzirErroAuth, traduzirErroPerfil, type UsuarioLinha,
 } from "@/lib/asp/usuario-api";
 import { invalidarLinks, invalidarLinksPorEmail, mesmaOrigem } from "@/lib/asp/acesso-api";
+import { carregarFuncoes } from "@/lib/asp/funcoes";
 import {
   checarAlteracaoAcesso, contarAdminsAtivos, normalizarEspacos, perdeAdmin, primeiroErro, ROTULOS_USUARIO,
   SENHA_MINIMA, temErros, validarUsuario, type DadosUsuario,
@@ -66,7 +67,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (senha !== undefined && typeof senha !== "string") return erroCampo("Senha: valor inválido.", "senha", 400);
 
   const admin = getSupabaseAdmin();
-  const { usuarios, erro: erroLista } = await carregarUsuarios();
+  const [{ usuarios, erro: erroLista }, cad] = await Promise.all([carregarUsuarios(), carregarFuncoes(admin)]);
   if (erroLista) return NextResponse.json({ erro: erroLista }, { status: 500 });
   const alvo = usuarios.find((u) => u.id === params.id);
   if (!alvo) return NextResponse.json({ erro: "Usuário não encontrado (excluído por outro administrador?). Recarregue a página." }, { status: 404 });
@@ -94,7 +95,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return erroCampo(`A nova senha deve ter ao menos ${SENHA_MINIMA} caracteres.`, "senha", 400);
   }
 
-  const r = validarUsuario(dados, { usuarios, modo: "editar", id: alvo.id, nomeAnterior: alvo.nome_completo });
+  if (dados.funcao !== undefined && cad.erro) return NextResponse.json({ erro: cad.erro }, { status: 500 });
+  // Função nova: só cadastrada e ativa; a atual (mesmo desativada) continua aceita.
+  const r = validarUsuario(dados, {
+    usuarios, modo: "editar", id: alvo.id, nomeAnterior: alvo.nome_completo, funcoes: cad.funcoes, funcaoAnterior: alvo.funcao,
+  });
   if (temErros(r)) {
     return NextResponse.json({ erro: primeiroErro(r, ROTULOS_USUARIO), erros: r.erros, avisos: r.avisos }, { status: 400 });
   }
