@@ -60,7 +60,8 @@ function EsqueciForm() {
       </div>
       <div className="card-login">
         <div className="login-marca">
-          <img src="/assets/asp-badge.svg" alt="ASP" className="logo" />
+          <img src="/assets/asp-logo.svg" alt="ASP — Advanced Services Provider" className="logo logo-claro" />
+          <img src="/assets/asp-logo-branco.svg" alt="ASP — Advanced Services Provider" className="logo logo-escuro" />
         </div>
         <h1>Esqueci minha senha</h1>
         {!enviado ? (

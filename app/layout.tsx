@@ -36,8 +36,9 @@ export const metadata: Metadata = {
   description: "Sistema interno — gestão de projetos e Ordens de Serviço.",
   applicationName: "ASP",
   icons: {
-    icon: "/assets/asp-badge.svg",
-    shortcut: "/assets/asp-badge.svg",
+    // Variante otimizada para 16–32 px (borda dourada no contorno, letras mais cheias).
+    icon: "/assets/asp-badge-16.svg",
+    shortcut: "/assets/asp-badge-16.svg",
     apple: "/apple-touch-icon.png",
   },
   appleWebApp: {
