@@ -42,14 +42,23 @@ const rotFiltro: React.CSSProperties = {
  *  ENCERRADAS (Fase 10 — concluido_em, gravado pela API); senão derivado
  *  das fases das suas OSs. Todas na fase 10 sem encerrar = "Em encerramento". */
 function statusProjeto(inspecoes: InspecaoResumo[], concluidoEm?: string | null): { label: string; cor: string; pct: number; chave: string } {
-  if (concluidoEm) return { label: "Concluído", cor: "#16a34a", pct: 100, chave: "concluido" };
-  if (!inspecoes.length) return { label: "Sem OS", cor: "#5a6b7b", pct: 0, chave: "sem" };
+  if (concluidoEm) return { label: "Concluído", cor: "var(--sucesso-solido)", pct: 100, chave: "concluido" };
+  if (!inspecoes.length) return { label: "Sem OS", cor: "var(--cinza)", pct: 0, chave: "sem" };
   const media = inspecoes.reduce((a, i) => a + i.fase, 0) / inspecoes.length;
   const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
-  if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Em encerramento", cor: "#0f766e", pct: 100, chave: "encerramento" };
-  if (inspecoes.some((i) => i.fase === 5 || i.fase === 9)) return { label: "Aguardando aprovação", cor: "#c2410c", pct, chave: "aprovacao" };
+  if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Em encerramento", cor: "var(--teal)", pct: 100, chave: "encerramento" };
+  if (inspecoes.some((i) => i.fase === 5 || i.fase === 9)) return { label: "Aguardando aprovação", cor: "var(--pendente)", pct, chave: "aprovacao" };
   return { label: "Em andamento", cor: "var(--primaria)", pct, chave: "andamento" };
 }
+
+/** Cor do chip de cada status (paleta única de status — globals.css). */
+const CHIP_STATUS: Record<string, string> = {
+  andamento: "chip-info",
+  aprovacao: "chip-pendente",
+  encerramento: "chip-sucesso",
+  concluido: "chip-sucesso solido",
+  sem: "chip-neutro",
+};
 
 /** Rótulos dos status, para o filtro. */
 const STATUS_OPCOES = [
@@ -154,10 +163,10 @@ export default function ProjetosPage() {
   function CartaoProjeto(p: Projeto) {
     const st = statusProjeto(p.inspecoes, p.concluido_em);
     return (
-      <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
-        <div style={{ display: "flex", width: "100%", alignItems: "flex-start", gap: 8 }}>
+      <Link key={p.id} href={`/projetos/${p.id}`} className="item item-col cartao-projeto" style={{ textDecoration: "none", color: "inherit", marginBottom: 0 }}>
+        <div className="cartao-projeto-topo">
           <div style={{ flex: 1, minWidth: 0 }}>
-            <strong style={{ color: "var(--texto)" }}>
+            <strong className="cartao-projeto-codigo">
               {p.codigo_projeto || p.pedido_compra || "Projeto sem código"}
             </strong>
             <span className="detalhe">
@@ -169,13 +178,13 @@ export default function ProjetosPage() {
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-            <span className="fu-badge" style={{ background: st.cor, color: "#fff" }}>{st.label}</span>
+            <span className={`chip ${CHIP_STATUS[st.chave] || "chip-neutro"}`}>{st.label}</span>
             <span className="detalhe" style={{ margin: 0 }}>
               {p.inspecoes_total} OS{p.inspecoes_total === 1 ? "" : "s"}
             </span>
           </div>
         </div>
-        <div className="fu-progresso" style={{ marginTop: 10 }} title={`Progresso médio: ${st.pct}%`}>
+        <div className="fu-progresso" title={`Progresso médio: ${st.pct}%`}>
           <div className="fu-barra" style={{ width: `${st.pct}%`, background: st.cor }} />
         </div>
       </Link>
@@ -184,9 +193,9 @@ export default function ProjetosPage() {
 
   return (
     <div className="page-larga">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div className="cabecalho-tela">
         <TituloPagina titulo={verLixeira ? "Projetos — Lixeira" : "Projetos"} subtitulo={verLixeira ? "Excluídos recentemente. Podem ser restaurados por 30 dias; depois são apagados de vez." : "Cada projeto corresponde a um pedido de compra e reúne as Ordens de Serviço — OSs (tanques/pontos)."} />
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="cabecalho-tela-acoes">
           {podeExcluir && (
             <button className="btn-azul btn-sec" onClick={() => setVerLixeira((v) => !v)}>
               {verLixeira ? "← Voltar aos projetos" : "🗑 Lixeira"}
@@ -251,7 +260,10 @@ export default function ProjetosPage() {
       )}
 
       {carregando ? (
-        <p className="vazio">Carregando projetos…</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-busy="true">
+          <span className="sr-only" role="status">Carregando projetos…</span>
+          {[0, 1, 2].map((n) => <span key={n} className="esqueleto esqueleto-cartao" aria-hidden="true" />)}
+        </div>
       ) : projetos.length === 0 ? (
         <p className="vazio">{verLixeira ? "A lixeira está vazia." : "Nenhum projeto ainda. Clique em “+ Novo projeto” para abrir o primeiro."}</p>
       ) : verLixeira ? (
@@ -264,7 +276,7 @@ export default function ProjetosPage() {
               </div>
               <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                 <button className="btn-dl btn-sec" onClick={() => restaurar(p.id)}>↩ Restaurar</button>
-                <button className="btn-dl" style={{ background: "#dc2626" }} onClick={() => excluirDefinitivo(p.id)}>Excluir definitivamente</button>
+                <button className="btn-dl btn-perigo" onClick={() => excluirDefinitivo(p.id)}>Excluir definitivamente</button>
               </span>
             </div>
           ))}
@@ -275,11 +287,8 @@ export default function ProjetosPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {grupos.map((g) => (
             <div key={g.nome}>
-              <div style={{
-                display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
-                borderBottom: "2px solid var(--borda)", paddingBottom: 6, marginBottom: 10,
-              }}>
-                <strong style={{ color: "var(--texto)", fontSize: 15 }}>{g.nome}</strong>
+              <div className="grupo-cliente">
+                <strong>{g.nome}</strong>
                 <span className="detalhe" style={{ margin: 0 }}>
                   {g.itens.length} projeto{g.itens.length === 1 ? "" : "s"}
                 </span>

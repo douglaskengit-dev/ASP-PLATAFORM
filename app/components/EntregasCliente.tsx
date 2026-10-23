@@ -217,7 +217,7 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
               </div>
               {podeRegistrarEntrega(perfil) && (
                 <span className="linha-acoes">
-                  <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }} onClick={() => retirar(e)}>Retirar</button>
+                  <button className="btn-dl btn-sec btn-perigo" onClick={() => retirar(e)}>Retirar</button>
                 </span>
               )}
             </div>

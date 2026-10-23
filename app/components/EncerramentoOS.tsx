@@ -175,7 +175,7 @@ export default function EncerramentoOS({ inspecaoId, perfil, versao, onMudou }: 
       <div>
         <strong style={{ fontSize: 14, color: "var(--texto)" }}>Pendências para encerrar</strong>
         {pend.length === 0 ? (
-          <p className="val-msg" style={{ margin: "4px 0 0", color: "#16a34a" }}>✓ Nenhuma pendência — a OS pode ser encerrada.</p>
+          <p className="val-msg" style={{ margin: "4px 0 0", color: "var(--sucesso)" }}>✓ Nenhuma pendência — a OS pode ser encerrada.</p>
         ) : (
           <ul style={{ margin: "4px 0 0", paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
             {pend.map((p) => (

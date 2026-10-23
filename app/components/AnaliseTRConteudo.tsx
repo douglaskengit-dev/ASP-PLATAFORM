@@ -297,12 +297,12 @@ export default function AnaliseTRConteudo({
         </p>
 
         {carregandoRascunho && (
-          <p className="msg" style={{ color: "#667085" }}>
+          <p className="msg" style={{ color: "var(--cinza)" }}>
             🔍 Verificando se este processo já tem uma análise salva...
           </p>
         )}
         {autoBuscando && (
-          <p className="msg" style={{ color: "#667085" }}>
+          <p className="msg" style={{ color: "var(--cinza)" }}>
             🔍 Carregando o TR já anexado a este processo e analisando automaticamente...
           </p>
         )}
@@ -406,12 +406,12 @@ export default function AnaliseTRConteudo({
             <h2>4. Gerar relatório final (PDF)</h2>
 
             {contatoExistente ? (
-              <p style={{ fontSize: 13, color: "#667085" }}>
+              <p style={{ fontSize: 13, color: "var(--cinza)" }}>
                 Responsável: {contatoExistente.nome_completo} ({contatoExistente.cargo})
               </p>
             ) : (
               <div style={{ marginBottom: 12 }}>
-                <p style={{ fontSize: 13, color: "#667085" }}>
+                <p style={{ fontSize: 13, color: "var(--cinza)" }}>
                   O órgão ainda não tem nenhum contato cadastrado. Informe um contato para liberar o relatório
                   (isso não interfere no resultado da análise, apenas identifica o responsável no documento).
                 </p>

@@ -71,7 +71,7 @@ export default function SubetapaRelatorio({
           );
         })}
         {reenvioNecessario && (
-          <span className="fu-badge" style={{ background: "#f8d7da", color: "#842029" }}>
+          <span className="fu-badge perigo">
             🔁 Reenvio necessário
           </span>
         )}

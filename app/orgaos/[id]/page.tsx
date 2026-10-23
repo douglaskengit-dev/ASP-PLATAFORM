@@ -391,7 +391,7 @@ export default function OrgaoDetalhePage() {
           </div>
 
           {orgao.contatos.length === 0 && !contatoForm && (
-            <p style={{ color: "#667085", fontSize: 13 }}>Nenhum contato cadastrado ainda.</p>
+            <p style={{ color: "var(--cinza)", fontSize: 13 }}>Nenhum contato cadastrado ainda.</p>
           )}
 
           {orgao.contatos.map((c) => {
@@ -416,7 +416,7 @@ export default function OrgaoDetalhePage() {
                       {inativo ? "Reativar" : "Desativar"}
                     </button>
                     {podeExcluirContato && (
-                      <button type="button" className="btn-dl btn-sec" onClick={() => excluirContato(c)}>Excluir</button>
+                      <button type="button" className="btn-dl btn-sec btn-perigo" onClick={() => excluirContato(c)}>Excluir</button>
                     )}
                   </span>
                 </div>

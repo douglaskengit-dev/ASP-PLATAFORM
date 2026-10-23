@@ -104,7 +104,7 @@ export default function LixeiraPage() {
                 <strong style={{ color: "var(--texto)" }}>{descrever(it)}</strong>
                 <span className="detalhe" style={{ display: "block" }}>
                   Excluído em {new Date(it.excluido_em).toLocaleString("pt-BR")} ·{" "}
-                  <span style={{ color: it.diasRestantes <= 5 ? "#c2410c" : undefined, fontWeight: it.diasRestantes <= 5 ? 700 : 400 }}>
+                  <span style={{ color: it.diasRestantes <= 5 ? "var(--pendente)" : undefined, fontWeight: it.diasRestantes <= 5 ? 700 : 400 }}>
                     {it.diasRestantes === 0 ? "será apagado a qualquer momento" : `${it.diasRestantes} dia(s) para a exclusão definitiva`}
                   </span>
                 </span>
@@ -114,7 +114,7 @@ export default function LixeiraPage() {
                   <button className="btn-dl" disabled={ocupado === it.dados.id} onClick={() => restaurar(it)}>
                     {ocupado === it.dados.id ? "…" : "↺ Restaurar"}
                   </button>
-                  <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                  <button className="btn-dl btn-sec btn-perigo"
                     disabled={ocupado === it.dados.id} onClick={() => excluirDefinitivo(it)}>
                     Excluir definitivamente
                   </button>

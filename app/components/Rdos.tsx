@@ -578,7 +578,7 @@ export default function Rdos({
                         </button>
                       )}
                       <button className="btn-dl btn-sec" disabled={ocupado === r.id} onClick={() => abrirEdicao(r)}>Editar</button>
-                      <button className="btn-dl btn-sec" style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                      <button className="btn-dl btn-sec btn-perigo"
                         disabled={ocupado === r.id} onClick={() => excluir(r)}>Excluir</button>
                     </>
                   )}

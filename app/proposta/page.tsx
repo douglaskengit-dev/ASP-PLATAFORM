@@ -359,7 +359,7 @@ function PropostaPageConteudo() {
           </div>
 
           {contatoSelecionado && (
-            <p style={{ fontSize: 13, color: "#667085" }}>
+            <p style={{ fontSize: 13, color: "var(--cinza)" }}>
               Destinatário: {contatoSelecionado.nome_completo} ({contatoSelecionado.cargo})
             </p>
           )}
@@ -454,7 +454,7 @@ function PropostaPageConteudo() {
 
         <section className="card">
           <h2>5. Cronograma (Etapas / Atividades / Período)</h2>
-          <p style={{ fontSize: 13, color: "#667085", marginTop: -8 }}>
+          <p style={{ fontSize: 13, color: "var(--cinza)", marginTop: -8 }}>
             Cada etapa é numerada automaticamente em algarismos romanos (Etapa I, II, III...) na ordem em que
             aparece abaixo. No campo &quot;Atividades&quot;, use <code>**texto**</code> para títulos de grupo em
             negrito e recue com espaços as sub-atividades numeradas. Qualquer alteração nesta seção (edição,
