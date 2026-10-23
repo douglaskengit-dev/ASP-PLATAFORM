@@ -5,9 +5,9 @@
  * inspeção fora da fase 10, ou projeto sem inspeções), com progresso médio. */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ULTIMA_FASE } from "@/lib/asp/fases";
+import { progressoFase, ULTIMA_FASE } from "@/lib/asp/fases";
 
-interface InspecaoResumo { id: string; fase: number }
+interface InspecaoResumo { id: string; fase: number; com_inspecao?: boolean }
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
@@ -51,9 +51,9 @@ export default function HistoricoConteudo() {
         <p className="vazio" style={{ marginBottom: 20 }}>Nenhum projeto em aberto.</p>
       )}
       {abertos.map((p) => {
-        const fases = p.inspecoes.map((i) => i.fase);
-        const media = fases.length ? fases.reduce((a, b) => a + b, 0) / fases.length : 1;
-        const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
+        // Progresso de cada OS sobre as fases que valem para ela (sem inspeção: 1, 6–10).
+        const pct = p.inspecoes.length
+          ? Math.round(p.inspecoes.reduce((a, i) => a + progressoFase(i.fase, i.com_inspecao).pct, 0) / p.inspecoes.length) : 0;
         return (
           <Link key={p.id} href={`/projetos/${p.id}`} className="item"
             style={{ display: "block", textDecoration: "none", color: "inherit", marginBottom: 10 }}

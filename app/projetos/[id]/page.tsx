@@ -1,7 +1,9 @@
 "use client";
 
 /** ASP — Detalhe do Projeto: informações + lista de Ordens de Serviço (OS =
- * gp_inspecoes, uma por tanque/ponto). A OS nasce na fase 2 (Agendamento).
+ * gp_inspecoes, uma por tanque/ponto). A OS nasce na fase 2 (Agendamento da
+ * inspeção) ou, SEM inspeção ("Haverá inspeção?" = Não — padrão do projeto,
+ * trocável em cada OS), na fase 6 (Agendamento de Execução).
  * Regras da criação em lib/validacao/ordemServico.ts — as mesmas que a API
  * repete: identificação única no projeto, procedimento obrigatório e tanque
  * completo; OS de mesmo nome na lixeira oferece "Restaurar". Ver COWORK-ASP.md §2. */
@@ -10,7 +12,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { descreverAcaoFase, tituloFase, ULTIMA_FASE } from "@/lib/asp/fases";
+import { descreverAcaoFase, faseInicial, progressoFase, tituloFase } from "@/lib/asp/fases";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import FormularioTanque from "@/app/components/FormularioTanque";
 import FormularioProjeto from "@/app/components/FormularioProjeto";
@@ -39,12 +41,16 @@ interface Projeto {
   cliente: Cliente | null;
   /** Fase 10: todas as OSs ativas encerradas (gravado pela API). */
   concluido_em?: string | null;
+  /** "Haverá inspeção?" padrão das OSs novas (ausente antes da migração = Sim). */
+  com_inspecao_padrao?: boolean;
 }
 interface Inspecao {
   id: string;
   identificacao: string;
   fase: number;
   ferramenta_coleta: string;
+  /** false = OS sem inspeção (começa na fase 6). */
+  com_inspecao?: boolean;
   /** Fase 10: data do encerramento (null = aberta). */
   encerrada_em?: string | null;
   /** Cadastro do tanque: dimensões, capacidade e material. */
@@ -89,6 +95,8 @@ export default function ProjetoDetalhePage() {
   // Tanque da inspeção: obrigatório na criação, porque é dele que sai a
   // identificação do tanque em todo relatório gerado depois.
   const [tanque, setTanque] = useState<TanqueForm>({ ...TANQUE_FORM_VAZIO });
+  /** "Haverá inspeção?" da nova OS — nasce com o padrão do projeto. */
+  const [osComInspecao, setOsComInspecao] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   // Validação da nova OS: erro "obrigatório" só depois de mexer no campo ou
@@ -176,6 +184,7 @@ export default function ProjetoDetalhePage() {
     setTentou(false);
     setTocados(new Set());
     setServidor(novoResultado());
+    setOsComInspecao(projeto?.com_inspecao_padrao !== false);
     fetch(`/api/inspecoes?projetoId=${id}&lixeira=1`).then((r) => (r.ok ? r.json() : {}))
       .then((d: any) => setInspLixeira(d.inspecoes || [])).catch(() => {});
     setModalAberto(true);
@@ -209,7 +218,7 @@ export default function ProjetoDetalhePage() {
       const r = await fetch("/api/inspecoes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projetoId: id, identificacao, procedimento, tanque }),
+        body: JSON.stringify({ projetoId: id, identificacao, procedimento, tanque, comInspecao: osComInspecao }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -295,6 +304,7 @@ export default function ProjetoDetalhePage() {
           <Campo rotulo="Endereço da obra" valor={projeto.endereco} />
           <Campo rotulo="Responsável" valor={projeto.responsavel_projeto} />
           <Campo rotulo="Aberto em" valor={formatarData(projeto.data_abertura)} />
+          <Campo rotulo="Haverá inspeção? (padrão das OSs)" valor={projeto.com_inspecao_padrao === false ? "Não — OSs começam na fase 6" : "Sim"} />
         </div>
       </div>
 
@@ -335,13 +345,18 @@ export default function ProjetoDetalhePage() {
       ) : (
         <div className="card lista-os">
           {inspecoes.map((i) => {
-            const pct = Math.round(((i.fase - 1) / (ULTIMA_FASE - 1)) * 100);
+            // Progresso sobre as fases que valem para a OS (sem inspeção: 1, 6–10).
+            const prog = progressoFase(i.fase, i.com_inspecao);
+            const pct = prog.pct;
             const data = proximaData(i);
             return (
               <div key={i.id} className="lista-os-item">
                 <Link href={`/inspecoes/${i.id}`} className="lista-os-link">
                   <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, paddingRight: podeExcluir ? 28 : 0 }}>
-                    <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
+                    <strong style={{ color: "var(--texto)" }}>
+                      {i.identificacao}
+                      {i.com_inspecao === false && <span className="chip chip-neutro" style={{ marginLeft: 8 }}>sem inspeção</span>}
+                    </strong>
                     <span className="detalhe" style={{ margin: 0 }}>
                       {i.encerrada_em ? <strong style={{ color: "var(--sucesso)" }}>🔒 Encerrada em {dataBrCompleta(i.encerrada_em)}</strong> : <>Fase {i.fase} · {tituloFase(i.fase)}</>}
                     </span>
@@ -354,7 +369,7 @@ export default function ProjetoDetalhePage() {
                       {" · "}{formatarDataHora(i.ultima_acao.data_autenticacao || i.ultima_acao.criado_em)}
                     </span>
                   )}
-                  <div className="fu-progresso" style={{ marginTop: 8 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
+                  <div className="fu-progresso" style={{ marginTop: 8 }} title={`Etapa ${prog.etapa} de ${prog.total}${i.com_inspecao === false ? " (sem inspeção)" : ""}`}>
                     <div className="fu-barra" style={{ width: `${pct}%` }} />
                   </div>
                 </Link>
@@ -392,6 +407,7 @@ export default function ProjetoDetalhePage() {
               endereco: projeto.endereco || "",
               responsavelProjeto: projeto.responsavel_projeto || "",
               dataAbertura: projeto.data_abertura || "",
+              comInspecaoPadrao: projeto.com_inspecao_padrao !== false,
             }}
             onCancelar={() => setModalEdit(false)}
             onSalvo={() => { setModalEdit(false); carregar(); }}
@@ -421,7 +437,20 @@ export default function ProjetoDetalhePage() {
                 )}
               </MensagensCampo>
               <small style={{ color: "var(--cinza)" }}>
-                Única no projeto — “TQ-01”, “tq 01” e “TQ01” contam como a mesma. A OS começa na fase 2 (Agendamento).
+                Única no projeto — “TQ-01”, “tq 01” e “TQ01” contam como a mesma.
+              </small>
+            </div>
+            <div>
+              <label id="rot-os-inspecao" style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 }}>Haverá inspeção? *</label>
+              <div className="val-escolha" role="group" aria-labelledby="rot-os-inspecao">
+                <button type="button" aria-pressed={osComInspecao} onClick={() => setOsComInspecao(true)}>Sim</button>
+                <button type="button" aria-pressed={!osComInspecao} onClick={() => setOsComInspecao(false)}>Não</button>
+              </div>
+              <small style={{ color: "var(--cinza)" }}>
+                {osComInspecao
+                  ? `A OS começa na fase ${faseInicial(true)} (Agendamento da inspeção).`
+                  : `A OS começa na fase ${faseInicial(false)} (Agendamento de Execução) — sem as fases de inspeção (2 a 5).`}
+                {(projeto.com_inspecao_padrao !== false) !== osComInspecao ? " Diferente do padrão do projeto." : " Padrão do projeto."}
               </small>
             </div>
             <div>

@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const info = await infoOSRelatorio(rel.inspecao_id);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
-  const erroTipo = erroTipoNaFase(rel.tipo, info.fase);
+  const erroTipo = erroTipoNaFase(rel.tipo, info.fase, info.comInspecao);
   if (erroTipo) return NextResponse.json({ erro: erroTipo }, { status: 400 });
 
   if (rel.dados) {

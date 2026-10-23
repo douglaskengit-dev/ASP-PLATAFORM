@@ -68,6 +68,10 @@ export async function POST(req: NextRequest) {
 
   const { ctx, info } = await contextoAgendamento({ inspecaoId: body.inspecaoId, dataVisita: dados.dataVisita, dataFim: dados.dataFim });
   if (!info) return NextResponse.json({ erro: "OS não encontrada." }, { status: 404 });
+  // ⛔ OS sem inspeção: não tem agendamento de inspeção.
+  if (!info.comInspecao && dados.tipo === "inspecao") {
+    return NextResponse.json({ erro: "Esta OS é sem inspeção — agende a execução." }, { status: 400 });
+  }
   dados.equipamentos = (dados.equipamentos || []).map((e) => nomeDoCatalogo(e, ctx.catalogo));
   const resultado = validarAgendamento(dados, ctx);
   if (temErros(resultado)) {

@@ -118,6 +118,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     responsavel_projeto: normalizarEspacos(dados.responsavelProjeto) || null,
     data_abertura: dados.dataAbertura,
   };
+  // "Haverá inspeção?" do projeto: vale para as OSs NOVAS (as que já existem não mudam).
+  if (typeof body.comInspecaoPadrao === "boolean") patch.com_inspecao_padrao = body.comInspecaoPadrao;
 
   const supabase = getSupabaseRouteClient();
   const { data, error } = await supabase.from("gp_projetos").update(patch).eq("id", params.id).select("*").single();

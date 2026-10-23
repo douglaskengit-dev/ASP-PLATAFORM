@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
   }
 
   const tipo = b?.tipo === "execucao" ? "execucao" : b?.tipo === "inspecao" ? "inspecao" : "";
-  const erroTipo = erroTipoNaFase(tipo, info.fase);
+  const erroTipo = erroTipoNaFase(tipo, info.fase, info.comInspecao);
   if (erroTipo) return NextResponse.json({ erro: erroTipo }, { status: 400 });
   const ext = String(b?.ext || "").toLowerCase();
   if (ext !== "pdf" && ext !== "docx") {

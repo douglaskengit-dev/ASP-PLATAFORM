@@ -32,6 +32,39 @@ export const FASES: DefinicaoFase[] = [
 
 export const PRIMEIRA_FASE_INSPECAO = 2;
 export const ULTIMA_FASE = 10;
+/** OS SEM inspeção (gp_inspecoes.com_inspecao = false) nasce aqui e nunca
+ *  passa pelas fases 2–5 (bloco de inspeção). */
+export const PRIMEIRA_FASE_EXECUCAO = 6;
+
+/** Fase em que a OS nasce: 2 (com inspeção) ou 6 (sem inspeção). */
+export function faseInicial(comInspecao: boolean | null | undefined): number {
+  return comInspecao === false ? PRIMEIRA_FASE_EXECUCAO : PRIMEIRA_FASE_INSPECAO;
+}
+
+/** Menor fase que a OS pode ocupar (nada a leva abaixo disto). */
+export function faseMinima(comInspecao: boolean | null | undefined): number {
+  return faseInicial(comInspecao);
+}
+
+/** Fases que valem para a OS, com a 1 (abertura do projeto): 1..10 com
+ *  inspeção; 1, 6..10 sem inspeção (2–5 não existem para ela). */
+export function fasesAplicaveis(comInspecao: boolean | null | undefined): number[] {
+  const todas = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  return comInspecao === false ? todas.filter((n) => n === 1 || n >= PRIMEIRA_FASE_EXECUCAO) : todas;
+}
+
+/** Progresso da OS sobre as fases que valem para ela. O NÚMERO da fase não
+ *  muda (a fase 6 é sempre o Agendamento de Execução); a posição é contada
+ *  nas fases aplicáveis: com inspeção, etapa = fase ("Fase 4 de 10"); sem
+ *  inspeção, a fase 6 é a etapa 2 de 6 (a 1 é a abertura do projeto). */
+export function progressoFase(fase: number, comInspecao: boolean | null | undefined): { etapa: number; total: number; pct: number } {
+  const lista = fasesAplicaveis(comInspecao);
+  const total = lista.length;
+  let etapa = lista.indexOf(fase) + 1;
+  // Fase fora da lista (dado antigo): conta as aplicáveis até ela.
+  if (etapa === 0) etapa = Math.max(1, lista.filter((n) => n <= fase).length);
+  return { etapa, total, pct: Math.round(((etapa - 1) / (total - 1)) * 100) };
+}
 
 export function definicaoFase(numero: number): DefinicaoFase | undefined {
   return FASES.find((f) => f.numero === numero);
@@ -56,6 +89,10 @@ export function descreverAcaoFase(acao: string, faseDe: number, fasePara: number
       return "Encerrou a OS";
     case "reabrir":
       return "Reabriu a OS (volta a aceitar alterações)";
+    case "alterar_inspecao":
+      return faseDe === fasePara
+        ? "Alterou “Haverá inspeção?” da OS"
+        : `Alterou “Haverá inspeção?” da OS — fase ${faseDe} → ${fasePara} (${tituloFase(fasePara)})`;
     default:
       return `${acao}: fase ${faseDe} → ${fasePara}`;
   }
@@ -88,21 +125,99 @@ export interface OpcaoAcao {
  * Fases de aprovação (5 e 9): Gerência aprova (avança) ou reprova (volta uma
  * fase, tag "Ajustar"). Demais fases: o responsável "avança".
  */
-export function acoesDisponiveis(perfil: string | null | undefined, faseAtual: number): OpcaoAcao[] {
+export function acoesDisponiveis(
+  perfil: string | null | undefined,
+  faseAtual: number,
+  opcoes: { comInspecao?: boolean | null } = {},
+): OpcaoAcao[] {
   if (!perfilAtuaNaFase(perfil, faseAtual)) return [];
+  // OS sem inspeção: nada a leva para as fases 2–5 (a reprovação da fase 9
+  // volta para a 8). Uma que, por dado antigo, esteja abaixo da 6 só anda
+  // para a 6.
+  const minima = faseMinima(opcoes.comInspecao);
+  const limitar = (n: number) => Math.min(Math.max(n, minima), ULTIMA_FASE);
+  if (faseAtual < minima) {
+    return [{ acao: "avancar", rotulo: "Concluir e avançar", destino: minima }];
+  }
 
   // Fases de aprovação
   if (faseAtual === 5 || faseAtual === 9) {
     return [
-      { acao: "aprovar", rotulo: "Aprovar relatório", destino: faseAtual + 1 },
-      { acao: "reprovar", rotulo: "Reprovar (Ajustar)", destino: faseAtual - 1, exigeMotivo: true },
+      { acao: "aprovar", rotulo: "Aprovar relatório", destino: limitar(faseAtual + 1) },
+      { acao: "reprovar", rotulo: "Reprovar (Ajustar)", destino: limitar(faseAtual - 1), exigeMotivo: true },
     ];
   }
 
   // Encerramento
   if (faseAtual >= ULTIMA_FASE) return [];
 
-  return [{ acao: "avancar", rotulo: "Concluir e avançar", destino: faseAtual + 1 }];
+  return [{ acao: "avancar", rotulo: "Concluir e avançar", destino: limitar(faseAtual + 1) }];
+}
+
+// ── "Haverá inspeção?" — troca depois de criada ─────────────────────────────
+
+export interface TrocaInspecao {
+  /** false = nada a fazer (mesmo valor). */
+  muda: boolean;
+  /** Fase depois da troca. */
+  faseNova: number;
+  /** Texto do aviso (confirmação) — sempre presente quando muda. */
+  aviso: string;
+  /** Não → Sim na fase 6 sem nada da execução feito: dá para voltar à fase 2. */
+  podeVoltarParaInspecao: boolean;
+}
+
+/**
+ * O que acontece ao trocar "Haverá inspeção?" de uma OS aberta (a OS
+ * encerrada nem chega aqui — é só consulta). Puro: a tela usa para o aviso,
+ * a API para gravar.
+ *  · Sim → Não nas fases 2–5: pula para a 6; o que já foi feito da inspeção
+ *    (agendamento de inspeção, coletas, relatório de inspeção) fica no
+ *    histórico.
+ *  · Sim → Não da 6 em diante: só esconde as fases 2–5; a fase não muda.
+ *  · Não → Sim na 6 sem nada da execução feito: pode voltar à fase 2
+ *    (`voltarParaInspecao`); sem escolher voltar, fica na 6.
+ *  · Não → Sim depois disso: a fase não muda; as fases 2–5 ficam puladas.
+ */
+export function planejarTrocaInspecao(d: {
+  fase: number;
+  comInspecaoAtual: boolean;
+  novo: boolean;
+  /** Sem agendamento de execução ativo, relatório de execução nem RDO. */
+  nadaFeitoNaExecucao: boolean;
+  voltarParaInspecao?: boolean;
+}): TrocaInspecao {
+  const { fase, comInspecaoAtual, novo } = d;
+  if (comInspecaoAtual === novo) {
+    return { muda: false, faseNova: fase, aviso: "", podeVoltarParaInspecao: false };
+  }
+  if (!novo) {
+    if (fase < PRIMEIRA_FASE_EXECUCAO) {
+      return {
+        muda: true, faseNova: PRIMEIRA_FASE_EXECUCAO, podeVoltarParaInspecao: false,
+        aviso: `A OS sai da fase ${fase} (${tituloFase(fase)}) e vai direto para a fase 6 (${tituloFase(6)}). `
+          + "O que já foi feito da inspeção — agendamento de inspeção, coletas e relatório de inspeção — continua no histórico da OS.",
+      };
+    }
+    return {
+      muda: true, faseNova: fase, podeVoltarParaInspecao: false,
+      aviso: `A OS continua na fase ${fase}. As fases de inspeção (2 a 5) deixam de aparecer; os registros que já existirem continuam no histórico.`,
+    };
+  }
+  if (fase === PRIMEIRA_FASE_EXECUCAO && d.nadaFeitoNaExecucao) {
+    const volta = !!d.voltarParaInspecao;
+    return {
+      muda: true, faseNova: volta ? PRIMEIRA_FASE_INSPECAO : fase, podeVoltarParaInspecao: true,
+      aviso: volta
+        ? `A OS volta para a fase 2 (${tituloFase(2)}) e segue o fluxo com inspeção (fases 2 a 5 antes da execução).`
+        : "A OS continua na fase 6. As fases de inspeção (2 a 5) ficam como puladas — nada da inspeção foi feito.",
+    };
+  }
+  return {
+    muda: true, faseNova: fase, podeVoltarParaInspecao: false,
+    aviso: `A OS continua na fase ${fase}. As fases de inspeção (2 a 5) foram puladas e aparecem como não realizadas`
+      + (fase === PRIMEIRA_FASE_EXECUCAO ? " — a execução já começou a ser preparada, então não dá para voltar à fase 2." : "."),
+  };
 }
 
 // ── Seções da página da inspeção ─────────────────────────────────────────────

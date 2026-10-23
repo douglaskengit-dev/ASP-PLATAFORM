@@ -43,13 +43,23 @@
  * com justificativa) e "Reabrir OS"; a seção "Entregas ao cliente" registra
  * o que foi entregue, a quem e quando. OS encerrada = só consulta: os botões
  * de edição somem/desabilitam aqui e a API recusa (409). Regras em
- * lib/validacao/encerramento.ts. */
+ * lib/validacao/encerramento.ts.
+ *
+ * OS SEM inspeção (com_inspecao = false): nasce na fase 6 e as fases 2–5 não
+ * aparecem (lista de fases, progresso "etapa N de 6", agendamento/relatório
+ * de inspeção e os avisos de inspeção). O cabeçalho mostra a "Última
+ * inspeção" do tanque/cliente (só leitura). "Haverá inspeção?" pode ser
+ * trocado depois, com aviso (lib/asp/fases.ts planejarTrocaInspecao). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { acoesDisponiveis, definicaoFase, descreverAcaoFase, perfilAtuaNaFase, tituloFase, ULTIMA_FASE, OpcaoAcao } from "@/lib/asp/fases";
+import {
+  acoesDisponiveis, definicaoFase, descreverAcaoFase, fasesAplicaveis, perfilAtuaNaFase, planejarTrocaInspecao, progressoFase,
+  tituloFase, ULTIMA_FASE, OpcaoAcao,
+} from "@/lib/asp/fases";
+import UltimaInspecao from "@/app/components/UltimaInspecao";
 import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
 import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
@@ -105,6 +115,8 @@ interface Inspecao {
   tanque?: Tanque | null;
   fase: number;
   ferramenta_coleta: string;
+  /** false = OS sem inspeção (fases 2–5 não existem). Ausente = com. */
+  com_inspecao?: boolean;
   status_relatorio_inspecao: string;
   status_relatorio_execucao: string;
   /** Quando TAG/procedimento/tanque mudaram (aviso da aprovação). */
@@ -172,8 +184,8 @@ interface ArquivoProjeto {
   chave?: string;
 }
 
-// Fase 1 é nível-projeto (abertura); as demais correm na inspeção.
-const TODAS_FASES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+// Fase 1 é nível-projeto (abertura); as demais correm na inspeção. A lista
+// de fases da OS vem de fasesAplicaveis (sem inspeção: 1, 6–10).
 function nomeFase(n: number) {
   return n === 1 ? "Abertura do Projeto" : tituloFase(n);
 }
@@ -374,6 +386,10 @@ export default function InspecaoDetalhePage() {
   const [pedidoNovoRdo, setPedidoNovoRdo] = useState(0);
   /** Lista completa das 10 fases no cabeçalho (recolhida por padrão). */
   const [verFases, setVerFases] = useState(false);
+  /** Troca de "Haverá inspeção?" (modal com o aviso) e o envio. */
+  const [trocaInspecao, setTrocaInspecao] = useState(false);
+  const [trocandoInspecao, setTrocandoInspecao] = useState(false);
+  const [erroTroca, setErroTroca] = useState<string | null>(null);
   /** Modal com o seletor de procedimento (antes ficava sempre aberto no topo). */
   const [editandoProc, setEditandoProc] = useState(false);
   /** Sobe a cada recarga: o card do encerramento e as entregas reconsultam. */
@@ -422,7 +438,9 @@ export default function InspecaoDetalhePage() {
     }).catch(() => {});
   }, [carregar]);
 
-  const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
+  /** OS sem inspeção: as fases 2–5 não existem para ela. */
+  const comInspecao = insp?.com_inspecao !== false;
+  const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase, { comInspecao: insp.com_inspecao !== false }) : []), [insp, perfil]);
 
   // Contato do cliente: preenche o campo "Contato" do tópico 1 do relatório.
   // Usa o primeiro contato ATIVO cadastrado (o principal); o campo segue editável.
@@ -639,6 +657,8 @@ export default function InspecaoDetalhePage() {
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
   const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "") && !encerrada;
   const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao }) && !encerrada;
+  /** Trocar "Haverá inspeção?": quem cria OS (Comercial/Gerência/Admin), OS aberta. */
+  const podeTrocarInspecao = ["admin", "comercial", "gerencia"].includes(perfil || "") && !encerrada;
 
   // Reprovação que trouxe a inspeção de volta para esta fase (o histórico
   // vem do mais recente para o mais antigo): abre Relatórios e Histórico e
@@ -759,7 +779,7 @@ export default function InspecaoDetalhePage() {
     }
     //  · Versão assinada: seguir da fase 6 sem a de inspeção; encerrar sem a
     //    de execução.
-    const semAssinatura = insp ? avisosAssinatura(insp.fase, opcao.acao, refsRelatorio) : [];
+    const semAssinatura = insp ? avisosAssinatura(insp.fase, opcao.acao, refsRelatorio, comInspecao) : [];
     if (semAssinatura.length) { if (!blocos.length) titulo = "Versão assinada"; blocos.push(...semAssinatura.map((a) => `• ${a}`)); }
     const verbo = opcao.acao === "aprovar" ? "Aprovar" : "Avançar";
     if (blocos.length > 0 && !confirm(`${titulo}:\n\n${blocos.join("\n\n")}\n\n${verbo} mesmo assim?`)) return;
@@ -1472,7 +1492,8 @@ export default function InspecaoDetalhePage() {
     }),
     usuariosAtivos: usuarios.length ? usuarios.map((u) => u.id) : undefined,
     catalogo: agCtx.catalogo || catalogoEquip,
-    relatoriosInspecao: agCtx.relatoriosInspecao
+    // OS sem inspeção: o relatório de inspeção não é cobrado na execução.
+    relatoriosInspecao: !comInspecao ? [] : agCtx.relatoriosInspecao
       || relatorios.filter((r) => r.tipo === "inspecao").map((r) => ({ versao: r.versao, status: r.status })),
     funcoes: agCtx.funcoes || funcoesUsuarios,
     equipamentosProcedimento: agCtx.equipamentosProcedimento || equipProcOS,
@@ -1618,6 +1639,39 @@ export default function InspecaoDetalhePage() {
     mexeuAgenda();
   }
 
+  /** "Haverá inspeção?" — o que a troca faria agora (o servidor confere de
+   *  novo). "Nada feito na execução" = sem agendamento de execução ativo,
+   *  relatório de execução nem RDO. */
+  const nadaFeitoNaExecucao = !agAtivos.some((a) => a.tipo === "execucao")
+    && !relatorios.some((r) => r.tipo === "execucao") && !(rdosInsp && rdosInsp.length > 0);
+  const planoTroca = insp ? planejarTrocaInspecao({
+    fase: insp.fase, comInspecaoAtual: comInspecao, novo: !comInspecao, nadaFeitoNaExecucao,
+  }) : null;
+
+  async function trocarInspecao(voltarParaInspecao: boolean) {
+    if (!insp || trocandoInspecao) return;
+    setTrocandoInspecao(true);
+    setErroTroca(null);
+    try {
+      const r = await fetch(`/api/inspecoes/${id}/com-inspecao`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comInspecao: !comInspecao, voltarParaInspecao, faseDe: insp.fase }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setErroTroca(d.erro || "Não foi possível alterar.");
+        if (r.status === 409) carregar();
+        return;
+      }
+      setTrocaInspecao(false);
+      carregar();
+    } catch {
+      setErroTroca("Sem conexão — tente de novo quando estiver online.");
+    } finally {
+      setTrocandoInspecao(false);
+    }
+  }
+
   if (carregando) return <div className="page-larga"><p className="vazio">Carregando…</p></div>;
   if (naoEncontrado || !insp)
     return (
@@ -1632,12 +1686,25 @@ export default function InspecaoDetalhePage() {
   const rotuloProcedimento = insp.procedimento
     ? `${insp.procedimento}${procAtual?.nome ? ` — ${procAtual.nome}` : ""}`
     : "não definido (escolha um)";
-  const pct = Math.round(((insp.fase - 1) / (ULTIMA_FASE - 1)) * 100);
+  // Progresso sobre as fases que valem para a OS: com inspeção, "Fase N de
+  // 10"; sem inspeção, o número da fase fica (6 = Agendamento de Execução) e
+  // a posição é "etapa N de 6" (1, 6–10).
+  const prog = progressoFase(insp.fase, comInspecao);
+  const pct = prog.pct;
+  const listaFases = fasesAplicaveis(comInspecao);
+  // Fases 2–5 por onde a OS passou (histórico ou a fase em que nasceu): com
+  // inspeção depois de ter sido sem, as que faltam aparecem como puladas.
+  const trocouInspecao = historico.some((h) => h.acao === "alterar_inspecao");
+  const fasesVisitadas = new Set<number>([
+    ...historico.flatMap((h) => [Number(h.fase_de), Number(h.fase_para)]),
+    historico.length ? Number(historico[historico.length - 1].fase_de) : insp.fase,
+  ]);
 
   // Resumos de uma linha das seções recolhidas.
   const aprovadas = coletas.filter((c) => c.aprovada_em).length;
-  // A partir do relatório (fase 4), falta de medição aprovada é pendência.
-  const classeAprovada = aprovadas === 0 && insp.fase >= 4 ? "alerta" : undefined;
+  // A partir do relatório (fase 4), falta de medição aprovada é pendência —
+  // só na OS com inspeção (a sem inspeção não tem medição obrigatória).
+  const classeAprovada = aprovadas === 0 && insp.fase >= 4 && comInspecao ? "alerta" : undefined;
   const resumoColetas = coletas.length === 0 ? <span className={classeAprovada}>Nenhuma coleta</span> : (
     <>
       {coletas.length} coleta{coletas.length === 1 ? "" : "s"} ·{" "}
@@ -1657,7 +1724,9 @@ export default function InspecaoDetalhePage() {
     const prevista = tipo === "execucao" && agAtivos.find((x) => x.data_execucao)?.data_execucao;
     return prevista ? `${formatarData(prevista).slice(0, 5)} (prevista)` : "—";
   };
-  const resumoAgendamentos = `Inspeção ${quandoAgenda("inspecao")} · Execução ${quandoAgenda("execucao")}`;
+  const resumoAgendamentos = comInspecao
+    ? `Inspeção ${quandoAgenda("inspecao")} · Execução ${quandoAgenda("execucao")}`
+    : `Execução ${quandoAgenda("execucao")}`;
   const progFotos = progressoColeta(fotosExec);
   const resumoFotos = `${fotosExec ? `${progFotos.feitos} de ${progFotos.total} itens` : "Carregando…"}`
     + (fotosLocais.fila > 0 ? ` · ${fotosLocais.fila} na fila` : "")
@@ -1727,8 +1796,11 @@ export default function InspecaoDetalhePage() {
               {insp.projeto?.endereco ? ` · ${insp.projeto.endereco}` : ""}
             </p>
           </div>
-          <span className={`fu-badge ${def?.bloco === "execucao" ? "manual" : "auto"}`} style={{ marginLeft: 0 }}>
-            Fase {insp.fase} · {def?.area || "—"}
+          <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {!comInspecao && <span className="chip chip-neutro" title="OS sem inspeção: as fases 2 a 5 não existem para ela">Sem inspeção</span>}
+            <span className={`fu-badge ${def?.bloco === "execucao" ? "manual" : "auto"}`} style={{ marginLeft: 0 }}>
+              Fase {insp.fase} · {def?.area || "—"}
+            </span>
           </span>
         </div>
 
@@ -1763,6 +1835,19 @@ export default function InspecaoDetalhePage() {
               <span className="os-meta-valor">{insp.tanque ? resumoTanque(insp.tanque) : "não cadastrado"}</span>
             </span>
           )}
+          {podeTrocarInspecao ? (
+            <button type="button" className="os-meta-item" aria-haspopup="dialog" title="Trocar “Haverá inspeção?” desta OS"
+              onClick={() => { setErroTroca(null); setTrocaInspecao(true); }}>
+              <span className="os-meta-rotulo">Inspeção</span>
+              <span className="os-meta-valor">{comInspecao ? "Sim" : "Não"}</span>
+              <span className="os-meta-lapis" aria-hidden="true">✎</span>
+            </button>
+          ) : (
+            <span className="os-meta-item">
+              <span className="os-meta-rotulo">Inspeção</span>
+              <span className="os-meta-valor">{comInspecao ? "Sim" : "Não"}</span>
+            </span>
+          )}
         </div>
         {erroProc && <p className="erro-texto" style={{ margin: "2px 0 0" }}>{erroProc}</p>}
 
@@ -1784,27 +1869,37 @@ export default function InspecaoDetalhePage() {
 
         <AvisoCliente clienteId={insp.projeto?.cliente?.id} faixa />
 
+        {/* OS sem inspeção: a inspeção anterior do tanque/cliente como referência. */}
+        {!comInspecao && <UltimaInspecao inspecaoId={id} />}
+
         {/* Fase atual em uma linha; a lista das 10 fases abre sob demanda. */}
         <div className="os-fase">
           <div className="os-fase-linha">
             <strong className="os-fase-nome">
-              Fase {insp.fase} de {ULTIMA_FASE} · {nomeFase(insp.fase)}
+              {comInspecao
+                ? <>Fase {insp.fase} de {ULTIMA_FASE} · {nomeFase(insp.fase)}</>
+                : <>Fase {insp.fase} · {nomeFase(insp.fase)} · etapa {prog.etapa} de {prog.total} (sem inspeção)</>}
             </strong>
             <button type="button" className="secao-link" aria-expanded={verFases} aria-controls="lista-fases"
               onClick={() => setVerFases((v) => !v)}>
               {verFases ? "ocultar fases" : "ver todas as fases"}
             </button>
           </div>
-          <div className="fu-progresso" title={`Fase ${insp.fase} de ${ULTIMA_FASE}`}>
+          <div className="fu-progresso" title={comInspecao ? `Fase ${insp.fase} de ${ULTIMA_FASE}` : `Etapa ${prog.etapa} de ${prog.total} — fases 2 a 5 não se aplicam`}>
             <div className="fu-barra" style={{ width: `${pct}%` }} />
           </div>
 
           <div id="lista-fases" hidden={!verFases}
             style={{ display: verFases ? "flex" : undefined, flexDirection: "column", gap: 4, marginTop: 12 }}>
-            {TODAS_FASES.map((n) => {
-              const estado = n < insp.fase ? "feita" : n === insp.fase ? "atual" : "futura";
+            {!comInspecao && (
+              <p className="detalhe" style={{ margin: "0 0 4px" }}>OS sem inspeção — as fases 2 a 5 (inspeção) não se aplicam.</p>
+            )}
+            {listaFases.map((n) => {
+              const pulada = comInspecao && trocouInspecao && n >= 2 && n <= 5 && n < insp.fase && !fasesVisitadas.has(n);
+              const estado = pulada ? "pulada" : n < insp.fase ? "feita" : n === insp.fase ? "atual" : "futura";
               return (
-                <div key={n} className="fase-linha" style={{ opacity: estado === "futura" ? 0.5 : 1 }}>
+                <div key={n} className={`fase-linha${pulada ? " pulada" : ""}`} style={{ opacity: estado === "futura" || pulada ? 0.5 : 1 }}
+                  title={pulada ? "Fase pulada: a OS era sem inspeção" : undefined}>
                   <span
                     style={{
                       width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
@@ -1814,10 +1909,10 @@ export default function InspecaoDetalhePage() {
                       color: estado === "futura" ? "var(--cinza)" : "#fff",
                     }}
                   >
-                    {estado === "feita" ? "✓" : n}
+                    {estado === "feita" ? "✓" : pulada ? "–" : n}
                   </span>
-                  <span className="fase-nome" style={{ fontWeight: estado === "atual" ? 700 : 500, color: "var(--texto)" }}>
-                    {nomeFase(n)}
+                  <span className="fase-nome" style={{ fontWeight: estado === "atual" ? 700 : 500, color: pulada ? undefined : "var(--texto)" }}>
+                    {nomeFase(n)}{pulada ? " (pulada)" : ""}
                   </span>
                 </div>
               );
@@ -2291,7 +2386,7 @@ export default function InspecaoDetalhePage() {
                 </div>
                 {h.motivo && (
                   <div className="detalhe" style={{ margin: 0 }}>
-                    {h.acao === "assinar" ? h.motivo : `Motivo: ${formatarMotivo(h.motivo_categoria, h.motivo)}`}
+                    {h.acao === "assinar" || h.acao === "alterar_inspecao" ? h.motivo : `Motivo: ${formatarMotivo(h.motivo_categoria, h.motivo)}`}
                   </div>
                 )}
                 <div className="detalhe" style={{ margin: 0 }}>
@@ -2800,6 +2895,48 @@ export default function InspecaoDetalhePage() {
 
       {/* Modal: procedimento da OS (antes era um seletor sempre aberto no
           topo). Trocar salva na hora, como antes. */}
+      {/* "Haverá inspeção?" — troca com aviso (Avisa: o produto aprovou). */}
+      {trocaInspecao && planoTroca && podeTrocarInspecao && (
+        <Modal titulo="Haverá inspeção nesta OS?" onFechar={() => !trocandoInspecao && setTrocaInspecao(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p style={{ margin: 0 }}>
+              Hoje: <strong>{comInspecao ? "Sim" : "Não"}</strong> → passa a <strong>{comInspecao ? "Não" : "Sim"}</strong>.
+            </p>
+            {planoTroca.podeVoltarParaInspecao ? (
+              <div className="val-campo" aria-live="polite">
+                <p className="val-msg val-aviso aviso-plano">
+                  ⚠️ Nada da execução foi feito ainda. Você pode voltar a OS para a fase 2 ({tituloFase(2)}) e fazer a inspeção,
+                  ou mantê-la na fase 6 (as fases 2 a 5 ficam como puladas).
+                </p>
+              </div>
+            ) : (
+              <div className="val-campo" aria-live="polite">
+                <p className="val-msg val-aviso aviso-plano">⚠️ {planoTroca.aviso}</p>
+              </div>
+            )}
+            <p className="detalhe" style={{ margin: 0 }}>A troca fica registrada no histórico de fases (quem, quando, de → para).</p>
+            {erroTroca && <p className="erro-texto" style={{ margin: 0 }}>⛔ {erroTroca}</p>}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button className="btn-azul btn-sec" onClick={() => setTrocaInspecao(false)} disabled={trocandoInspecao}>Cancelar</button>
+              {planoTroca.podeVoltarParaInspecao ? (
+                <>
+                  <button className="btn-azul btn-sec" onClick={() => trocarInspecao(false)} disabled={trocandoInspecao}>
+                    {trocandoInspecao ? "Salvando…" : "Manter na fase 6"}
+                  </button>
+                  <button className="btn-azul" onClick={() => trocarInspecao(true)} disabled={trocandoInspecao}>
+                    {trocandoInspecao ? "Salvando…" : "Voltar para a fase 2"}
+                  </button>
+                </>
+              ) : (
+                <button className="btn-azul" onClick={() => trocarInspecao(false)} disabled={trocandoInspecao}>
+                  {trocandoInspecao ? "Salvando…" : comInspecao ? "Confirmar: sem inspeção" : "Confirmar: com inspeção"}
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {editandoProc && podeRenomear && (
         <Modal titulo="Procedimento da OS" onFechar={() => setEditandoProc(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

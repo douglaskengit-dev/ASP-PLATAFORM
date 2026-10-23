@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
   const info = await infoOSRelatorio(inspecaoId);
   if (!info) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
   const tipo = corpo.tipo;
-  const erroTipo = erroTipoNaFase(tipo, info.fase);
+  const erroTipo = erroTipoNaFase(tipo, info.fase, info.comInspecao);
   if (erroTipo) return NextResponse.json({ erro: erroTipo }, { status: 400 });
   if (ehRascunho && !dados) return NextResponse.json({ erro: "Rascunho sem os dados do formulário." }, { status: 400 });
 

@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import FormularioProjeto from "@/app/components/FormularioProjeto";
 import TituloPagina from "@/app/components/TituloPagina";
+import { progressoFase } from "@/lib/asp/fases";
 
 interface ClienteResumo {
   id: string;
@@ -17,7 +18,7 @@ interface ClienteResumo {
   cidade?: string | null;
   uf?: string | null;
 }
-interface InspecaoResumo { id: string; fase: number; encerrada_em?: string | null }
+interface InspecaoResumo { id: string; fase: number; encerrada_em?: string | null; com_inspecao?: boolean }
 interface Projeto {
   id: string;
   codigo_projeto: string | null;
@@ -44,8 +45,9 @@ const rotFiltro: React.CSSProperties = {
 function statusProjeto(inspecoes: InspecaoResumo[], concluidoEm?: string | null): { label: string; cor: string; pct: number; chave: string } {
   if (concluidoEm) return { label: "Concluído", cor: "var(--sucesso-solido)", pct: 100, chave: "concluido" };
   if (!inspecoes.length) return { label: "Sem OS", cor: "var(--cinza)", pct: 0, chave: "sem" };
-  const media = inspecoes.reduce((a, i) => a + i.fase, 0) / inspecoes.length;
-  const pct = Math.round(((media - 1) / (ULTIMA_FASE - 1)) * 100);
+  // Progresso de cada OS sobre as fases que valem para ela (a sem inspeção
+  // não tem as fases 2–5).
+  const pct = Math.round(inspecoes.reduce((a, i) => a + progressoFase(i.fase, i.com_inspecao).pct, 0) / inspecoes.length);
   if (inspecoes.every((i) => i.fase >= ULTIMA_FASE)) return { label: "Em encerramento", cor: "var(--teal)", pct: 100, chave: "encerramento" };
   if (inspecoes.some((i) => i.fase === 5 || i.fase === 9)) return { label: "Aguardando aprovação", cor: "var(--pendente)", pct, chave: "aprovacao" };
   return { label: "Em andamento", cor: "var(--primaria)", pct, chave: "andamento" };
@@ -73,6 +75,8 @@ export default function ProjetosPage() {
   const [projetos, setProjetos] = useState<Projeto[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [modalAberto, setModalAberto] = useState(false);
+  /** Cliente já escolhido ao abrir o modal (link "+ Novo projeto" do cliente/Dashboard). */
+  const [clienteInicial, setClienteInicial] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [verLixeira, setVerLixeira] = useState(false);
   // Filtros, ordenação e agrupamento da lista.
@@ -97,6 +101,16 @@ export default function ProjetosPage() {
 
   useEffect(() => { carregar(verLixeira); }, [verLixeira]);
 
+  // /projetos?novo=1&cliente=<id>: abre "Abrir novo projeto" com o cliente
+  // escolhido (lembrete de serviço recorrente, página do cliente).
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("novo") !== "1") return;
+    setClienteInicial(sp.get("cliente"));
+    setModalAberto(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
   async function restaurar(pid: string) {
     const r = await fetch(`/api/projetos/${pid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurar: true }) });
     if (!r.ok) { setErro((await r.json()).erro || "Falha ao restaurar."); return; }
@@ -111,6 +125,7 @@ export default function ProjetosPage() {
 
   function abrirModal() {
     setErro(null);
+    setClienteInicial(null);
     setModalAberto(true);
   }
 
@@ -309,6 +324,7 @@ export default function ProjetosPage() {
         <Modal titulo="Abrir novo projeto" onFechar={() => setModalAberto(false)}>
           <FormularioProjeto
             modo="novo"
+            inicial={clienteInicial ? { clienteId: clienteInicial } : undefined}
             onCancelar={() => setModalAberto(false)}
             onSalvo={(projeto) => router.push(`/projetos/${projeto.id}`)}
           />

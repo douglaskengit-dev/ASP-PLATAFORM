@@ -76,8 +76,12 @@ export function tipoDaFase(fase: number): TipoRelatorio {
 }
 
 /** Erro quando o tipo não é o da fase atual, ou null. */
-export function erroTipoNaFase(tipo: string, fase: number): string | null {
+export function erroTipoNaFase(tipo: string, fase: number, comInspecao: boolean = true): string | null {
   if (tipo !== "inspecao" && tipo !== "execucao") return "Tipo de relatório inválido.";
+  // OS sem inspeção nunca recebe relatório de inspeção (as fases 2–5 não existem para ela).
+  if (tipo === "inspecao" && comInspecao === false) {
+    return "Esta OS é sem inspeção — não aceita relatório de inspeção (só o de execução).";
+  }
   const certo = tipoDaFase(fase);
   if (tipo === certo) return null;
   return tipo === "inspecao"

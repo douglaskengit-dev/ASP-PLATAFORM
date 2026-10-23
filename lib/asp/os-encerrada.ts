@@ -37,6 +37,8 @@ export interface EstadoOS {
   encerramento_manual: boolean;
   encerramento_justificativa: string | null;
   encerramento_pendencias: string[] | null;
+  /** false = OS sem inspeção (true antes da migração). */
+  com_inspecao: boolean;
 }
 
 function paraEstado(o: any): EstadoOS {
@@ -46,6 +48,7 @@ function paraEstado(o: any): EstadoOS {
     encerrada_em: o.encerrada_em ?? null, encerrada_por: o.encerrada_por ?? null,
     encerramento_manual: !!o.encerramento_manual, encerramento_justificativa: o.encerramento_justificativa ?? null,
     encerramento_pendencias: Array.isArray(o.encerramento_pendencias) ? o.encerramento_pendencias : null,
+    com_inspecao: o.com_inspecao !== false,
   };
 }
 
@@ -133,6 +136,7 @@ export async function contextoEncerramento(os: EstadoOS): Promise<ContextoServid
   const coleta: RegistroFotosExecucao = (fotos.data as any) || registroVazio(!!(proc.data as any)?.agua_potavel);
   const pendencias = pendenciasEncerramento({
     relatorios, usaLaudo: procedimentoUsaLaudo(proc.data as any), rdos: rdoLista, periodo, hoje, coleta,
+    comInspecao: os.com_inspecao,
   });
   const ultima = ultimaAtividade({ rdos: rdoLista, relatorios, coletas: (coletas.data || []) as any[], periodo });
   return { os, pendencias, ultima, entregas: entregas.error ? -1 : (entregas.data || []).length, hoje };

@@ -1248,6 +1248,17 @@ button.os-meta-item:focus-visible { outline: 2px solid var(--primaria); outline-
 .os-fase-linha { display: flex; justify-content: space-between; align-items: center; gap: 0 var(--esp-3); flex-wrap: wrap; }
 .os-fase-nome { font-size: 13.5px; color: var(--texto); }
 .os-fase .fu-progresso { height: 6px; }
+/* Fase pulada (OS que trocou "Haverá inspeção?" depois): traço, sem número. */
+.fase-linha.pulada .fase-nome { text-decoration: line-through; color: var(--texto-suave); }
+
+/* OS sem inspeção: "Última inspeção" do tanque/cliente — compacto, divisória. */
+.os-ultima { margin-top: var(--esp-3); padding-top: var(--esp-3); border-top: 1px solid var(--borda); }
+.os-ultima-titulo { margin: 0 0 var(--esp-1); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cinza); }
+.os-ultima-dados { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--esp-1) var(--esp-4); font-size: 13px; }
+.os-ultima-dados dt { color: var(--cinza); font-size: 12px; }
+.os-ultima-dados dd { margin: 0; color: var(--texto); overflow-wrap: anywhere; }
+.os-ultima-dados a { color: var(--primaria); }
 
 /* Barra de ações da fase — logo abaixo, separada por divisória. Recebe o
    foco depois de uma ação de fase (antes era o card "Ações desta fase"). */
