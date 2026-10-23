@@ -39,7 +39,8 @@ export const metadata: Metadata = {
     // Variante otimizada para 16–32 px (borda dourada no contorno, letras mais cheias).
     icon: "/assets/asp-badge-16.svg",
     shortcut: "/assets/asp-badge-16.svg",
-    apple: "/apple-touch-icon.png",
+    // iOS: 180×180 sem transparência (o iOS pinta o transparente de preto).
+    apple: { url: "/icons/apple-touch-180-v2.png", sizes: "180x180", type: "image/png" },
   },
   appleWebApp: {
     capable: true,
