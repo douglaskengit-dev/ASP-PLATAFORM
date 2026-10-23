@@ -149,7 +149,7 @@ export default function EncerramentoOS({ inspecaoId, perfil, versao, onMudou }: 
           <div><button className="btn-azul btn-sec" onClick={() => { setReabrindo(true); setTentou(false); setMotivo(""); setErro(null); }}>↺ Reabrir OS</button></div>
         )}
         {reabrindo && (
-          <div className="val-contato">
+          <div className="bloco-plano">
             <label style={{ fontWeight: 600, fontSize: 13 }} htmlFor="motivo-reabrir">Motivo da reabertura *</label>
             <textarea id="motivo-reabrir" rows={3} value={motivo} maxLength={1000} onChange={(e) => setMotivo(e.target.value)}
               placeholder="Ex.: cliente pediu correção na data do relatório de execução"
@@ -207,7 +207,7 @@ export default function EncerramentoOS({ inspecaoId, perfil, versao, onMudou }: 
           <MensagensCampo r={validacao} campo="data" mostrarErros={tentou || !!data} />
 
           {manual && (
-            <div className="val-contato">
+            <div className="bloco-plano">
               <strong style={{ fontSize: 13.5 }}>Encerramento manual — ignora {pend.length} pendência(s)</strong>
               <label htmlFor="justificativa-enc" style={{ fontWeight: 600, fontSize: 13 }}>Justificativa *</label>
               <textarea id="justificativa-enc" rows={3} value={justificativa} maxLength={1000}

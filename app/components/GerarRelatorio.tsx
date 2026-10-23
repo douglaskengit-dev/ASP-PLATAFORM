@@ -687,7 +687,7 @@ export default function GerarRelatorio({
     if (!coletaFotos) return null;
     const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.coleta);
     return (
-      <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
+      <div className="rel-bloco">
         <strong style={{ fontSize: 13.5 }}>
           Fotos da coleta de execução <span className="detalhe">— {minhas.length} carregada(s) automaticamente</span>
         </strong>
@@ -1238,10 +1238,7 @@ export default function GerarRelatorio({
   }) {
     const on = ativo(numero);
     return (
-      <div style={{
-        border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px",
-        opacity: on ? 1 : 0.55, background: on ? "transparent" : "var(--bg-suave)",
-      }}>
+      <div className="rel-bloco" style={{ opacity: on ? 1 : 0.55 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontWeight: 700, fontSize: 13.5 }}>
           <input type="checkbox" checked={on}
             onChange={(e) => setVisiveis((v) => ({ ...v, [numero]: e.target.checked }))} />
@@ -1429,7 +1426,7 @@ export default function GerarRelatorio({
           de figura em Arial 10. {qtdOcultos > 0 && <strong>{qtdOcultos} tópico(s) oculto(s) — os demais são renumerados.</strong>}
         </p>
 
-        <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
+        <div className="rel-bloco">
           <label style={rotulo}>Medição utilizada <span className="detalhe">(define altura, diâmetro, capacidade e volume)</span></label>
           {coletas.length === 0 ? (
             <p className="vazio" style={{ margin: 0 }}>Nenhuma medição salva nesta OS — os campos automáticos ficam vazios.</p>
@@ -1603,7 +1600,7 @@ export default function GerarRelatorio({
           {/* Horários da operação: alimentam o texto padrão de Observações do
               POP 001, na ordem em que os marcadores aparecem no modelo. */}
           {limpeza && (
-          <div style={{ border: "1px solid var(--borda)", borderRadius: 8, padding: 10 }}>
+          <div className="rel-sub">
             <strong style={{ fontSize: 12.5 }}>Horários da operação <span className="detalhe">(texto padrão do procedimento)</span></strong>
             <div style={{ ...grade, marginTop: 6 }}>
               <div><label style={rotulo}>Data</label>
@@ -1667,7 +1664,7 @@ export default function GerarRelatorio({
         {/* Anexos existe só no modelo do POP 001 e numa posição diferente da do
             modelo de batimetria, por isso não entra na lista numerada: o
             gerador o localiza pelo título. Em modelo sem "Anexos", é ignorado. */}
-        <div className="card" style={{ margin: 0 }}>
+        <div className="rel-bloco">
           <strong style={{ fontSize: 13.5 }}>
             Anexos <span className="detalhe">(usado quando o modelo tem o tópico “Anexos”)</span>
           </strong>
@@ -1757,7 +1754,7 @@ export default function GerarRelatorio({
               </p>
             )}
             {subs8.map((st, i) => (
-              <div key={i} style={{ marginTop: 10, padding: 10, border: "1px solid var(--borda)", borderRadius: 8 }}>
+              <div key={i} className="rel-sub" style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>8.{i + 1}</strong>
                   <input style={{ ...campo, flex: 1, minWidth: 160 }} placeholder="Título do subtópico * (ex.: Teto)"
@@ -1784,7 +1781,7 @@ export default function GerarRelatorio({
         {/* Seções extras do procedimento: entram aqui, antes da Conclusão,
             exatamente como sairão no documento. O título vem do Catálogo. */}
         {extras.length > 0 && (
-          <div className="card" style={{ margin: 0 }}>
+          <div className="rel-bloco">
             <strong style={{ fontSize: 13.5 }}>
               Tópicos de {proc?.codigo} <span className="detalhe">(definidos no Catálogo)</span>
             </strong>
@@ -1803,7 +1800,7 @@ export default function GerarRelatorio({
             no modelo — aqui só entram os valores medidos e as fotos, na ordem
             das vagas. Em modelo sem essas vagas, nada disso é usado. */}
         {limpeza && (
-        <div className="card" style={{ margin: 0 }}>
+        <div className="rel-bloco">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ fontSize: 13.5 }}>
               Análise Físico Química e Laboratorial <span className="detalhe">— {d.procedimento}</span>
@@ -1913,7 +1910,7 @@ export default function GerarRelatorio({
           });
         })}
 
-        <div style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" }}>
+        <div className="rel-bloco">
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
           <div style={{ ...grade, marginTop: 8 }}>
             {SelectPessoa("elaboradoPor", "Relatório elaborado por (Operações)", operacoes)}

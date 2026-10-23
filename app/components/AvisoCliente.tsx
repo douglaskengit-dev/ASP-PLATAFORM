@@ -12,10 +12,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { AVISO_CLIENTE_MAX, validarAvisoCliente } from "@/lib/validacao";
 
-export default function AvisoCliente({ clienteId, compacto = false }: {
+export default function AvisoCliente({ clienteId, compacto = false, faixa = false }: {
   clienteId?: string | null;
   /** Versão reduzida, para uso dentro de outro card. */
   compacto?: boolean;
+  /** Faixa fina, sem moldura (cabeçalho da OS). Sem aviso cadastrado, quem
+   *  pode editar vê só o link "Adicionar aviso do cliente". */
+  faixa?: boolean;
 }) {
   const [avisos, setAvisos] = useState("");
   const [podeEditar, setPodeEditar] = useState(false);
@@ -52,6 +55,25 @@ export default function AvisoCliente({ clienteId, compacto = false }: {
   if (!clienteId) return null;
   // Sem aviso e sem permissão: não ocupa espaço na tela.
   if (!avisos && !podeEditar) return null;
+
+  const abrirEdicao = () => { setRascunho(avisos); setEditando(true); };
+  if (faixa && !editando) {
+    if (!avisos) {
+      return (
+        <div style={{ marginTop: 4 }}>
+          <button type="button" className="secao-link" onClick={abrirEdicao}>+ Adicionar aviso do cliente</button>
+        </div>
+      );
+    }
+    return (
+      <div className="faixa-alerta" role="note" aria-label="Avisos do cliente">
+        <p className="faixa-alerta-texto" style={{ margin: 0 }}>
+          <span className="faixa-alerta-rotulo">⚠ Aviso do cliente</span>{avisos}
+        </p>
+        {podeEditar && <button type="button" className="faixa-alerta-acao" onClick={abrirEdicao}>Editar</button>}
+      </div>
+    );
+  }
 
   const moldura: React.CSSProperties = {
     border: "1px solid #dc2626",

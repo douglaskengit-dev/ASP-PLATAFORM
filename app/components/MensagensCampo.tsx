@@ -30,14 +30,25 @@ export function MensagensCampo({ r, campo, mostrarErros = true, children }: {
   );
 }
 
-export function ResumoValidacao({ r, rotulos = {}, mostrarErros = true }: {
+export function ResumoValidacao({ r, rotulos = {}, mostrarErros = true, recolhivel = false }: {
   r: ResultadoValidacao;
   rotulos?: Record<string, string>;
   mostrarErros?: boolean;
+  /** Só avisos (⚠️, sem ⛔): mostra uma linha "N avisos" que abre a lista.
+   *  Erros continuam sempre abertos. */
+  recolhivel?: boolean;
 }) {
   const { erros, avisos } = resumoValidacao(r, rotulos);
   const e = mostrarErros ? erros : [];
   if (!e.length && !avisos.length) return null;
+  if (recolhivel && !e.length) {
+    return (
+      <details className="val-resumo val-recolhivel" role="status">
+        <summary>⚠️ {avisos.length} aviso{avisos.length === 1 ? "" : "s"} — confira (não impede)</summary>
+        <ul>{avisos.map((m, i) => <li key={i}>{m}</li>)}</ul>
+      </details>
+    );
+  }
   return (
     <div className="val-resumo" role="status">
       {e.length > 0 && (

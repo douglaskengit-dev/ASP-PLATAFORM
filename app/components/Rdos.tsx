@@ -545,12 +545,12 @@ export default function Rdos({
           {inspecaoId ? "Nenhum RDO cobre esta OS ainda." : "Nenhum RDO neste projeto."}
         </p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="os-lista">
           {visiveis.map((r) => {
             const emDia = arquivoEmDia(r);
             const nomes = nomesCobertos(r);
             return (
-              <div key={r.id} className="linha-item" style={{ borderLeft: "3px solid var(--borda)", paddingLeft: 12, marginTop: 0 }}>
+              <div key={r.id} className="linha-item os-linha">
                 <div className="linha-texto">
                   <div style={{ color: "var(--texto)" }}>
                     <strong>RDO nº {numeroRdo(r.numero)}</strong> · {dataBr(r.data)}

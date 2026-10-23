@@ -199,9 +199,9 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
       {entregas.length === 0 ? (
         <p className="vazio" style={{ margin: 0 }}>{carregado ? "Nenhuma entrega registrada." : "Carregando…"}</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="os-lista">
           {entregas.map((e) => (
-            <div key={e.id} className="linha-item" style={{ borderLeft: "3px solid var(--primaria)", paddingLeft: 12, marginTop: 0 }}>
+            <div key={e.id} className="linha-item os-linha">
               <div className="linha-texto">
                 <div style={{ color: "var(--texto)" }}>
                   <strong>📦 {dataBrCompleta(e.data)}</strong> — {e.contato_nome || "contato removido"} · {rotuloMeio(e.meio, e.meio_outro)}
@@ -266,12 +266,12 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
                   </button>
                 )}
               </div>
-              {ativos.length === 0 && <p className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ O cliente não tem contatos cadastrados — cadastre quem recebeu.</p>}
+              {ativos.length === 0 && <p className="val-msg val-aviso aviso-plano" style={{ margin: "4px 0 0" }}>⚠️ O cliente não tem contatos cadastrados — cadastre quem recebeu.</p>}
               <MensagensCampo r={validacao} campo="contato" mostrarErros={tentou} />
             </div>
 
             {novoContato && (
-              <div className="val-contato">
+              <div className="bloco-plano">
                 <strong style={{ fontSize: 13.5 }}>Novo contato do cliente</strong>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
                   {campoContato("nomeCompleto", "Nome completo *")}
@@ -289,8 +289,8 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
               </div>
             )}
 
-            <fieldset style={{ border: "1px solid var(--borda)", borderRadius: 8, padding: "8px 12px", margin: 0 }}>
-              <legend style={{ fontWeight: 600, fontSize: 13 }}>Arquivos entregues *</legend>
+            <fieldset style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }}>
+              <legend style={{ fontWeight: 600, fontSize: 13, padding: 0, marginBottom: 2 }}>Arquivos entregues *</legend>
               {disponiveis.length === 0 ? (
                 <p className="vazio" style={{ margin: 0 }}>Nenhum documento final nesta OS (relatório aprovado/assinado, laudo, RDO .docx ou anexo).</p>
               ) : disponiveis.map((a) => (

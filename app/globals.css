@@ -770,9 +770,6 @@ img, svg, video, canvas, iframe, table { max-width: 100%; }
   color: var(--primaria); font: inherit; font-size: 13px; font-weight: 600; border-radius: 6px;
 }
 .secao-link:hover { text-decoration: underline; }
-/* Card de ações recebe o foco depois de uma ação de fase. */
-.card-acoes:focus { outline: none; }
-.card-acoes:focus-visible { outline: 2px solid var(--primaria); outline-offset: 2px; }
 
 /* ---- RDO (Registro Diário de Operação) — formulário ----
  * Pensado para o celular em campo: uma coluna até onde couber, alvos de
@@ -869,4 +866,158 @@ input.val-invalido, select.val-invalido { border-color: #b3261e; }
 .val-acoes > button { min-height: 44px; }
 @media (max-width: 520px) {
   .val-acoes > button { flex: 1 1 100%; }
+}
+
+/* ==========================================================================
+   MENOS CAIXAS — página da OS e telas ligadas a ela
+   Uma superfície por área (cabeçalho da OS; lista de seções) e, dentro dela,
+   hierarquia por tipografia e divisórias — nada de card dentro de card.
+   Escala de espaçamento: 4 · 8 · 12 · 16 · 24 px.
+   Aviso (⚠️) tem UM estilo: texto âmbar com filete à esquerda, sem caixa.
+   ========================================================================== */
+:root {
+  --esp-1: 4px; --esp-2: 8px; --esp-3: 12px; --esp-4: 16px; --esp-5: 24px;
+  --cor-aviso: #92400e; --filete-aviso: #d97706;
+  --cor-alerta-cliente: #b91c1c;
+}
+[data-theme="dark"] { --cor-aviso: #fbbf24; --filete-aviso: #b45309; --cor-alerta-cliente: #f87171; }
+
+/* ---- Cabeçalho único da OS: título, metadados, fase e ações ---- */
+.os-cab { padding: var(--esp-4) var(--esp-5); margin: var(--esp-2) 0 var(--esp-4); }
+.os-cab-voltar { display: inline-flex; align-items: center; min-height: 32px; color: var(--primaria); text-decoration: none; font-size: 13px; }
+.os-cab-voltar:hover { text-decoration: underline; }
+.os-cab-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--esp-2); flex-wrap: wrap; }
+.os-titulo { margin: 0; font-size: 21px; line-height: 1.25; display: flex; align-items: center; gap: var(--esp-1); flex-wrap: wrap; color: var(--texto); overflow-wrap: anywhere; }
+.os-sub { margin: 2px 0 0; font-size: 13px; color: var(--cinza); overflow-wrap: anywhere; }
+/* Metadados em linha (procedimento, tanque): texto, não formulário. O botão
+   de editar é o próprio item — alvo ≥ 36px no mouse, 44px no toque. */
+.os-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--esp-4); margin-top: var(--esp-1); font-size: 13px; color: var(--texto-suave); }
+.os-meta-item { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; min-width: 0; overflow-wrap: anywhere; }
+.os-meta-rotulo { color: var(--cinza); flex-shrink: 0; white-space: nowrap; }
+.os-meta-valor { min-width: 0; }
+.os-meta-valor { color: var(--texto); font-weight: 600; }
+button.os-meta-item {
+  border: none; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left;
+  padding: 0 6px; margin: 0 -6px; border-radius: 6px;
+}
+button.os-meta-item:hover { background: var(--bg-suave); }
+button.os-meta-item:hover .os-meta-lapis { opacity: 1; }
+button.os-meta-item:focus-visible { outline: 2px solid var(--primaria); outline-offset: 1px; }
+.os-meta-lapis { color: var(--primaria); opacity: .75; font-size: 13px; }
+.os-meta-status { font-size: 12.5px; color: var(--cinza); }
+@media (pointer: coarse) { .os-meta-item, .os-cab-voltar { min-height: 44px; } }
+
+/* Aviso do cliente / OS encerrada: faixa fina, sem moldura. */
+.faixa-alerta {
+  display: flex; gap: var(--esp-1) var(--esp-2); align-items: baseline; flex-wrap: wrap;
+  margin-top: var(--esp-3); padding: 6px var(--esp-3);
+  border-left: 3px solid var(--cor-alerta-cliente); border-radius: 0 6px 6px 0;
+  background: rgba(220, 38, 38, 0.06); font-size: 13.5px; color: var(--texto);
+}
+.faixa-alerta.ok { border-left-color: #16a34a; background: rgba(22, 163, 74, 0.07); }
+.faixa-alerta-texto { flex: 1 1 240px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.faixa-alerta-rotulo { color: var(--cor-alerta-cliente); font-weight: 700; margin-right: 6px; }
+.faixa-alerta.ok .faixa-alerta-rotulo { color: #16a34a; }
+.faixa-alerta-acao {
+  min-height: 32px; padding: 0 6px; border: none; background: none; cursor: pointer; border-radius: 4px;
+  color: var(--cor-alerta-cliente); font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline;
+}
+.faixa-alerta-acao:focus-visible { outline: 2px solid var(--primaria); outline-offset: 1px; }
+@media (pointer: coarse) { .faixa-alerta-acao { min-height: 44px; } }
+
+/* Fase atual: uma linha + barra fina; lista das 10 fases sob demanda. */
+.os-fase { margin-top: var(--esp-3); }
+.os-fase-linha { display: flex; justify-content: space-between; align-items: center; gap: 0 var(--esp-3); flex-wrap: wrap; }
+.os-fase-nome { font-size: 13.5px; color: var(--texto); }
+.os-fase .fu-progresso { height: 6px; }
+
+/* Barra de ações da fase — logo abaixo, separada por divisória. Recebe o
+   foco depois de uma ação de fase (antes era o card "Ações desta fase"). */
+.os-acoes { margin-top: var(--esp-4); padding-top: var(--esp-3); border-top: 1px solid var(--borda); display: flex; flex-direction: column; gap: var(--esp-2); scroll-margin-top: 80px; }
+.os-acoes:focus { outline: none; }
+.os-acoes:focus-visible { outline: 2px solid var(--primaria); outline-offset: 4px; border-radius: 4px; }
+.os-cab .os-acoes-titulo { margin: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cinza); }
+.os-acoes-botoes { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.os-acoes-botoes .btn-azul { min-height: 44px; }
+.os-acoes .vazio, .os-acoes > .detalhe { margin: 0; }
+
+/* ---- Lista de seções: UMA superfície, seções separadas por divisória ---- */
+.os-secoes { padding: 0; }
+.os-secoes-topo {
+  display: flex; justify-content: space-between; align-items: center; gap: 0 var(--esp-4); flex-wrap: wrap;
+  padding: 0 var(--esp-5); border-bottom: 1px solid var(--borda);
+}
+.os-secoes-topo .secoes-controles { margin: 0; }
+.os-secoes .os-secoes-rotulo { margin: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cinza); }
+.os-secoes > .secao { padding: var(--esp-2) var(--esp-5) var(--esp-3); min-width: 0; }
+.os-secoes > .secao + .secao { border-top: 1px solid var(--borda); }
+.secao-titulo { font-size: 15.5px; }
+.secao-corpo { margin-top: var(--esp-1); padding-bottom: var(--esp-1); }
+/* Âncora (#relatorios…) não fica escondida atrás da barra fixa do topo. */
+.secao { scroll-margin-top: 72px; }
+
+/* Linhas de lista dentro das seções: divisória em vez de caixa/filete. */
+.os-linha { padding: 10px 0; border-top: 1px solid var(--borda); min-width: 0; }
+.os-linha.linha-item { margin-top: 0; }
+.os-lista { display: flex; flex-direction: column; }
+.os-lista > .os-linha:first-child { border-top: none; padding-top: var(--esp-1); }
+.os-linha-titulo { color: var(--texto); font-weight: 700; }
+.os-linha-titulo.pendente { color: #c2410c; }
+[data-theme="dark"] .os-linha-titulo.pendente { color: #fb923c; }
+
+/* Aviso único: texto âmbar com filete, sem caixa. */
+.aviso-plano { border-left: 3px solid var(--filete-aviso); padding: 2px 0 2px 10px; color: var(--cor-aviso); font-size: 13px; }
+
+/* Resumo de validação: filete em vez de caixa (vale para todo o app). */
+.val-resumo { border: none; border-left: 3px solid var(--filete-aviso); border-radius: 0; background: none; padding: 2px 0 2px 10px; }
+.val-resumo:has(.val-erro) { border-left-color: #b3261e; }
+details.val-resumo > summary {
+  cursor: pointer; min-height: 32px; display: flex; align-items: center; gap: 6px;
+  color: var(--cor-aviso); font-weight: 600; font-size: 13px; list-style: none; border-radius: 4px;
+}
+details.val-resumo > summary::-webkit-details-marker { display: none; }
+details.val-resumo > summary::after { content: "▸"; color: var(--cinza); transition: transform .15s; }
+details.val-resumo[open] > summary::after { transform: rotate(90deg); }
+details.val-resumo > summary:focus-visible { outline: 2px solid var(--primaria); outline-offset: 2px; }
+@media (pointer: coarse) { details.val-resumo > summary { min-height: 44px; } }
+
+/* Bloco de formulário embutido (reabrir / encerrar manualmente). */
+.bloco-plano { display: flex; flex-direction: column; gap: var(--esp-2); padding-left: var(--esp-3); border-left: 3px solid var(--borda); }
+
+/* RDO (formulário): blocos viram trechos com título e divisória. */
+.rdo-form { gap: 0; }
+.rdo-bloco { border: none; border-top: 1px solid var(--borda); border-radius: 0; padding: var(--esp-4) 0; }
+.rdo-form > .rdo-bloco:first-child { border-top: none; padding-top: 0; }
+.rdo-bloco h4 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--cinza); }
+.rdo-aviso { background: none; border-left: 3px solid var(--filete-aviso); border-radius: 0; padding: 2px 0 2px 10px; color: var(--cor-aviso); }
+[data-theme="dark"] .rdo-aviso { background: none; color: var(--cor-aviso); }
+.rdo-rodape { padding-top: var(--esp-3); margin-top: var(--esp-2); border-top: 1px solid var(--borda); }
+@media (max-width: 520px) { .rdo-bloco { padding: var(--esp-3) 0; } }
+
+/* Relatório (GerarRelatorio): tópicos sem moldura, divididos por linha. */
+.rel-bloco { border-top: 1px solid var(--borda); padding: var(--esp-3) 0 0; min-width: 0; }
+.rel-sub { border-left: 3px solid var(--borda); padding: 2px 0 2px var(--esp-3); min-width: 0; }
+
+/* Lista de OSs do projeto: uma superfície, OSs separadas por divisória. */
+.lista-os { padding: 0; overflow: hidden; }
+.lista-os-item { position: relative; }
+.lista-os-item + .lista-os-item { border-top: 1px solid var(--borda); }
+.lista-os-link {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 14px var(--esp-5); text-decoration: none; color: inherit;
+}
+.lista-os-link:hover { background: var(--bg-suave); }
+.lista-os-link:focus-visible { outline: 2px solid var(--primaria); outline-offset: -2px; }
+.lista-os-link .fu-progresso { height: 6px; }
+
+@media (max-width: 820px) {
+  .os-cab { padding: var(--esp-3) 14px; }
+  .os-titulo { font-size: 19px; }
+  .os-secoes-topo, .os-secoes > .secao { padding-left: 14px; padding-right: 14px; }
+  .lista-os-link { padding: 12px 14px; }
+}
+@media (max-width: 520px) {
+  .os-cab { padding: var(--esp-3) 12px; }
+  .os-secoes-topo, .os-secoes > .secao { padding-left: 12px; padding-right: 12px; }
+  .os-acoes-botoes > .btn-azul { flex: 1 1 100%; }
 }

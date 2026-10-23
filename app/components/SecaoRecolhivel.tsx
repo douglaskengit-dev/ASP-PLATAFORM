@@ -31,7 +31,9 @@ export default function SecaoRecolhivel({ id, titulo, resumo, acoesCabecalho, ab
   const idResumo = `${id}-resumo`;
   const mostrarResumo = !aberta && resumo != null && resumo !== "";
   return (
-    <section id={id} className="card secao" style={style}>
+    // Sem card próprio: as seções ficam numa superfície única (.os-secoes)
+    // separadas por divisória — nada de caixa dentro de caixa.
+    <section id={id} className="secao" style={style}>
       <div className="secao-topo">
         <div className="secao-cabeca">
           <h3 className="secao-titulo">

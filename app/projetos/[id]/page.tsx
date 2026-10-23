@@ -318,9 +318,9 @@ export default function ProjetoDetalhePage() {
         inspLixeira.length === 0 ? (
           <p className="vazio">A lixeira de OSs está vazia.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="card lista-os">
             {inspLixeira.map((i) => (
-              <div key={i.id} className="item" style={{ justifyContent: "space-between" }}>
+              <div key={i.id} className="lista-os-item linha-item" style={{ padding: "12px 20px", marginTop: 0 }}>
                 <strong style={{ color: "var(--texto)" }}>{i.identificacao} <span className="detalhe" style={{ fontWeight: 400 }}>· fase {i.fase}</span></strong>
                 <span style={{ display: "flex", gap: 8 }}>
                   <button className="btn-dl btn-sec" onClick={() => restaurarInspecao(i.id)}>↩ Restaurar</button>
@@ -333,13 +333,13 @@ export default function ProjetoDetalhePage() {
       ) : inspecoes.length === 0 ? (
         <p className="vazio">Nenhuma OS. Adicione um tanque/ponto para iniciar o fluxo.</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="card lista-os">
           {inspecoes.map((i) => {
             const pct = Math.round(((i.fase - 1) / (ULTIMA_FASE - 1)) * 100);
             const data = proximaData(i);
             return (
-              <div key={i.id} style={{ position: "relative" }}>
-                <Link href={`/inspecoes/${i.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
+              <div key={i.id} className="lista-os-item">
+                <Link href={`/inspecoes/${i.id}`} className="lista-os-link">
                   <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, paddingRight: podeExcluir ? 28 : 0 }}>
                     <strong style={{ color: "var(--texto)" }}>{i.identificacao}</strong>
                     <span className="detalhe" style={{ margin: 0 }}>
@@ -354,14 +354,15 @@ export default function ProjetoDetalhePage() {
                       {" · "}{formatarDataHora(i.ultima_acao.data_autenticacao || i.ultima_acao.criado_em)}
                     </span>
                   )}
-                  <div className="fu-progresso" style={{ marginTop: 10 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
+                  <div className="fu-progresso" style={{ marginTop: 8 }} title={`Fase ${i.fase} de ${ULTIMA_FASE}`}>
                     <div className="fu-barra" style={{ width: `${pct}%` }} />
                   </div>
                 </Link>
                 {podeExcluir && !i.encerrada_em && (
                   <button className="fu-icone-btn lixeira" title="Excluir OS (lixeira)"
                     onClick={() => excluirInspecao(i.id)}
-                    style={{ position: "absolute", top: 12, right: 12 }}>🗑</button>
+                    aria-label={`Excluir OS ${i.identificacao} (lixeira)`}
+                    style={{ position: "absolute", top: 8, right: 12, minWidth: 36, minHeight: 36 }}>🗑</button>
                 )}
               </div>
             );
@@ -443,7 +444,7 @@ export default function ProjetoDetalhePage() {
             {/* Tanque: cadastrado aqui uma vez e reaproveitado por todo
                 relatório desta inspeção. */}
             <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 12 }}>
-              <strong style={{ fontSize: 13 }}>Tanque</strong>
+              <strong style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--cinza)" }}>Tanque</strong>
               <p className="detalhe" style={{ margin: "2px 0 10px" }}>
                 Dimensões, capacidade e material — saem na identificação do tanque de todo relatório desta OS.
               </p>

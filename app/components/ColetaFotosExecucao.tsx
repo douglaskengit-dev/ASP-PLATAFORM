@@ -298,8 +298,7 @@ export default function ColetaFotosExecucao({
     const local = locais.filter((l) => l.slot === slot.id).pop();
     const valor = valorDoSlot(registro, slot.id);
     return (
-      <div key={slot.id} style={{ border: "1px solid var(--borda)", borderRadius: 10, padding: 10,
-        display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+      <div key={slot.id} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <strong style={{ fontSize: 13, minWidth: 0, overflowWrap: "anywhere" }}>{slot.rotulo}</strong>
           <Selo ok={completo} texto={completo ? "✓" : "pendente"} />
@@ -341,8 +340,8 @@ export default function ColetaFotosExecucao({
     const meus = locais.filter((l) => l.slot === slot.id);
     const n = fotos.length + meus.length;
     return (
-      <div key={slot.id} style={{ gridColumn: "1 / -1", border: "1px solid var(--borda)", borderRadius: 10, padding: 10,
-        display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+      <div key={slot.id} style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 6, minWidth: 0,
+        paddingTop: 8, borderTop: "1px dashed var(--borda)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <strong style={{ fontSize: 13 }}>{slot.rotulo}</strong>
           <Selo ok={completo} texto={`${completo ? "✓ " : ""}${n} de ${slot.minimo} (mín.)`} />
@@ -386,7 +385,7 @@ export default function ColetaFotosExecucao({
           </label>
         )}
         {secao.flag && aguaPotavel && !exigida && (
-          <p className="val-msg val-aviso" style={{ margin: "6px 0 0" }}>
+          <p className="val-msg val-aviso aviso-plano" style={{ margin: "6px 0 0" }}>
             ⚠️ O procedimento desta OS é de água potável, mas esta coleta está desmarcada — as fotos e análises não serão cobradas nem entram no relatório.
           </p>
         )}
@@ -407,7 +406,7 @@ export default function ColetaFotosExecucao({
             )}
             {secao.id === "limpeza" && <MensagensCampo r={validacao} campo="limpeza_confirmada" />}
             {secao.id === "agua_depois" && <MensagensCampo r={validacao} campo="agua_depois" />}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginTop: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "14px 16px", marginTop: 10 }}>
               {secao.slots.map((slot) => slot.minimo ? VagaMultipla(slot, ok(slot.id)) : VagaSimples(slot, ok(slot.id)))}
             </div>
           </>
