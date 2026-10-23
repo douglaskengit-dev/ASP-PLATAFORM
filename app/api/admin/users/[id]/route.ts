@@ -5,6 +5,7 @@ import {
   agendamentosFuturosAfetados, CAMPOS_USUARIO, carregarUsuarios, mesmaVersao, msgVersaoUsuario,
   removerDasEquipesFuturas, traduzirErroAuth, traduzirErroPerfil, type UsuarioLinha,
 } from "@/lib/asp/usuario-api";
+import { invalidarLinks, invalidarLinksPorEmail, mesmaOrigem } from "@/lib/asp/acesso-api";
 import {
   checarAlteracaoAcesso, contarAdminsAtivos, normalizarEspacos, perdeAdmin, primeiroErro, ROTULOS_USUARIO,
   SENHA_MINIMA, temErros, validarUsuario, type DadosUsuario,
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 const CAMPOS_EDITAR = new Set(["nomeCompleto", "perfil", "ativo", "funcao", "senha", "versao"]);
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  if (!mesmaOrigem(req)) return NextResponse.json({ erro: "Origem não permitida." }, { status: 403 });
   const check = await exigirAdmin();
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
 
@@ -141,6 +143,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     // Desativado: sai das equipes dos agendamentos futuros (reativar não devolve).
     if (mudaAtivo && ativo === false) {
+      // Links de convite/redefinição pendentes deixam de valer (o banco
+      // também faz isso por trigger — migração 20261104100000).
+      await invalidarLinks(alvo.id, "usuario_desativado");
       agendamentos = await removerDasEquipesFuturas({ usuario: alvo, autorId: check.profile.id });
     }
   }
@@ -168,7 +173,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
  * o banco bloqueia a exclusão para não perder o histórico — nesse caso a
  * orientação é desativá-lo.
  */
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  if (!mesmaOrigem(req)) return NextResponse.json({ erro: "Origem não permitida." }, { status: 403 });
   const check = await exigirAdmin();
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
 
@@ -195,6 +201,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     const t = traduzirErroPerfil(erroPerfil);
     return erroCampo(t.erro, "excluir", t.status);
   }
+
+  // Links pendentes deixam de valer (o perfil sumiu; a linha fica para auditoria).
+  await invalidarLinksPorEmail(alvo.email, "usuario_excluido");
 
   const { error: erroAuth } = await admin.auth.admin.deleteUser(params.id);
   if (erroAuth && erroAuth.status !== 404) {
