@@ -19,7 +19,7 @@ export async function enviarEmail(
   assunto: string,
   html: string,
   anexos?: AnexoEmail[],
-  opcoes?: { cc?: string[] }
+  opcoes?: { cc?: string[]; /** Versão em texto puro (clientes sem HTML). */ texto?: string }
 ): Promise<{ ok: boolean; ignorado?: boolean; erro?: string }> {
   const apiKey = process.env.RESEND_API_KEY;
   const remetente = process.env.EMAIL_REMETENTE || "ASP <onboarding@resend.dev>";
@@ -31,6 +31,7 @@ export async function enviarEmail(
   try {
     const body: Record<string, unknown> = { from: remetente, to: destinatarios, subject: assunto, html };
     if (copia.length > 0) body.cc = copia;
+    if (opcoes?.texto) body.text = opcoes.texto;
     if (anexos && anexos.length > 0) {
       body.attachments = anexos.map((a) => ({
         filename: a.filename,

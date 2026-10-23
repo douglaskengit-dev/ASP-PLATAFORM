@@ -202,6 +202,7 @@ h4 { font-size: var(--fs-md); }
   font-size: 18px; line-height: 1; color: var(--cinza);
 }
 .login-olho:hover { background: var(--bg-hover); }
+.login-esqueci { align-self: flex-end; font-size: var(--fs-sm); font-weight: 600; padding: 2px 0; }
 .card-login .btn-azul { width: 100%; min-height: 46px; font-size: 15px; margin-top: 4px; }
 .login-rodape { font-size: var(--fs-xs); color: var(--cinza); margin: 20px 0 0; text-align: center; line-height: 1.5; }
 

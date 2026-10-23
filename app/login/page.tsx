@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import ThemeToggle from "@/app/components/ThemeToggle";
+import { CHAVE_EMAIL_ESQUECI } from "@/lib/validacao";
 
 function LoginForm() {
   const router = useRouter();
@@ -17,6 +18,15 @@ function LoginForm() {
       ? "Sua conta ainda não foi ativada por um administrador. Fale com quem cuida do sistema."
       : null
   );
+
+  function irParaEsqueci(e: React.MouseEvent<HTMLAnchorElement>) {
+    // Leva o e-mail digitado sem colocá-lo na URL.
+    try { if (email.trim()) sessionStorage.setItem(CHAVE_EMAIL_ESQUECI, email.trim()); } catch { /* sem storage */ }
+    e.preventDefault();
+    router.push(linkEsqueci);
+  }
+  const proximoAtual = searchParams.get("proximo");
+  const linkEsqueci = `/esqueci-senha${proximoAtual ? `?proximo=${encodeURIComponent(proximoAtual)}` : ""}`;
 
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
@@ -89,6 +99,7 @@ function LoginForm() {
                 {mostrarSenha ? "🙈" : "👁️"}
               </button>
             </div>
+            <a href={linkEsqueci} onClick={irParaEsqueci} className="login-esqueci">Esqueci minha senha</a>
           </div>
           <button type="submit" className="btn-azul" disabled={entrando} aria-busy={entrando}>
             {entrando ? "Entrando..." : "Entrar"}
