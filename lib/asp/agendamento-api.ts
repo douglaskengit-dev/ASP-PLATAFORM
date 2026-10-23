@@ -20,6 +20,7 @@ import { enviarPushParaUsuarios } from "@/lib/push/send";
 import {
   AgendamentoRef, ContextoAgendamento, DadosAgendamento, hojeBrasil, MembroEquipe, nomeDoCatalogo, nomesEquipamentosProcedimento,
   APP_URL_PADRAO, normalizarBaseUrl, normalizarEspacos, periodoDe, textoPeriodoLongo,
+  provedorEmail, remetenteEmail, separarRemetente,
 } from "@/lib/validacao";
 
 // Sem barra no fim (NEXT_PUBLIC_APP_URL pode vir "https://…app/" → "//inspecoes").
@@ -232,7 +233,10 @@ export async function notificarEquipe(opts: {
     titulo, descricao: mensagem,
     local: info.endereco || info.projLabel || undefined,
     data: ag.data_visita, dataFim: ag.data_fim || null, hora: ag.hora,
-    organizador: process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
+    // No SMTP (Gmail) o From efetivo pode ter sido trocado para o SMTP_USER.
+    organizador: provedorEmail(process.env) === "smtp"
+      ? separarRemetente(remetenteEmail(process.env).from).email || undefined
+      : process.env.EMAIL_REMETENTE?.match(/<(.+)>/)?.[1],
     participantes: paraEmails,
   });
   const resultado = await enviarEmail(
