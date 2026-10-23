@@ -1369,6 +1369,37 @@ begin
   end if;
 end $$;
 
+-- Segurança: só administradores alteram perfil, função, status ou e-mail
+-- (a policy gp_profiles_update deixa cada um atualizar a própria linha).
+create or replace function public.gp_profiles_protege_campos()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+  if exists (select 1 from public.gp_profiles p where p.id = auth.uid() and p.perfil = 'admin' and p.ativo) then
+    return new;
+  end if;
+  if new.perfil is distinct from old.perfil
+     or new.ativo is distinct from old.ativo
+     or new.funcao is distinct from old.funcao
+     or new.email is distinct from old.email
+     or new.id is distinct from old.id then
+    raise exception 'Somente administradores podem alterar perfil, função, status ou e-mail.'
+      using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_gp_profiles_protege_campos on public.gp_profiles;
+create trigger trg_gp_profiles_protege_campos
+  before update on public.gp_profiles
+  for each row execute function public.gp_profiles_protege_campos();
+
 
 -- PostgREST: recarrega o cache do schema.
 notify pgrst, 'reload schema';
@@ -1586,6 +1617,10 @@ select * from (
   union all
   select 'gp_profiles', 'trigger último admin ativo',
     case when exists (select 1 from pg_trigger where tgname = 'trg_gp_profiles_guarda_admin'
+      and tgrelid = 'public.gp_profiles'::regclass) then 'OK' else '*** FALTANDO ***' end
+  union all
+  select 'gp_profiles', 'trigger só admin altera perfil/função/status/e-mail',
+    case when exists (select 1 from pg_trigger where tgname = 'trg_gp_profiles_protege_campos'
       and tgrelid = 'public.gp_profiles'::regclass) then 'OK' else '*** FALTANDO ***' end
   union all
   select 'gp_profiles', 'índice e-mail único (sem caixa)',

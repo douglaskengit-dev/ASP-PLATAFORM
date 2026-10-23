@@ -89,4 +89,40 @@ begin
   end if;
 end $$;
 
+-- 4) Segurança: só administradores alteram perfil, função, status ou e-mail.
+--    A policy gp_profiles_update deixa cada usuário atualizar a PRÓPRIA linha
+--    sem restringir colunas — pelo navegador, um usuário comum poderia se
+--    promover a admin. O nome continua editável pelo próprio usuário
+--    (/api/perfil); os demais campos só por admin ativo ou pela chave de
+--    serviço (API de Administração de usuários) / SQL Editor.
+create or replace function public.gp_profiles_protege_campos()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Chave de serviço (API) e SQL Editor: auth.uid() é nulo.
+  if auth.uid() is null then
+    return new;
+  end if;
+  if exists (select 1 from public.gp_profiles p where p.id = auth.uid() and p.perfil = 'admin' and p.ativo) then
+    return new;
+  end if;
+  if new.perfil is distinct from old.perfil
+     or new.ativo is distinct from old.ativo
+     or new.funcao is distinct from old.funcao
+     or new.email is distinct from old.email
+     or new.id is distinct from old.id then
+    raise exception 'Somente administradores podem alterar perfil, função, status ou e-mail.'
+      using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_gp_profiles_protege_campos on public.gp_profiles;
+create trigger trg_gp_profiles_protege_campos
+  before update on public.gp_profiles
+  for each row execute function public.gp_profiles_protege_campos();
+
 notify pgrst, 'reload schema';
