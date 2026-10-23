@@ -1,7 +1,7 @@
 /** Permissões do fluxo ASP que não cabem só no perfil (área).
  *
  * Duas fontes, somadas:
- *   - o PERFIL (área): regras fixas abaixo (Admin/Gerência/Comercial);
+ *   - o PERFIL (área): regras fixas abaixo (Admin/Gerência/Comercial/Operações);
  *   - a FUNÇÃO do usuário: as marcas da linha de gp_funcoes, que o
  *     administrador edita em "Permissões por função".
  * A função só acrescenta direitos. No servidor, getProfileAtual() já traz
@@ -27,6 +27,12 @@ export const PERFIS_COM_DIREITO: Record<Exclude<ChavePermissaoFuncao, "lideranca
   pode_excluir_projetos: ["admin", "comercial", "gerencia"],
   pode_aprovar_medicao: ["admin", "gerencia"],
   pode_editar_revisao: ["admin", "gerencia"],
+  // Registro em campo: os mesmos perfis de PERFIS_COLETA (lib/asp/coleta-api),
+  // PERFIS da coleta de fotos e PERFIS_RDO (lib/asp/rdo-api) — que continuam
+  // valendo sozinhos para EXCLUIR/RESTAURAR coleta e RDO.
+  pode_registrar_medicao: ["admin", "operacoes", "gerencia"],
+  pode_registrar_fotos: ["admin", "operacoes", "gerencia"],
+  pode_preparar_rdo: ["admin", "operacoes", "gerencia"],
 };
 
 function porPerfil(profile: PerfilLike, chave: keyof typeof PERFIS_COM_DIREITO): boolean {
@@ -54,4 +60,33 @@ export function podeAprovarColeta(profile: PerfilLike | null): boolean {
 export function podeEditarRevisao(profile: PerfilLike | null): boolean {
   if (!profile) return false;
   return porPerfil(profile, "pode_editar_revisao") || funcaoPermite(profile, "pode_editar_revisao");
+}
+
+// ── Registro em campo (Técnico/Auxiliar acrescentam dados na execução) ──────
+// Valem para CRIAR e EDITAR. Não dão: aprovar a medição, ações de fase,
+// excluir/restaurar coleta ou RDO (lixeira), relatórios, agendamentos,
+// checklist, tanque/procedimento — essas seguem as regras de antes.
+
+/** Registrar medições / batimetria: criar e editar coletas (medidor,
+ * digitar, importar, anexar PDF; data e responsável ao salvar). Admin,
+ * Gerência e Operações (por área) ou a função com "Registrar medições". */
+export function podeRegistrarMedicao(profile: PerfilLike | null): boolean {
+  if (!profile) return false;
+  return porPerfil(profile, "pode_registrar_medicao") || funcaoPermite(profile, "pode_registrar_medicao");
+}
+
+/** Registrar a coleta de fotos da execução: enviar/trocar/remover foto de
+ * uma vaga, valores de pH/cloro e as caixinhas (água antes/depois, limpeza
+ * confirmada). Admin, Gerência e Operações ou a função com "Registrar
+ * coleta de fotos". */
+export function podeRegistrarFotos(profile: PerfilLike | null): boolean {
+  if (!profile) return false;
+  return porPerfil(profile, "pode_registrar_fotos") || funcaoPermite(profile, "pode_registrar_fotos");
+}
+
+/** Preparar RDO: criar/editar o RDO e gerar/enviar o .docx. Admin, Gerência
+ * e Operações ou a função com "Preparar RDO". */
+export function podePrepararRdo(profile: PerfilLike | null): boolean {
+  if (!profile) return false;
+  return porPerfil(profile, "pode_preparar_rdo") || funcaoPermite(profile, "pode_preparar_rdo");
 }

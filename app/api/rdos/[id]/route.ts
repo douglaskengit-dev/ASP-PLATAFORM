@@ -4,6 +4,7 @@ import { dataIsoValida } from "@/lib/asp/rdo";
 import { CAMPOS_RDO, PERFIS_RDO, MSG_DIA_DUPLICADO, bloqueiosDoRdo, erroDasInspecoes, erroDeDuplicidade, erroDosDados } from "@/lib/asp/rdo-api";
 
 import { garantirOsAberta, osDoRdo } from "@/lib/asp/os-encerrada";
+import { podePrepararRdo } from "@/lib/asp/permissoes";
 
 export const runtime = "nodejs";
 
@@ -23,10 +24,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS_RDO.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "RDO é responsabilidade de Operações." }, { status: 403 });
-  }
   const b = await req.json().catch(() => ({}));
+  // Restaurar da lixeira = inverso de excluir: só os perfis (a função
+  // "Preparar RDO" não dá). Editar: perfil OU função com "Preparar RDO".
+  if (b?.restaurar ? !PERFIS_RDO.includes(profile.perfil) : !podePrepararRdo(profile)) {
+    return NextResponse.json({
+      erro: b?.restaurar ? "Restaurar RDO da lixeira é com Operações, Gerência ou Admin." : "RDO é com Operações, Gerência, Admin ou uma função com a permissão “Preparar RDO”.",
+    }, { status: 403 });
+  }
   const supabase = getSupabaseRouteClient();
   const { data: atual } = await supabase.from("gp_rdos")
     .select("id, projeto_id, excluido_em, data, inspecoes, dados").eq("id", params.id).maybeSingle();
@@ -78,7 +83,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ ok: true, rdo: data });
 }
 
-/** Exclusão — lixeira (recuperável por 30 dias; o arquivo fica no storage). */
+/** Exclusão — lixeira (recuperável por 30 dias; o arquivo fica no storage).
+ *  Só os perfis (PERFIS_RDO): a função "Preparar RDO" NÃO exclui. */
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });

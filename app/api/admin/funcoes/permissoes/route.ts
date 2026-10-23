@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { mesmaOrigem } from "@/lib/asp/acesso-api";
 import {
-  carregarFuncoesComUso, exigirAdminFuncoes, lerCorpo, MSG_TABELA_AUSENTE, msgVersaoFuncao,
+  carregarFuncoesComUso, exigirAdminFuncoes, lerCorpo, MSG_MARCAS_AUSENTES, MSG_TABELA_AUSENTE, msgVersaoFuncao,
 } from "@/lib/asp/funcao-api";
 import { mesmaVersao } from "@/lib/asp/usuario-api";
 import { CHAVES_PERMISSAO_FUNCAO } from "@/lib/validacao";
@@ -11,7 +11,8 @@ export const runtime = "nodejs";
 
 /** Grava a matriz "Permissões por função" de uma vez (tudo ou nada):
  * { itens: [{ id, versao, pode_aprovar_medicao, pode_excluir_projetos,
- *   pode_editar_revisao, lideranca_equipe }] } — só as funções alteradas.
+ *   pode_editar_revisao, pode_registrar_medicao, pode_registrar_fotos,
+ *   pode_preparar_rdo, lideranca_equipe }] } — só as funções alteradas.
  * Se outra pessoa alterou alguma delas desde a leitura: 409 e nada grava. */
 export async function PUT(req: NextRequest) {
   if (!mesmaOrigem(req)) return NextResponse.json({ erro: "Origem não permitida." }, { status: 403 });
@@ -27,9 +28,17 @@ export async function PUT(req: NextRequest) {
     && CHAVES_PERMISSAO_FUNCAO.every((k) => it[k] === undefined || typeof it[k] === "boolean"));
   if (!valido) return NextResponse.json({ erro: "Permissões inválidas." }, { status: 400 });
 
-  const { funcoes, erro, tabelaAusente } = await carregarFuncoesComUso();
+  const { funcoes, erro, tabelaAusente, marcasAusentes } = await carregarFuncoesComUso();
   if (erro) return NextResponse.json({ erro }, { status: 500 });
   if (tabelaAusente) return NextResponse.json({ erro: MSG_TABELA_AUSENTE }, { status: 503 });
+  // Marca nova sem coluna no banco (migração pendente): mudar ela não grava —
+  // recusa em vez de fingir que salvou.
+  if (marcasAusentes.length && itens.some((it: any) => {
+    const f = funcoes.find((x) => x.id === it.id);
+    return marcasAusentes.some((k) => it[k] !== undefined && f && it[k] !== !!f[k]);
+  })) {
+    return NextResponse.json({ erro: MSG_MARCAS_AUSENTES }, { status: 503 });
+  }
   for (const it of itens) {
     const f = funcoes.find((x) => x.id === it.id);
     if (!f) return NextResponse.json({ erro: "Uma das funções foi excluída por outro administrador — recarregue.", conflitoVersao: true, funcoes }, { status: 409 });

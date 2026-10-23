@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { podeAprovarColeta } from "@/lib/asp/permissoes";
+import { podeAprovarColeta, podeRegistrarMedicao } from "@/lib/asp/permissoes";
 import { removerArquivos, uploadArquivo } from "@/lib/processos/arquivos";
 import {
   conflitoAoRestaurarColeta, contextoColeta, examinarPdf, hashMedicao, lerCorpoColeta, PERFIS_COLETA,
@@ -70,12 +70,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ ok: true, aprovada: true });
   }
 
-  if (!PERFIS_COLETA.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "Coleta é responsabilidade de Operações." }, { status: 403 });
-  }
-
-  // Restaurar da lixeira (dentro dos 30 dias) — sem trazer a aprovação.
+  // Restaurar da lixeira (dentro dos 30 dias) — sem trazer a aprovação. É o
+  // inverso de excluir: só os perfis da coleta (a função não dá).
   if (corpo.restaurar === true) {
+    if (!PERFIS_COLETA.includes(profile.perfil)) {
+      return NextResponse.json({ erro: "Restaurar coleta da lixeira é com Operações, Gerência ou Admin." }, { status: 403 });
+    }
     const conflito = await conflitoAoRestaurarColeta(params.id);
     if (conflito) return NextResponse.json({ erro: conflito }, { status: 409 });
     const { data, error } = await admin.from("gp_coletas")
@@ -86,6 +86,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ ok: true, coleta: data });
   }
 
+  // Editar: perfil (Admin/Gerência/Operações) OU função com "Registrar medições".
+  if (!podeRegistrarMedicao(profile)) {
+    return NextResponse.json({ erro: "Registrar medição é com Operações, Gerência, Admin ou uma função com a permissão “Registrar medições / batimetria”." }, { status: 403 });
+  }
   if (coleta.excluido_em) return NextResponse.json({ erro: "A coleta está na lixeira — restaure antes de editar." }, { status: 400 });
   const cx = await contextoColeta(coleta.inspecao_id);
   if (!cx) return NextResponse.json({ erro: "OS não encontrada (ou está na lixeira)." }, { status: 404 });
@@ -156,7 +160,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 /** Exclui a coleta. Padrão do sistema: vai para a lixeira (recuperável por
  * 30 dias) e PERDE a aprovação — restaurar não a devolve. Com ?definitivo=1,
- * apaga de vez. */
+ * apaga de vez. Só os perfis da coleta: a função "Registrar medições" NÃO
+ * exclui. */
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {

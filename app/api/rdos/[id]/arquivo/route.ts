@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { uploadArquivo, removerArquivos, DOCX_MIME } from "@/lib/processos/arquivos";
 import { caminhoRdo } from "@/lib/asp/rdo";
-import { PERFIS_RDO } from "@/lib/asp/rdo-api";
+import { podePrepararRdo } from "@/lib/asp/permissoes";
 import { garantirOsAberta, osDoRdo } from "@/lib/asp/os-encerrada";
 
 export const runtime = "nodejs";
@@ -18,8 +18,9 @@ const MAX_BYTES = 3 * 1024 * 1024;
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!PERFIS_RDO.includes(profile.perfil)) {
-    return NextResponse.json({ erro: "RDO é responsabilidade de Operações." }, { status: 403 });
+  // Gerar/enviar o .docx: perfil OU função com "Preparar RDO".
+  if (!podePrepararRdo(profile)) {
+    return NextResponse.json({ erro: "RDO é com Operações, Gerência, Admin ou uma função com a permissão “Preparar RDO”." }, { status: 403 });
   }
   const supabase = getSupabaseRouteClient();
   const { data: rdo } = await supabase.from("gp_rdos")

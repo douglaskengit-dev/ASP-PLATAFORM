@@ -132,7 +132,7 @@ function limparDados(d: DadosRdo, cloroUnidade: UnidadeCloro): DadosRdo {
 
 export default function Rdos({
   projetoId, inspecaoId, codigoProjeto, cliente, clienteId,
-  podeEditar, somenteLeitura, embutido, pedidoNovo, onMudar, onErro,
+  podeEditar, podeExcluir, somenteLeitura, embutido, pedidoNovo, onMudar, onErro,
 }: {
   projetoId: string;
   /** Página da inspeção: a lista mostra os RDOs que a cobrem, e ela é a
@@ -141,7 +141,11 @@ export default function Rdos({
   codigoProjeto?: string | null;
   cliente?: string | null;
   clienteId?: string | null;
+  /** Criar/editar/gerar o .docx (perfil ou função com "Preparar RDO"). */
   podeEditar?: boolean;
+  /** Excluir (lixeira): só os perfis Admin/Gerência/Operações. Sem a prop,
+   *  vale podeEditar (comportamento de antes). */
+  podeExcluir?: boolean;
   somenteLeitura?: boolean;
   embutido?: boolean;
   /** Muda (incrementa) quando a página pede um RDO novo — o botão fica no
@@ -583,8 +587,10 @@ export default function Rdos({
                         </button>
                       )}
                       <button className="btn-dl btn-sec" disabled={ocupado === r.id} onClick={() => abrirEdicao(r)}>Editar</button>
-                      <button className="btn-dl btn-sec btn-perigo"
-                        disabled={ocupado === r.id} onClick={() => excluir(r)}>Excluir</button>
+                      {(podeExcluir ?? podeEditar) && (
+                        <button className="btn-dl btn-sec btn-perigo"
+                          disabled={ocupado === r.id} onClick={() => excluir(r)}>Excluir</button>
+                      )}
                     </>
                   )}
                 </span>

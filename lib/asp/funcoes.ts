@@ -7,11 +7,14 @@
  * outro erro: nenhuma permissão pela função (falha fechada). */
 import {
   CHAVES_PERMISSAO_FUNCAO, FUNCOES_PADRAO, ordenarFuncoes, permissoesDaFuncao, semPermissoes,
-  type FuncaoRef, type PermissoesFuncao,
+  type ChavePermissaoFuncao, type FuncaoRef, type PermissoesFuncao,
 } from "@/lib/validacao/funcao";
 
-export const CAMPOS_FUNCAO =
-  "id, nome, nome_rdo, ordem, ativo, pode_aprovar_medicao, pode_excluir_projetos, pode_editar_revisao, lideranca_equipe, created_at, updated_at";
+/** Todas as colunas: as marcas novas (migração 20261106100000) podem ainda
+ * não existir no banco — listar uma coluna ausente derrubaria a leitura
+ * inteira (inclusive "Aprovar medição" do Coordenador). Marca ausente = false
+ * (veja marcasAusentes). */
+export const CAMPOS_FUNCAO = "*";
 
 type ClienteSupabase = { from: (tabela: string) => any };
 
@@ -36,16 +39,27 @@ export function paraFuncaoRef(x: any): FuncaoRef {
   return f;
 }
 
+/** Marcas que as linhas lidas NÃO trazem (coluna ainda não criada no banco).
+ * Sem linhas não dá para saber: nenhuma. */
+export function marcasAusentes(linhas: any[] | null | undefined): ChavePermissaoFuncao[] {
+  const l = (linhas || [])[0];
+  if (!l || typeof l !== "object") return [];
+  return CHAVES_PERMISSAO_FUNCAO.filter((k) => !(k in l));
+}
+
 export async function carregarFuncoes(cliente: ClienteSupabase): Promise<{
-  funcoes: FuncaoRef[]; erro: string | null; tabelaAusente: boolean;
+  funcoes: FuncaoRef[]; erro: string | null; tabelaAusente: boolean; marcasAusentes: ChavePermissaoFuncao[];
 }> {
   const { data, error } = await cliente.from("gp_funcoes").select(CAMPOS_FUNCAO);
   if (error) {
-    if (tabelaFuncoesAusente(error)) return { funcoes: FUNCOES_PADRAO, erro: null, tabelaAusente: true };
+    if (tabelaFuncoesAusente(error)) return { funcoes: FUNCOES_PADRAO, erro: null, tabelaAusente: true, marcasAusentes: [] };
     console.error("[funcoes] carregar:", error.code, error.message);
-    return { funcoes: [], erro: "Não foi possível carregar as funções.", tabelaAusente: false };
+    return { funcoes: [], erro: "Não foi possível carregar as funções.", tabelaAusente: false, marcasAusentes: [] };
   }
-  return { funcoes: ordenarFuncoes((data || []).map(paraFuncaoRef)), erro: null, tabelaAusente: false };
+  return {
+    funcoes: ordenarFuncoes((data || []).map(paraFuncaoRef)), erro: null, tabelaAusente: false,
+    marcasAusentes: marcasAusentes(data),
+  };
 }
 
 /** Marcas da função de um usuário (uma consulta; sem função = nenhuma). */

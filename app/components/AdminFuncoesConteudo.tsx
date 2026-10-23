@@ -11,7 +11,7 @@
  *
  * Permissões por função: matriz funções × permissões; grava tudo de uma vez
  * com a versão lida de cada função (409 se outro administrador alterou —
- * nada é gravado). As regras por perfil (Admin/Gerência/Comercial) valem
+ * nada é gravado). As regras por perfil (Admin/Gerência/Comercial/Operações) valem
  * sempre, independentemente da função. */
 import { useEffect, useMemo, useState } from "react";
 import Modal from "@/app/components/Modal";
@@ -44,6 +44,8 @@ export function useFuncoesAdmin(habilitado: boolean) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [tabelaAusente, setTabelaAusente] = useState(false);
+  /** Marcas cuja coluna ainda não existe no banco (migração pendente). */
+  const [marcasAusentes, setMarcasAusentes] = useState<ChavePermissaoFuncao[]>([]);
 
   async function carregar() {
     setCarregando(true);
@@ -54,6 +56,7 @@ export function useFuncoesAdmin(habilitado: boolean) {
       if (!resp.ok) throw new Error(dados.erro || "Falha ao carregar as funções.");
       setFuncoes(dados.funcoes || []);
       setTabelaAusente(!!dados.tabelaAusente);
+      setMarcasAusentes(Array.isArray(dados.marcasAusentes) ? dados.marcasAusentes : []);
     } catch (e: any) {
       setErro(e.message || "Falha ao carregar as funções.");
     } finally {
@@ -64,7 +67,7 @@ export function useFuncoesAdmin(habilitado: boolean) {
     if (habilitado) carregar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [habilitado]);
-  return { funcoes, setFuncoes, carregando, erro, tabelaAusente, carregar };
+  return { funcoes, setFuncoes, carregando, erro, tabelaAusente, marcasAusentes, carregar };
 }
 
 type EstadoFuncoes = ReturnType<typeof useFuncoesAdmin>;
@@ -434,7 +437,7 @@ function marcasDe(f: FuncaoRef): Marcas {
 export function AbaPermissoes({ estado, onMudou, onPendentes }: {
   estado: EstadoFuncoes; onMudou: () => void; onPendentes?: (n: number) => void;
 }) {
-  const { funcoes, setFuncoes, carregando, erro, tabelaAusente, carregar } = estado;
+  const { funcoes, setFuncoes, carregando, erro, tabelaAusente, marcasAusentes, carregar } = estado;
   const lista = useMemo(() => ordenarFuncoes(funcoes), [funcoes]);
   const [rascunho, setRascunho] = useState<Record<string, Marcas>>({});
   const [salvando, setSalvando] = useState(false);
@@ -499,6 +502,16 @@ export function AbaPermissoes({ estado, onMudou, onPendentes }: {
   return (
     <div>
       {tabelaAusente && <AvisoTabelaAusente />}
+      {!tabelaAusente && marcasAusentes.length > 0 && (
+        <div className="val-resumo" role="status">
+          <strong className="val-aviso">⚠️ Algumas permissões ainda não existem no banco.</strong>
+          <p className="detalhe" style={{ margin: "4px 0 0" }}>
+            Rode a migração <code>20261106100000_asp_permissoes_campo.sql</code> no SQL Editor do Supabase. Até lá as colunas{" "}
+            {PERMISSOES_FUNCAO.filter((p) => marcasAusentes.includes(p.chave)).map((p) => `“${p.rotulo}”`).join(", ")} ficam
+            travadas e só os perfis da Área / Acesso têm esses direitos.
+          </p>
+        </div>
+      )}
       <section className="card">
         <h2>Permissões por função</h2>
         <p className="detalhe" style={{ marginTop: 0 }}>
@@ -531,7 +544,8 @@ export function AbaPermissoes({ estado, onMudou, onPendentes }: {
                     </th>
                     {PERMISSOES_FUNCAO.map((p) => (
                       <td key={p.chave} className="matriz-cel">
-                        <input type="checkbox" checked={m[p.chave]} disabled={tabelaAusente || salvando}
+                        <input type="checkbox" checked={m[p.chave]}
+                          disabled={tabelaAusente || salvando || marcasAusentes.includes(p.chave)}
                           aria-label={`${f.nome}: ${p.rotulo}`} onChange={() => alternar(f, p.chave)} />
                       </td>
                     ))}

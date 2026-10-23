@@ -15,9 +15,9 @@ export const runtime = "nodejs";
 export async function GET() {
   const check = await exigirAdminFuncoes();
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
-  const { funcoes, erro, tabelaAusente } = await carregarFuncoesComUso();
+  const { funcoes, erro, tabelaAusente, marcasAusentes } = await carregarFuncoesComUso();
   if (erro) return NextResponse.json({ erro }, { status: 500 });
-  return NextResponse.json({ ok: true, funcoes, tabelaAusente, perfisComDireito: PERFIS_COM_DIREITO });
+  return NextResponse.json({ ok: true, funcoes, tabelaAusente, marcasAusentes, perfisComDireito: PERFIS_COM_DIREITO });
 }
 
 const CAMPOS_CRIAR = new Set(["nome", "nome_rdo"]);
