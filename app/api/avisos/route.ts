@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
+import { primeiroErro, ROTULOS_CLIENTE, temErros, validarAvisoCliente } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,8 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** Grava o aviso: { clienteId, avisos }. */
+/** Grava o aviso: { clienteId, avisos } — até 500 caracteres (aparece em
+ *  todas as OSs do cliente). */
 export async function PATCH(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
@@ -31,9 +33,13 @@ export async function PATCH(req: NextRequest) {
   }
   const b = await req.json().catch(() => ({}));
   if (!b?.clienteId) return NextResponse.json({ erro: "Cliente obrigatório." }, { status: 400 });
+  const v = validarAvisoCliente(b.avisos);
+  if (temErros(v)) {
+    return NextResponse.json({ erro: primeiroErro(v, ROTULOS_CLIENTE), erros: v.erros, avisos: v.avisos }, { status: 400 });
+  }
 
   const { error } = await getSupabaseRouteClient()
-    .from("gp_orgaos").update({ avisos: (b.avisos || "").trim() || null }).eq("id", b.clienteId);
+    .from("gp_orgaos").update({ avisos: String(b.avisos || "").trim() || null }).eq("id", b.clienteId);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

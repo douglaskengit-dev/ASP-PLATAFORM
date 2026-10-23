@@ -24,7 +24,8 @@ async function contextoOS(inspecaoId: string) {
   const clienteId = (proj as any)?.cliente_id || null;
   const [contatos, entregas, disponiveis] = await Promise.all([
     clienteId
-      ? admin.from("gp_orgaos_contatos").select("id, nome_completo, cargo, email, telefone").eq("orgao_id", clienteId).order("created_at", { ascending: true })
+      // "*": traz `ativo` quando a migração de Clientes já rodou.
+      ? admin.from("gp_orgaos_contatos").select("*").eq("orgao_id", clienteId).order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as any[] }),
     admin.from("gp_entregas").select("*").eq("inspecao_id", inspecaoId).is("excluido_em", null).order("data", { ascending: false }),
     arquivosParaEntrega(inspecaoId),
@@ -100,6 +101,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ erro: primeiroErro(v, ROTULOS_ENTREGA), erros: v.erros, avisos: v.avisos }, { status: 400 });
   }
   const contato = ctx.contatos.find((c) => c.id === dados.contatoId);
+  if (contato && contato.ativo === false) {
+    return NextResponse.json({
+      erro: `O contato “${contato.nome_completo}” está desativado — escolha outro ou reative-o no cadastro do cliente.`,
+      erros: { contato: ["Contato desativado — escolha outro ou reative-o no cadastro do cliente."] },
+    }, { status: 400 });
+  }
   const escolhidos = ctx.disponiveis.filter((a) => arquivos.includes(a.chave))
     .map(({ chave, tipo, id: aid, caminho, nome, hash, data }) => ({ chave, tipo, id: aid, caminho, nome, hash, data }));
   const { data, error } = await getSupabaseRouteClient().from("gp_entregas").insert({

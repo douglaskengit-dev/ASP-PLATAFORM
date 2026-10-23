@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Achado, AchadoEstado, ResultadoAnaliseTR } from "@/lib/tr/types";
 import { gerarAchados, itensSemAchados } from "@/lib/tr/regras";
 import { NovoContatoInput, OrgaoComContatos, contatoValido } from "@/lib/orgaos/types";
+import { contatosAtivos } from "@/lib/validacao";
 import { mascaraTelefone } from "@/lib/mascaras";
 
 function novoContatoVazio(): NovoContatoInput {
@@ -78,7 +79,7 @@ export default function AnaliseTRConteudo({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgaoId]);
 
-  const contatoExistente = orgao?.contatos[0] || null;
+  const contatoExistente = contatosAtivos(orgao?.contatos)[0] || null;
 
   async function executarAnalise(arquivoParaAnalisar: File) {
     setErro(null);

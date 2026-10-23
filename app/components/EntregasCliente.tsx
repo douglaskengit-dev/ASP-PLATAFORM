@@ -16,10 +16,10 @@ import { enviarJson, novoId } from "@/lib/pwa/sync";
 import { mascaraTelefone } from "@/lib/mascaras";
 import {
   dataBrCompleta, MEIOS_ENTREGA, mesclar, novoResultado, podeRegistrarEntrega, rotuloMeio, ROTULOS_ENTREGA, temErros,
-  validarContato, validarEntrega, type ArquivoEntrega, type DadosContato, type EntregaRegistrada, type ResultadoValidacao,
+  contatosAtivos, validarContato, validarEntrega, type ArquivoEntrega, type DadosContato, type EntregaRegistrada, type ResultadoValidacao,
 } from "@/lib/validacao";
 
-interface Contato { id: string; nome_completo: string; cargo?: string | null; email: string | null; telefone?: string | null }
+interface Contato { id: string; nome_completo: string; cargo?: string | null; email: string | null; telefone?: string | null; ativo?: boolean }
 type Arquivo = ArquivoEntrega & { href: string };
 interface Entrega extends EntregaRegistrada {
   meio: string; meio_outro?: string | null; observacao?: string | null; criado_por_nome?: string | null; criado_em?: string;
@@ -97,7 +97,10 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
     { perfil, hoje, contatos, disponiveis, anteriores: entregas },
   ), servidor), [data, contatoId, marcados, meio, meioOutro, observacao, perfil, hoje, contatos, disponiveis, entregas, servidor]);
 
-  const existentesContato = contatos.map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email }));
+  const existentesContato = contatos.map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email, ativo: c.ativo !== false }));
+  // Desativados não entram em escolha nova; as entregas já registradas
+  // mostram o nome gravado (contato_nome).
+  const ativos = contatosAtivos(contatos);
   const valContato = useMemo(
     () => (novoContato ? mesclar(validarContato(novoContato, existentesContato), contatoServidor) : novoResultado()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,7 +108,7 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
   );
 
   function abrir() {
-    setData(hoje); setContatoId(contatos.length === 1 ? contatos[0].id : ""); setMarcados([]); setMeio(""); setMeioOutro("");
+    setData(hoje); setContatoId(ativos.length === 1 ? ativos[0].id : ""); setMarcados([]); setMeio(""); setMeioOutro("");
     setObservacao(""); setTentou(false); setServidor(novoResultado()); setErro(null); setNovoContato(null);
     idRef.current = novoId();
     setAberto(true);
@@ -255,7 +258,7 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
                 <select id="entrega-contato" style={{ ...campo, flex: "1 1 220px", width: "auto" }} value={contatoId}
                   onChange={(e) => { setContatoId(e.target.value); setServidor(novoResultado()); }}>
                   <option value="">— escolha um contato do cliente —</option>
-                  {contatos.map((c) => <option key={c.id} value={c.id}>{c.nome_completo}{c.cargo ? ` (${c.cargo})` : ""}</option>)}
+                  {ativos.map((c) => <option key={c.id} value={c.id}>{c.nome_completo}{c.cargo ? ` (${c.cargo})` : ""}</option>)}
                 </select>
                 {clienteId && !novoContato && (
                   <button type="button" className="btn-azul btn-sec" onClick={() => { setNovoContato({ nomeCompleto: "", cargo: "", email: "", telefone: "" }); setContatoServidor(novoResultado()); }}>
@@ -263,7 +266,7 @@ export default function EntregasCliente({ inspecaoId, perfil, versao, onResumo }
                   </button>
                 )}
               </div>
-              {contatos.length === 0 && <p className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ O cliente não tem contatos cadastrados — cadastre quem recebeu.</p>}
+              {ativos.length === 0 && <p className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ O cliente não tem contatos cadastrados — cadastre quem recebeu.</p>}
               <MensagensCampo r={validacao} campo="contato" mostrarErros={tentou} />
             </div>
 

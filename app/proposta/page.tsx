@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Etapa, PropostaFormData, Tratamento } from "@/lib/types";
 import { ETAPAS_PADRAO } from "@/lib/etapasPadrao";
 import { Contato, NovoContatoInput, OrgaoComContatos } from "@/lib/orgaos/types";
+import { contatosAtivos } from "@/lib/validacao";
 import { mascaraTelefone } from "@/lib/mascaras";
 
 const MESES = [
@@ -90,9 +91,11 @@ function PropostaPageConteudo() {
         const resp = await fetch(`/api/orgaos/${orgaoId}`);
         const dados = await resp.json();
         if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao carregar o órgão.");
-        setOrgao(dados.orgao);
-        if (dados.orgao.contatos.length === 1) {
-          setContatoSelecionadoId(dados.orgao.contatos[0].id);
+        // Contato desativado não é destinatário de proposta nova.
+        const ativos = contatosAtivos(dados.orgao.contatos as Contato[]);
+        setOrgao({ ...dados.orgao, contatos: ativos });
+        if (ativos.length === 1) {
+          setContatoSelecionadoId(ativos[0].id);
         }
       } catch (err: any) {
         setErroOrgao(err.message || "Erro ao carregar o órgão.");

@@ -57,21 +57,33 @@ export default function OrgaosConteudo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtrosAplicados, verLixeira]);
 
+  // Regras em lib/validacao/cliente.ts (decisaoExcluirCliente), aplicadas
+  // pela API: ⛔ projeto em andamento bloqueia; ⚠️ projetos concluídos ou na
+  // lixeira pedem confirmação (409 precisaConfirmar → ?confirmar=1).
   async function excluirCliente(cid: string) {
     if (!confirm("Enviar este cliente para a lixeira? Recuperável por 30 dias.")) return;
-    const r = await fetch(`/api/orgaos/${cid}`, { method: "DELETE" });
-    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir."); return; }
+    setErro(null);
+    let r = await fetch(`/api/orgaos/${cid}`, { method: "DELETE" });
+    let d = await r.json().catch(() => ({}));
+    if (r.status === 409 && d.precisaConfirmar) {
+      if (!confirm(`⚠️ ${d.texto}`)) return;
+      r = await fetch(`/api/orgaos/${cid}?confirmar=1`, { method: "DELETE" });
+      d = await r.json().catch(() => ({}));
+    }
+    if (!r.ok) { setErro(`⛔ ${d.erro || "Falha ao excluir."}`); return; }
     carregarClientes(filtrosAplicados, verLixeira);
   }
   async function restaurarCliente(cid: string) {
+    setErro(null);
     const r = await fetch(`/api/orgaos/${cid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurar: true }) });
-    if (!r.ok) { setErro((await r.json()).erro || "Falha ao restaurar."); return; }
+    if (!r.ok) { setErro(`⛔ ${(await r.json().catch(() => ({}))).erro || "Falha ao restaurar."}`); return; }
     carregarClientes(filtrosAplicados, true);
   }
   async function excluirClienteDefinitivo(cid: string) {
-    if (!confirm("Excluir DEFINITIVAMENTE este cliente?")) return;
+    if (!confirm("Excluir DEFINITIVAMENTE este cliente? Não dá para desfazer.")) return;
+    setErro(null);
     const r = await fetch(`/api/orgaos/${cid}?definitivo=1`, { method: "DELETE" });
-    if (!r.ok) { setErro((await r.json()).erro || "Falha ao excluir."); return; }
+    if (!r.ok) { setErro(`⛔ ${(await r.json().catch(() => ({}))).erro || "Falha ao excluir."}`); return; }
     carregarClientes(filtrosAplicados, true);
   }
 

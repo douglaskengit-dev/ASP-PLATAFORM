@@ -36,6 +36,7 @@ import {
 import { contemDia, periodoDe } from "@/lib/validacao/periodo";
 import { execucaoAtiva } from "@/lib/validacao/execucao";
 import { hojeBrasil } from "@/lib/validacao/formatos";
+import { contatosAtivos } from "@/lib/validacao/cliente";
 import { MensagensCampo } from "./MensagensCampo";
 import {
   CONTRATADA, FUNCOES_RDO, FRASES_RAPIDAS, OPCOES_TEMPO, PERIODOS,
@@ -211,7 +212,8 @@ export default function Rdos({
       definirInspecoesProjeto((proj.inspecoes || []).map((i: any) => ({
         id: i.id, identificacao: i.identificacao, fase: i.fase, procedimento: i.procedimento,
       })));
-      const c = (org.orgao?.contatos || [])[0];
+      // Primeiro contato ATIVO do cliente (desativado não é sugerido).
+      const c = contatosAtivos<any>(org.orgao?.contatos)[0];
       f = {
         ...f,
         usuarios: usu.usuarios || [],

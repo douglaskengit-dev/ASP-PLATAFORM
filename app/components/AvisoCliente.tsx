@@ -10,6 +10,7 @@
  * edição é embutida na própria faixa, para quem descobre a exigência em campo
  * registrar na hora; o mesmo texto também é editável no cadastro do cliente. */
 import { useCallback, useEffect, useState } from "react";
+import { AVISO_CLIENTE_MAX, validarAvisoCliente } from "@/lib/validacao";
 
 export default function AvisoCliente({ clienteId, compacto = false }: {
   clienteId?: string | null;
@@ -31,7 +32,11 @@ export default function AvisoCliente({ clienteId, compacto = false }: {
   }, [clienteId]);
   useEffect(() => { carregar(); }, [carregar]);
 
+  const erroTamanho = validarAvisoCliente(rascunho).erros.avisos?.[0] || null;
+  const tamanho = rascunho.trim().length;
+
   async function salvar() {
+    if (erroTamanho) { setErro(erroTamanho); return; }
     setSalvando(true); setErro(null);
     const res = await fetch("/api/avisos", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -75,20 +80,27 @@ export default function AvisoCliente({ clienteId, compacto = false }: {
         <div style={{ marginTop: 8 }}>
           <textarea
             value={rascunho}
-            onChange={(e) => setRascunho(e.target.value)}
+            onChange={(e) => { setRascunho(e.target.value); setErro(null); }}
+            aria-invalid={!!erroTamanho}
             placeholder="Ex.: Entrada somente pelo portão 3. Exige crachá provisório na portaria. Trabalho em altura precisa de ASO válido."
             style={{
               width: "100%", minHeight: 90, padding: "9px 11px", borderRadius: 8,
               border: "1px solid #dc2626", background: "var(--bg-card)", color: "var(--texto)", fontSize: 14,
             }}
           />
-          <p className="detalhe" style={{ margin: "4px 0 8px" }}>
-            Este aviso vale para <strong>todos</strong> os projetos e Ordens de Serviço deste cliente.
-          </p>
-          {erro && <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erro}</p>}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", margin: "4px 0 8px" }}>
+            <p className="detalhe" style={{ margin: 0 }}>
+              ℹ️ Este aviso aparece em <strong>todas</strong> as OSs deste cliente.
+            </p>
+            <span className="detalhe" style={{ margin: 0, color: erroTamanho ? "#dc2626" : undefined }}>
+              {tamanho}/{AVISO_CLIENTE_MAX}
+            </span>
+          </div>
+          {erroTamanho && <p className="val-msg val-erro" style={{ margin: "0 0 8px" }}>⛔ {erroTamanho}</p>}
+          {erro && erro !== erroTamanho && <p className="erro-texto" style={{ margin: "0 0 8px" }}>{erro}</p>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             <button className="btn-azul btn-sec" disabled={salvando} onClick={() => setEditando(false)}>Cancelar</button>
-            <button className="btn-azul" disabled={salvando} onClick={salvar}>
+            <button className="btn-azul" disabled={salvando || !!erroTamanho} onClick={salvar}>
               {salvando ? "Salvando…" : "Salvar aviso"}
             </button>
           </div>
