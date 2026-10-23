@@ -3,8 +3,8 @@
  * - GET /api/*: network-first com fallback de cache (leitura offline do que
  *   já foi carregado). NUNCA intercepta POST/PATCH/DELETE (as escritas offline
  *   são tratadas pela fila em IndexedDB — lib/pwa). */
-const CACHE = "asp-v3";
-const API_CACHE = "asp-api-v3";
+const CACHE = "asp-v4";
+const API_CACHE = "asp-api-v3"; // mantido: trocar apagaria os dados offline já baixados
 
 /* Arquivos com nome FIXO (o conteúdo muda, o endereço não): o modelo do
  * relatório, a ferramenta do medidor, ícones. Se forem servidos com
@@ -14,13 +14,22 @@ const API_CACHE = "asp-api-v3";
  *
  * Já os arquivos de /_next/static têm o hash do conteúdo no nome: cada build
  * gera um endereço novo, então cache-first ali é seguro e rápido. */
+/* Notificações: "icon" é a imagem colorida do corpo da notificação (o
+ * Android pode recortá-la em círculo, por isso o conteúdo fica centralizado);
+ * "badge" é o selo da barra de status — o Android usa SÓ o canal alfa e pinta
+ * de branco/escuro, então precisa ser silhueta branca sobre transparente (um
+ * PNG colorido vira um quadrado/borrão branco). */
+const ICONE_NOTIFICACAO = "/icons/notif-icon-192.png";
+const SELO_NOTIFICACAO = "/icons/notif-badge-96.png";
+const ICONES_NOTIFICACAO = [ICONE_NOTIFICACAO, SELO_NOTIFICACAO];
+
 function temNomeFixo(pathname) {
   return !pathname.startsWith("/_next/static/");
 }
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/icon-192.png"]).catch(() => {})));
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ICONES_NOTIFICACAO).catch(() => {})));
 });
 
 self.addEventListener("activate", (event) => {
@@ -94,8 +103,8 @@ self.addEventListener("push", (event) => {
   const titulo = data.titulo || "ASP";
   const opcoes = {
     body: data.mensagem || "",
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    icon: ICONE_NOTIFICACAO,
+    badge: SELO_NOTIFICACAO,
     data: { link: data.link || "/dashboard" },
     tag: data.tag || undefined,
   };
