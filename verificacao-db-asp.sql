@@ -1027,22 +1027,22 @@ create policy gp_entregas_delete on public.gp_entregas for delete to authenticat
 
 -- 1) Chaves
 create or replace function public.gp_chave_codigo(t text) returns text
-language sql immutable parallel safe as $
+language sql immutable parallel safe as $$
   select regexp_replace(
     lower(translate(coalesce(t, ''),
       'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ',
       'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')),
     '[^a-z0-9]', '', 'g')
-$;
+$$;
 
 create or replace function public.gp_chave_nome(t text) returns text
-language sql immutable parallel safe as $
+language sql immutable parallel safe as $$
   select btrim(regexp_replace(
     lower(translate(coalesce(t, ''),
       'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ',
       'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')),
     '\s+', ' ', 'g'))
-$;
+$$;
 
 -- 3) Colunas
 alter table public.gp_procedimentos add column if not exists ativo boolean not null default true;
@@ -1055,7 +1055,7 @@ alter table public.gp_equipamentos add column if not exists desativado_por uuid 
 alter table public.gp_equipamentos add column if not exists atualizado_em timestamptz not null default now();
 
 -- 2) Índices únicos pela chave (NOTICE com os conflitos, se houver)
-do $
+do $$
 declare
   g record;
   qtd int;
@@ -1134,13 +1134,13 @@ begin
   if qtd > 0 then
     raise notice 'gp_equipamentos: % equipamento(s) sem nome — complete no Catálogo.', qtd;
   end if;
-end $;
+end $$;
 
 -- 4) Funções da API
 create or replace function public.gp_renomear_procedimento(
   p_id uuid, p_antigo text, p_novo text, p_versao timestamptz
 ) returns jsonb
-language plpgsql as $
+language plpgsql as $$
 declare
   v_versao timestamptz;
   n_os int := 0;
@@ -1170,12 +1170,12 @@ begin
     get diagnostics n_rasc = row_count;
   end if;
   return jsonb_build_object('versao', v_versao, 'oss', n_os, 'checklists', n_check, 'rascunhos', n_rasc);
-end $;
+end $$;
 
 create or replace function public.gp_renomear_equipamento(
   p_id uuid, p_antigo text, p_novo text, p_versao timestamptz
 ) returns jsonb
-language plpgsql as $
+language plpgsql as $$
 declare
   v_versao timestamptz;
   v_slug text;
@@ -1218,10 +1218,10 @@ begin
     get diagnostics n_ag = row_count;
   end if;
   return jsonb_build_object('versao', v_versao, 'checklists', n_check, 'agendamentos', n_ag);
-end $;
+end $$;
 
 create or replace function public.gp_uso_catalogo(p_tipo text, p_id uuid) returns jsonb
-language plpgsql stable as $
+language plpgsql stable as $$
 declare
   v_codigo text;
   v_slug text;
@@ -1265,7 +1265,7 @@ begin
     return r;
   end if;
   return null;
-end $;
+end $$;
 
 -- Só a API (chave de serviço) chama as funções que escrevem em várias tabelas.
 revoke all on function public.gp_renomear_procedimento(uuid, text, text, timestamptz) from public, anon, authenticated;
