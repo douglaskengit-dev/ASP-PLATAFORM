@@ -2758,13 +2758,18 @@ export default function InspecaoDetalhePage() {
               <label style={{ fontWeight: 600, fontSize: 13, display: "block", marginBottom: 6 }}>Checklist</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {agChecklist.map((c, i) => (
-                  <label key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--texto)" }}>
-                    <input type="checkbox" checked={c.ok}
-                      onChange={(e) => setAgChecklist((prev) => prev.map((x, idx) => idx === i ? { ...x, ok: e.target.checked } : x))} />
-                    <span style={{ flex: 1 }}>{c.item}</span>
-                    <button type="button" className="fu-icone-btn" title="Remover item"
+                  // O ✕ fica fora do <label>: clicar nele não pode marcar/desmarcar o item.
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, fontSize: 14,
+                      color: "var(--texto)", cursor: "pointer", padding: "6px 0" }}>
+                      <input type="checkbox" checked={c.ok} style={{ width: 18, height: 18 }}
+                        onChange={(e) => setAgChecklist((prev) => prev.map((x, idx) => idx === i ? { ...x, ok: e.target.checked } : x))} />
+                      <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", textAlign: "left" }}>{c.item}</span>
+                    </label>
+                    <button type="button" className="fu-icone-btn" title={`Remover “${c.item}”`} aria-label={`Remover “${c.item}”`}
+                      style={{ width: 36, height: 36, flex: "none" }}
                       onClick={() => { setAgChecklist((prev) => prev.filter((_, idx) => idx !== i)); mexeuAgenda(); }}>✕</button>
-                  </label>
+                  </div>
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>

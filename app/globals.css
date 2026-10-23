@@ -203,6 +203,16 @@ input, select, textarea {
   color: var(--texto);
 }
 
+/* Caixas de marcar e rádios não herdam a largura/padding dos campos de texto
+   acima (com width:100% a caixa ocupava a linha e espremia o rótulo). */
+input[type="checkbox"], input[type="radio"] {
+  width: auto;
+  padding: 0;
+  flex: none;
+  margin: 0;
+  accent-color: var(--primaria);
+}
+
 textarea {
   resize: vertical;
   min-height: 120px;
