@@ -87,7 +87,7 @@ export default function LixeiraPage() {
       </header>
       {erro && <p className="erro-texto">{erro}</p>}
       {!podeGerenciar && (
-        <p className="detalhe">Somente consulta — restaurar e excluir é restrito a Comercial, Gerência, Admin ou Coordenador.</p>
+        <p className="detalhe">Somente consulta — restaurar e excluir é restrito a Comercial, Gerência, Admin ou funções com a permissão “Excluir projetos/OS”.</p>
       )}
 
       {itens.length === 0 ? (

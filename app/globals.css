@@ -1382,3 +1382,42 @@ details.val-resumo > summary:focus-visible { outline: 2px solid var(--primaria);
     transition-duration: 0.01ms !important; scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Abas dentro da tela (Administração de usuários) ----------
+ * .abas-tela [role=tablist] > .aba-tela [role=tab][aria-selected]. Em telas
+ * estreitas as abas rolam na horizontal (nunca quebram o texto). */
+.abas-tela {
+  display: flex; gap: 4px; margin: 0 0 var(--esp-2, 16px);
+  border-bottom: 1px solid var(--borda);
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.abas-tela::-webkit-scrollbar { display: none; }
+.aba-tela {
+  flex-shrink: 0; white-space: nowrap; cursor: pointer;
+  font-family: var(--fonte-titulo), -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--fs-sm); font-weight: 600;
+  padding: 10px 14px; margin-bottom: -1px;
+  background: transparent; color: var(--cinza);
+  border: 0; border-bottom: 3px solid transparent; border-radius: var(--raio-sm) var(--raio-sm) 0 0;
+}
+.aba-tela:hover { color: var(--texto); background: var(--bg-hover); }
+.aba-tela[aria-selected="true"] { color: var(--primaria); border-bottom-color: var(--primaria); }
+.aba-tela .chip { margin-left: 6px; }
+
+/* Matriz "Permissões por função": células de marcar centralizadas. */
+.matriz-permissoes th.matriz-col, .matriz-permissoes td.matriz-cel { text-align: center; vertical-align: middle; }
+.matriz-permissoes th.matriz-col { min-width: 120px; text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); }
+.matriz-permissoes td.matriz-cel input { width: 20px; height: 20px; cursor: pointer; }
+.matriz-permissoes tr.matriz-alterada td { background: var(--aviso-bg); }
+.matriz-permissoes tr.matriz-inativa td:first-child { color: var(--cinza); }
+.matriz-ajuda { display: block; font-weight: 400; color: var(--cinza); margin-top: 2px; }
+.funcao-ordem { display: inline-flex; gap: 4px; }
+/* Coluna "Função" fixa ao rolar a matriz na horizontal (celular). */
+.matriz-permissoes thead th:first-child, .matriz-permissoes th.matriz-linha {
+  position: sticky; left: 0; z-index: 1; background: var(--bg-card);
+}
+.matriz-permissoes thead th:first-child { background: var(--bg-suave); }
+.matriz-permissoes th.matriz-linha {
+  text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); color: var(--texto); min-width: 110px;
+}
+.matriz-permissoes tr.matriz-alterada th.matriz-linha { background: var(--aviso-bg); }

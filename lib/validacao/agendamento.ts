@@ -24,10 +24,12 @@
  *      conflito de equipe/equipamento em qualquer dia do período ·
  *      relatório de inspeção ainda não aprovado/assinado · início ≠
  *      previsão de execução do agendamento de inspeção · equipamento do
- *      procedimento fora da lista · equipe sem Coordenador/Engenheiro ·
+ *      procedimento fora da lista · equipe sem liderança (funções com
+ *      "Conta como liderança" em gp_funcoes — Coordenador/Engenheiro) ·
  *      checklist de segurança incompleto com a execução já começando */
 import { addAviso, addErro, novoResultado, ResultadoValidacao } from "./resultado";
 import { dataIsoValida } from "./formatos";
+import { encontrarFuncao, FUNCOES_PADRAO, type FuncaoRef } from "./funcao";
 import { duplicadosEmLista, nomesParecidos, normalizarTexto, semPontuacao } from "./texto";
 import { normalizarEndereco } from "./projeto";
 import { feriadoNacional, fimDeSemana } from "./feriados";
@@ -111,6 +113,9 @@ export interface ContextoAgendamento {
   relatoriosInspecao?: { versao: number; status: string }[];
   /** Funções do cadastro (gp_profiles.funcao) por id de usuário. */
   funcoes?: Record<string, string | null>;
+  /** Funções cadastradas (gp_funcoes) — quais contam como liderança.
+   * Sem a lista, vale a carga inicial (Coordenador e Engenheiro). */
+  catalogoFuncoes?: CatalogoLideranca | null;
   /** Equipamentos previstos no procedimento da OS (nomes do Catálogo). */
   equipamentosProcedimento?: string[];
   /** Código do procedimento da OS (só para a mensagem). */
@@ -138,9 +143,38 @@ function periodoTexto(p: Periodo | null): string {
   return p ? textoPeriodo(p) : "data a definir";
 }
 
-/** Coordenador ou Engenheiro (gp_profiles.funcao), em qualquer grafia. */
-export function funcaoLideranca(funcao: string | null | undefined): boolean {
-  return /^\s*(coord|eng)/i.test(funcao || "");
+export type CatalogoLideranca = Pick<FuncaoRef, "nome" | "lideranca_equipe" | "ativo">[];
+
+/** A função (gp_profiles.funcao) conta como liderança da equipe? Marca
+ * "lideranca_equipe" da função em gp_funcoes (sem acento/caixa). Sem
+ * catálogo: carga inicial (Coordenador e Engenheiro). */
+export function funcaoLideranca(funcao: string | null | undefined, catalogo?: CatalogoLideranca | null): boolean {
+  return !!encontrarFuncao(funcao, catalogo || FUNCOES_PADRAO)?.lideranca_equipe;
+}
+
+/** "Coordenador ou Engenheiro" — funções ativas que contam como liderança
+ * ("" = nenhuma: o aviso de equipe sem liderança não se aplica). */
+export function textoLiderancas(catalogo?: CatalogoLideranca | null): string {
+  const nomes = (catalogo || FUNCOES_PADRAO).filter((f) => f.lideranca_equipe && f.ativo !== false).map((f) => f.nome);
+  if (nomes.length <= 1) return nomes[0] || "";
+  return `${nomes.slice(0, -1).join(", ")} ou ${nomes[nomes.length - 1]}`;
+}
+
+/** Equipe da execução sem ninguém de liderança (só avisa se alguma função
+ * conta como liderança e as funções dos usuários são conhecidas). */
+export function equipeSemLideranca(
+  equipe: { id: string }[],
+  funcoes: Record<string, string | null> | undefined,
+  catalogo?: CatalogoLideranca | null
+): boolean {
+  if (!funcoes || equipe.length === 0) return false;
+  if (!(catalogo || FUNCOES_PADRAO).some((f) => f.lideranca_equipe)) return false;
+  return !equipe.some((m) => funcaoLideranca(funcoes[m.id], catalogo));
+}
+
+export function msgSemLideranca(catalogo?: CatalogoLideranca | null): string {
+  const t = textoLiderancas(catalogo);
+  return `Nenhuma liderança${t ? ` (${t})` : ""} na equipe da execução`;
 }
 
 /** Nomes do Catálogo dos equipamentos previstos no procedimento (slugs, como
@@ -374,8 +408,8 @@ export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento
       addAviso(r, "equipe", `${m.nome} já está agendado(a) em ${quando} na ${descreverOndeAgendado(a)}.`)
     );
   });
-  if (execucao && ctx.funcoes && equipe.length > 0 && !equipe.some((m) => funcaoLideranca(ctx.funcoes![m.id]))) {
-    addAviso(r, "equipe", "Nenhum Coordenador ou Engenheiro na equipe da execução — confira quem responde pelo serviço em campo.");
+  if (execucao && equipeSemLideranca(equipe, ctx.funcoes, ctx.catalogoFuncoes)) {
+    addAviso(r, "equipe", `${msgSemLideranca(ctx.catalogoFuncoes)} — confira quem responde pelo serviço em campo.`);
   }
 
   // Equipamentos

@@ -64,6 +64,8 @@ import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
 import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
 import { podeAprovarColeta, podeEditarRevisao } from "@/lib/asp/permissoes";
+import { carregarPermissoesFuncao } from "@/lib/asp/funcoes";
+import type { FuncaoRef, PermissoesFuncao } from "@/lib/validacao/funcao";
 import { camposDaMedicao } from "@/lib/asp/relatorio";
 import { sha256Hex } from "@/lib/sha256";
 import { lerArquivoParaMatriz, extrairBatimetria, montarEstadoMedidor, gerarModeloXlsx, paraNumero } from "@/lib/asp/batimetria";
@@ -214,6 +216,8 @@ export default function InspecaoDetalhePage() {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [funcao, setFuncao] = useState<string | null>(null);
+  /** Marcas da função do usuário (gp_funcoes) — a API confere de novo. */
+  const [permissoesFuncao, setPermissoesFuncao] = useState<PermissoesFuncao | null>(null);
   const [aprovandoColeta, setAprovandoColeta] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
@@ -368,6 +372,8 @@ export default function InspecaoDetalhePage() {
    *  ações, que fica escondido atrás do modal aberto. */
   const [erroAgenda, setErroAgenda] = useState<string | null>(null);
   const [usuarios, setUsuarios] = useState<UsuarioOpcao[]>([]);
+  /** Funções cadastradas (quais contam como liderança da equipe). */
+  const [catalogoFuncoes, setCatalogoFuncoes] = useState<FuncaoRef[] | undefined>(undefined);
   const [arquivos, setArquivos] = useState<ArquivoProjeto[]>([]);
   /** Coleta de fotos da execução, como o card a mostra — alimenta o aviso ao
    *  concluir a Execução e as fotos do Relatório de Execução. */
@@ -427,8 +433,12 @@ export default function InspecaoDetalhePage() {
       const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao, nome_completo").eq("id", data.user.id).single();
       setPerfil(p?.perfil ?? null);
       setFuncao((p as any)?.funcao ?? null);
+      setPermissoesFuncao(await carregarPermissoesFuncao(supabase, (p as any)?.funcao));
     });
-    fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => setUsuarios(d.usuarios || [])).catch(() => {});
+    fetch("/api/usuarios").then((r) => r.ok ? r.json() : { usuarios: [] }).then((d) => {
+      setUsuarios(d.usuarios || []);
+      if (Array.isArray(d.funcoes)) setCatalogoFuncoes(d.funcoes);
+    }).catch(() => {});
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
       setProcedimentos(d.procedimentos || []);
       // Sugestões do agendamento: só equipamentos ativos. A lista completa
@@ -511,7 +521,7 @@ export default function InspecaoDetalhePage() {
       ? nomesEquipamentosProcedimento(procOS?.equipamentos, catalogoEquipCompleto.filter((e: any) => ativoNoCatalogo(e))) : undefined),
     [procedimentos, catalogoEquipCompleto, procOS]
   );
-  /** Função de cada usuário ativo (Coordenador/Engenheiro/Técnico). */
+  /** Função de cada usuário ativo (nome em gp_funcoes). */
   const funcoesUsuarios = useMemo(
     () => (usuarios.length ? Object.fromEntries(usuarios.map((u) => [u.id, u.funcao])) : undefined),
     [usuarios]
@@ -521,7 +531,7 @@ export default function InspecaoDetalhePage() {
   const periodoExec = periodoDe(agExec);
   /** Unidade e limite de aviso do cloro do procedimento (Fase 7). */
   const cloroOS = cloroDoProcedimento(procOS);
-  const avisosExec = avisosExecucao({ ag: agExec, hoje: hojeExec, equipamentosProcedimento: equipProcOS, funcoes: funcoesUsuarios });
+  const avisosExec = avisosExecucao({ ag: agExec, hoje: hojeExec, equipamentosProcedimento: equipProcOS, funcoes: funcoesUsuarios, catalogoFuncoes });
   /** Água potável no procedimento × coletas de água desmarcadas nas fotos. */
   const avisoAgua = aguaPotavelDesmarcada(procOS?.agua_potavel, fotosExec);
   /** Dias já passados do período sem RDO desta OS (resumo da seção). */
@@ -656,7 +666,7 @@ export default function InspecaoDetalhePage() {
   const podeAgenda = ["admin", "comercial", "gerencia"].includes(perfil || "") && !encerrada;
   const podeRelatorio = ["admin", "operacoes", "gerencia"].includes(perfil || "") && !encerrada;
   const podeRenomear = ["admin", "operacoes", "gerencia", "comercial"].includes(perfil || "") && !encerrada;
-  const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao }) && !encerrada;
+  const podeAprovarMedicao = podeAprovarColeta({ perfil, funcao, permissoesFuncao }) && !encerrada;
   /** Trocar "Haverá inspeção?": quem cria OS (Comercial/Gerência/Admin), OS aberta. */
   const podeTrocarInspecao = ["admin", "comercial", "gerencia"].includes(perfil || "") && !encerrada;
 
@@ -1496,6 +1506,7 @@ export default function InspecaoDetalhePage() {
     relatoriosInspecao: !comInspecao ? [] : agCtx.relatoriosInspecao
       || relatorios.filter((r) => r.tipo === "inspecao").map((r) => ({ versao: r.versao, status: r.status })),
     funcoes: agCtx.funcoes || funcoesUsuarios,
+    catalogoFuncoes: agCtx.catalogoFuncoes || catalogoFuncoes,
     equipamentosProcedimento: agCtx.equipamentosProcedimento || equipProcOS,
     procedimento: agCtx.procedimento ?? insp?.procedimento ?? null,
   };
@@ -2521,7 +2532,7 @@ export default function InspecaoDetalhePage() {
           inspecaoId={id}
           revisaoEsperada={revisaoRelatorio}
           codigoEsperado={codigoRelatorio(codigoProjetoOS, revisaoRelatorio)}
-          podeEditarRevisao={podeEditarRevisao({ perfil, funcao })}
+          podeEditarRevisao={podeEditarRevisao({ perfil, funcao, permissoesFuncao })}
           equipeAgendada={(agDoBloco?.equipe || []).map((m) => m.id).filter(Boolean)}
           // Fase 8: RDOs, período da execução e arquivos da OS (laudo).
           execucao={bloco === "execucao" ? { rdos: rdosInsp, periodo: periodoExec, arquivosOS } : undefined}

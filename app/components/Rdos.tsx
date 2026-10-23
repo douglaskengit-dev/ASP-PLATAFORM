@@ -39,8 +39,8 @@ import { hojeBrasil } from "@/lib/validacao/formatos";
 import { contatosAtivos } from "@/lib/validacao/cliente";
 import { MensagensCampo } from "./MensagensCampo";
 import {
-  CONTRATADA, FUNCOES_RDO, FRASES_RAPIDAS, OPCOES_TEMPO, PERIODOS,
-  arquivoEmDia, assinanteAspPadrao, dadosRdoVazio, dataBr, fraseCloro, funcaoDoPerfil, gerarRdoDocx,
+  CONTRATADA, FRASES_RAPIDAS, OPCOES_TEMPO, PERIODOS,
+  arquivoEmDia, assinanteAspPadrao, cargosRdo, dadosRdoVazio, dataBr, fraseCloro, funcaoDoPerfil, gerarRdoDocx,
   hojeIso, horaValida, horariosNoTexto, nomeArquivoRdo, normalizarDadosRdo, numeroLinha, numeroPh, numeroRdo,
   ordenarAtividades, osDaAmostra, removerEquipamentosRepetidos, removerHorarioDoTexto, semFraseCloro,
   textoAtividade, textoDaFrase, validarRdo,
@@ -60,6 +60,8 @@ interface Agendamento {
 /** O que o sistema já sabe e alimenta as sugestões do formulário. */
 interface Fontes {
   usuarios: { id: string; nome: string; funcao: string | null }[];
+  /** Funções cadastradas (gp_funcoes): cargo no RDO e ordem. null = não lidas. */
+  funcoes: { nome: string; nome_rdo: string | null; ativo: boolean; ordem: number }[] | null;
   procedimentos: { codigo: string; nome: string; equipamentos?: string[]; cloro_unidade?: string; cloro_limite_aviso?: number }[];
   equipamentos: { slug?: string; id?: string; nome: string }[];
   contato: { nome: string; cargo: string } | null;
@@ -68,7 +70,7 @@ interface Fontes {
   checklists: Record<string, string[]>;
   fotos: Record<string, RegistroFotosExecucao | null>;
 }
-const FONTES_VAZIAS: Fontes = { usuarios: [], procedimentos: [], equipamentos: [], contato: null, agendamentos: {}, checklists: {}, fotos: {} };
+const FONTES_VAZIAS: Fontes = { usuarios: [], funcoes: null, procedimentos: [], equipamentos: [], contato: null, agendamentos: {}, checklists: {}, fotos: {} };
 
 const campo: React.CSSProperties = {
   width: "100%", padding: "10px 11px", borderRadius: 8, border: "1px solid var(--borda)",
@@ -103,10 +105,11 @@ function horaAgora(): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/** Ordem da equipe no documento: coordenador, engenheiro, técnico, auxiliar. */
-function ordemFuncao(f: string): number {
-  const i = FUNCOES_RDO.findIndex((x) => x.toLowerCase() === f.trim().toLowerCase());
-  return i === -1 ? FUNCOES_RDO.length : i;
+/** Ordem da equipe no documento: a ordem das funções no cadastro
+ *  (coordenador, engenheiro, técnico, auxiliar…). */
+function ordemFuncao(f: string, cargos: string[]): number {
+  const i = cargos.findIndex((x) => x.toLowerCase() === f.trim().toLowerCase());
+  return i === -1 ? cargos.length : i;
 }
 
 /** Limpa o que vai ao banco: linhas vazias saem, frase de cloro digitada à
@@ -217,6 +220,7 @@ export default function Rdos({
       f = {
         ...f,
         usuarios: usu.usuarios || [],
+        funcoes: Array.isArray(usu.funcoes) ? usu.funcoes : null,
         procedimentos: cat.procedimentos || [],
         equipamentos: cat.equipamentos || [],
         contato: c ? { nome: c.nome_completo || c.nome || "", cargo: c.cargo || "" } : null,
@@ -267,10 +271,11 @@ export default function Rdos({
         const chave = m.id || m.nome;
         if (!m.nome || vistos.has(chave)) continue;
         vistos.add(chave);
-        lista.push({ nome: m.nome, funcao: funcaoDoPerfil(f.usuarios.find((u) => u.id === m.id)?.funcao) });
+        lista.push({ nome: m.nome, funcao: funcaoDoPerfil(f.usuarios.find((u) => u.id === m.id)?.funcao, f.funcoes) });
       }
     }
-    return lista.sort((a, b) => ordemFuncao(a.funcao) - ordemFuncao(b.funcao));
+    const cargos = cargosRdo(f.funcoes);
+    return lista.sort((a, b) => ordemFuncao(a.funcao, cargos) - ordemFuncao(b.funcao, cargos));
   }
 
   /** Equipamentos do checklist de execução; sem checklist, os previstos no
@@ -669,7 +674,7 @@ export default function Rdos({
                   ↻ Puxar do agendamento
                 </button>
               </div>
-              <datalist id="rdo-funcoes">{FUNCOES_RDO.map((f) => <option key={f} value={f} />)}</datalist>
+              <datalist id="rdo-funcoes">{cargosRdo(fontes.funcoes).map((f) => <option key={f} value={f} />)}</datalist>
               {dados.equipe.map((m, i) => (
                 <div key={i} className="rdo-membro">
                   <input style={campo} aria-label={`Nome ${i + 1}`} placeholder="Nome" value={m.nome}

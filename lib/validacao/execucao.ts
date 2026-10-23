@@ -8,10 +8,10 @@
  *     coleta de fotos
  *   · itens de segurança do checklist sem marcar com a execução começando
  *   · equipamento do procedimento fora do agendamento; equipe sem
- *     Coordenador/Engenheiro
+ *     liderança (funções com "Conta como liderança" — gp_funcoes)
  *
  * As regras que BLOQUEIAM (período, sobreposição) ficam em agendamento.ts. */
-import { equipamentosFaltando, funcaoLideranca, segurancaPendente, dataCurta } from "./agendamento";
+import { equipamentosFaltando, equipeSemLideranca, msgSemLideranca, segurancaPendente, dataCurta, type CatalogoLideranca } from "./agendamento";
 import { diaNaoUtil, diasDoPeriodo, Periodo, periodoDe } from "./periodo";
 
 /** Agendamento como a página o tem (gravado). */
@@ -77,6 +77,8 @@ export function avisosExecucao(opts: {
   equipamentosProcedimento?: string[];
   /** Funções por id de usuário. undefined = não checado. */
   funcoes?: Record<string, string | null>;
+  /** Funções cadastradas (quais contam como liderança). */
+  catalogoFuncoes?: CatalogoLideranca | null;
 }): { seguranca: string[]; faltamEquipamentos: string[]; semLideranca: boolean; mensagens: string[] } {
   const { ag, hoje } = opts;
   const vazio = { seguranca: [], faltamEquipamentos: [], semLideranca: false, mensagens: [] };
@@ -85,12 +87,12 @@ export function avisosExecucao(opts: {
   const seguranca = p && p.inicio <= hoje ? segurancaPendente(ag.checklist) : [];
   const faltamEquipamentos = equipamentosFaltando(opts.equipamentosProcedimento, ag.equipamentos || []);
   const equipe = (ag.equipe || []).filter((m) => m && m.id);
-  const semLideranca = !!opts.funcoes && equipe.length > 0 && !equipe.some((m) => funcaoLideranca(opts.funcoes![m.id]));
+  const semLideranca = equipeSemLideranca(equipe, opts.funcoes, opts.catalogoFuncoes);
   const mensagens: string[] = [];
   if (seguranca.length) {
     mensagens.push(`Checklist de segurança incompleto com a execução ${p!.inicio < hoje ? "em andamento" : "começando hoje"}: ${seguranca.join(", ")}.`);
   }
   if (faltamEquipamentos.length) mensagens.push(`Equipamento(s) do procedimento fora do agendamento: ${faltamEquipamentos.join(", ")}.`);
-  if (semLideranca) mensagens.push("Nenhum Coordenador ou Engenheiro na equipe da execução.");
+  if (semLideranca) mensagens.push(`${msgSemLideranca(opts.catalogoFuncoes)}.`);
   return { seguranca, faltamEquipamentos, semLideranca, mensagens };
 }

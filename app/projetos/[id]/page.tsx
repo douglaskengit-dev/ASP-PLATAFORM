@@ -14,6 +14,7 @@ import Modal from "@/app/components/Modal";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { descreverAcaoFase, faseInicial, progressoFase, tituloFase } from "@/lib/asp/fases";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
+import { carregarPermissoesFuncao } from "@/lib/asp/funcoes";
 import FormularioTanque from "@/app/components/FormularioTanque";
 import FormularioProjeto from "@/app/components/FormularioProjeto";
 import Rdos from "@/app/components/Rdos";
@@ -135,7 +136,7 @@ export default function ProjetoDetalhePage() {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const { data: p } = await supabase.from("gp_profiles").select("perfil, funcao").eq("id", data.user.id).single();
-      setPodeExcluir(podeExcluirProjeto(p));
+      setPodeExcluir(podeExcluirProjeto(p ? { ...p, permissoesFuncao: await carregarPermissoesFuncao(supabase, (p as any).funcao) } : null));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);

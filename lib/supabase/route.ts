@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { carregarPermissoesFuncao } from "@/lib/asp/funcoes";
 
 /**
  * Cliente Supabase para uso dentro de Route Handlers (app/api/.../route.ts),
@@ -28,7 +29,9 @@ export function getSupabaseRouteClient() {
 }
 
 /** Retorna o profile (com perfil/permissões) do usuário autenticado na
- * requisição atual, ou null se não houver sessão. */
+ * requisição atual, ou null se não houver sessão. `permissoesFuncao` = as
+ * marcas da função do usuário em gp_funcoes (lidas uma vez aqui; usadas por
+ * lib/asp/permissoes.ts). */
 export async function getProfileAtual() {
   const supabase = getSupabaseRouteClient();
   const {
@@ -38,6 +41,7 @@ export async function getProfileAtual() {
 
   const { data: profile } = await supabase.from("gp_profiles").select("*").eq("id", user.id).single();
   // Pool de auth compartilhado com outro sistema: só entra quem um admin ativou.
-  if (profile && !profile.ativo) return null;
-  return profile;
+  if (!profile || !profile.ativo) return null;
+  const permissoesFuncao = await carregarPermissoesFuncao(supabase, profile.funcao);
+  return { ...profile, permissoesFuncao };
 }

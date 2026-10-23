@@ -74,7 +74,9 @@ export function traduzirErroPerfil(error: { code?: string; message?: string }): 
   }
   if (error.code === "23505" && /email/.test(m)) return { erro: "Já existe um usuário com este e-mail.", campo: "email", status: 409 };
   if (error.code === "23514" && /perfil/.test(m)) return { erro: "Área / Acesso inválida.", campo: "perfil", status: 400 };
-  if (error.code === "23514" && /funcao/.test(m)) return { erro: "Função inválida.", campo: "funcao", status: 400 };
+  if ((error.code === "23514" || error.code === "23503") && /funcao/.test(m)) {
+    return { erro: "Função inválida — escolha uma das funções cadastradas.", campo: "funcao", status: 400 };
+  }
   console.error("[admin/users] gravar perfil:", error.code, m);
   return { erro: "Não foi possível gravar o usuário. Tente de novo em instantes.", campo: null, status: 500 };
 }

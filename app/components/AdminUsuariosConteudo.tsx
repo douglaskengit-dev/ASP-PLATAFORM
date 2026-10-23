@@ -14,15 +14,20 @@
  * "Criar minha senha" (24 h). Cada linha mostra o último convite e oferece
  * "Enviar link de redefinição" (1 h) e, para quem nunca entrou, "Reenviar
  * convite". Se o e-mail não sair, aparece o motivo e "Copiar link" (o link
- * só existe nesta tela, logo após gerar — no banco fica só o hash). */
-import { useEffect, useMemo, useState } from "react";
+ * só existe nesta tela, logo após gerar — no banco fica só o hash).
+ *
+ * Abas: "Usuários" (esta lista) · "Funções" e "Permissões por função"
+ * (AdminFuncoesConteudo.tsx — gp_funcoes). O seletor de Função mostra só as
+ * funções ATIVAS (+ a atual de cada usuário, mesmo desativada). */
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import Modal from "@/app/components/Modal";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
+import { AbaFuncoes, AbaPermissoes, opcoesFuncao, useFuncoesAdmin } from "@/app/components/AdminFuncoesConteudo";
 import {
-  addAviso, addErro, checarAlteracaoAcesso, dataHoraCurta, ehPerfilLegado, FUNCOES_USUARIO, mesclar, nomeCompletoValido,
+  addAviso, addErro, checarAlteracaoAcesso, dataHoraCurta, ehPerfilLegado, mesclar, nomeCompletoValido,
   normalizarEspacos, novoResultado, ROTULOS_USUARIO, SENHA_MINIMA, temErros, validarUsuario, VALIDADE_LINK_TEXTO,
-  type ResultadoValidacao, type TipoLinkAcesso,
+  type FuncaoRef, type ResultadoValidacao, type TipoLinkAcesso,
 } from "@/lib/validacao";
 
 interface Profile {
@@ -47,7 +52,12 @@ const PERFIS_ACESSO = [
 const AREA_POR_PERFIL: Record<string, string> = {
   comercial: "Comercial", operacoes: "Operação", gerencia: "Gerência", admin: "Administração",
 };
-const FUNCOES = FUNCOES_USUARIO as readonly string[];
+type Aba = "usuarios" | "funcoes" | "permissoes";
+const ABAS: { id: Aba; rotulo: string }[] = [
+  { id: "usuarios", rotulo: "Usuários" },
+  { id: "funcoes", rotulo: "Funções" },
+  { id: "permissoes", rotulo: "Permissões por função" },
+];
 
 /** Mensagens de uma linha da lista (resposta da API + resultado do salvar). */
 interface EstadoLinha {
@@ -183,6 +193,12 @@ export default function AdminUsuariosConteudo() {
   /** Erro/aviso geral (carregar a lista) — os de cada usuário ficam na linha. */
   const [erro, setErro] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
+  /** Funções cadastradas (gp_funcoes) — null = não deu para ler. */
+  const [funcoesCad, setFuncoesCad] = useState<FuncaoRef[] | null>(null);
+  const [aba, setAba] = useState<Aba>("usuarios");
+  const [abriuFuncoes, setAbriuFuncoes] = useState(false);
+  const [pendentesPermissoes, setPendentesPermissoes] = useState(0);
+  const estadoFuncoes = useFuncoesAdmin(!!autorizado && abriuFuncoes);
 
   const [novoEmail, setNovoEmail] = useState("");
   const [novoNome, setNovoNome] = useState("");
@@ -234,8 +250,10 @@ export default function AdminUsuariosConteudo() {
   const usuariosVisiveis = usuariosFiltrados.slice(0, qtdVisivel);
   const filtrosAtivos = !!(filtroNome || filtroEmail || filtroPerfil);
 
-  async function carregar() {
-    setCarregando(true);
+  /** `silencioso`: recarrega sem trocar a tela por "Carregando..." (depois
+   *  de mexer nas funções, por exemplo). */
+  async function carregar(silencioso = false) {
+    if (!silencioso) setCarregando(true);
     setErro(null);
     try {
       const supabase = getSupabaseBrowserClient();
@@ -262,6 +280,7 @@ export default function AdminUsuariosConteudo() {
       if (!resp.ok) throw new Error(dados.erro || "Falha ao carregar usuários.");
       setUsuarios(dados.usuarios || []);
       setAcesso(dados.acesso || {});
+      setFuncoesCad(Array.isArray(dados.funcoes) ? dados.funcoes : null);
       setNomes({});
       setLinhas({});
     } catch (err: any) {
@@ -279,10 +298,10 @@ export default function AdminUsuariosConteudo() {
   const rCriar = useMemo(() => mesclar(
     validarUsuario(
       { email: novoEmail, nomeCompleto: novoNome, perfil: novoPerfil, funcao: novaFuncao || null },
-      { usuarios, modo: "criar" }
+      { usuarios, modo: "criar", funcoes: funcoesCad }
     ),
     rApiCriar,
-  ), [novoEmail, novoNome, novoPerfil, novaFuncao, usuarios, rApiCriar]);
+  ), [novoEmail, novoNome, novoPerfil, novaFuncao, usuarios, rApiCriar, funcoesCad]);
 
   const invalidoCriar = (campo: string) => (tentouCriar && rCriar.erros[campo]?.length ? "val-invalido" : undefined);
 
@@ -505,10 +524,49 @@ export default function AdminUsuariosConteudo() {
     }
   }
 
+  const aoMudarFuncoes = useCallback(() => { carregar(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function trocarAba(nova: Aba) {
+    if (nova === aba) return;
+    if (aba === "permissoes" && pendentesPermissoes > 0
+      && !window.confirm("Há permissões marcadas e não salvas. Sair da aba e descartar?")) return;
+    if (aba === "permissoes") setPendentesPermissoes(0);
+    setAba(nova);
+    if (nova !== "usuarios") {
+      // 1ª vez: o hook carrega; depois, recarrega (nº de usuários atualizado).
+      if (abriuFuncoes) estadoFuncoes.carregar(); else setAbriuFuncoes(true);
+    }
+  }
+
   if (carregando) return <p>Carregando...</p>;
 
   if (!autorizado) {
     return <p>Esta página é exclusiva para administradores.</p>;
+  }
+
+  const abas = (
+    <div className="abas-tela" role="tablist" aria-label="Administração de usuários">
+      {ABAS.map((a) => (
+        <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id} aria-controls={`painel-${a.id}`}
+          className="aba-tela" onClick={() => trocarAba(a.id)}>
+          {a.rotulo}
+          {a.id === "permissoes" && pendentesPermissoes > 0 && <span className="chip chip-aviso">{pendentesPermissoes}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (aba !== "usuarios") {
+    return (
+      <div>
+        {abas}
+        <div role="tabpanel" id={`painel-${aba}`} aria-labelledby={`aba-${aba}`}>
+          {aba === "funcoes"
+            ? <AbaFuncoes estado={estadoFuncoes} onMudou={aoMudarFuncoes} />
+            : <AbaPermissoes estado={estadoFuncoes} onMudou={aoMudarFuncoes} onPendentes={setPendentesPermissoes} />}
+        </div>
+      </div>
+    );
   }
 
   // Resumo das linhas com erro (perto do título da lista).
@@ -516,6 +574,8 @@ export default function AdminUsuariosConteudo() {
 
   return (
     <div>
+      {abas}
+      <div role="tabpanel" id="painel-usuarios" aria-labelledby="aba-usuarios">
       <section className="card">
         <h2>Criar novo usuário</h2>
         <div className="grid">
@@ -542,14 +602,15 @@ export default function AdminUsuariosConteudo() {
             <label>Função</label>
             <select value={novaFuncao} onChange={(e) => { setNovaFuncao(e.target.value); setRApiCriar(novoResultado()); }} className={invalidoCriar("funcao")}>
               <option value="">— Selecione —</option>
-              {FUNCOES.map((fn) => <option key={fn} value={fn}>{fn}</option>)}
+              {opcoesFuncao(funcoesCad || []).map((o) => <option key={o.nome} value={o.nome}>{o.rotulo}</option>)}
             </select>
             <MensagensCampo r={rCriar} campo="funcao" mostrarErros={tentouCriar} />
           </div>
         </div>
         <p className="detalhe" style={{ marginTop: 10 }}>
           A <strong>Área</strong> (acesso) define as permissões no fluxo: Comercial (fases 1/2/6), Operações (3/4/7/8),
-          Gerência (aprovações 5/9) e Administrador (tudo). A <strong>Função</strong> é o cargo do colaborador.
+          Gerência (aprovações 5/9) e Administrador (tudo). A <strong>Função</strong> é o cargo do colaborador e pode
+          dar permissões extras (aba “Permissões por função”).
         </p>
         <p className="detalhe" style={{ marginTop: 6 }}>
           ✉️ O usuário recebe por e-mail o convite <strong>“Criar minha senha”</strong> (válido por 24 horas, uso único).
@@ -684,7 +745,7 @@ export default function AdminUsuariosConteudo() {
                   <label>Função</label>
                   <select value={u.funcao || ""} onChange={(e) => atualizarUsuario(u, { funcao: e.target.value || null }, "funcao")}>
                     <option value="">— Não definida —</option>
-                    {FUNCOES.map((fn) => <option key={fn} value={fn}>{fn}</option>)}
+                    {opcoesFuncao(funcoesCad || [], u.funcao).map((o) => <option key={o.nome} value={o.nome} disabled={o.desativada}>{o.rotulo}</option>)}
                   </select>
                   <MensagensCampo r={rLinha} campo="funcao" />
                 </div>
@@ -813,6 +874,7 @@ export default function AdminUsuariosConteudo() {
           </div>
         </Modal>
       )}
+      </div>
     </div>
   );
 }

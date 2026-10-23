@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getProfileAtual } from "@/lib/supabase/route";
 import { carregarUsuarios, traduzirErroAuth, traduzirErroPerfil, CAMPOS_USUARIO } from "@/lib/asp/usuario-api";
 import { emitirLinkAcesso, mesmaOrigem, resumosDeAcesso, senhaAleatoria } from "@/lib/asp/acesso-api";
+import { carregarFuncoes } from "@/lib/asp/funcoes";
 import {
   normalizarEmail, normalizarEspacos, primeiroErro, ROTULOS_USUARIO, temErros, usuarioComEmail, validarUsuario,
 } from "@/lib/validacao";
@@ -20,11 +21,12 @@ export async function GET() {
   const check = await exigirAdmin();
   if ("erro" in check) return NextResponse.json({ erro: check.erro }, { status: check.status });
 
-  const { usuarios, erro } = await carregarUsuarios();
+  const [{ usuarios, erro }, cad] = await Promise.all([carregarUsuarios(), carregarFuncoes(getSupabaseAdmin())]);
   if (erro) return NextResponse.json({ erro }, { status: 500 });
   // Convite/redefinição (último link de cada tipo) e se já entrou alguma vez.
   const acesso = await resumosDeAcesso(usuarios.map((u) => u.id)).catch(() => ({}));
-  return NextResponse.json({ ok: true, usuarios, acesso, meuId: check.profile.id });
+  // Funções cadastradas: o seletor mostra só as ativas (+ a atual de cada um).
+  return NextResponse.json({ ok: true, usuarios, acesso, meuId: check.profile.id, funcoes: cad.erro ? null : cad.funcoes });
 }
 
 /** Só estes campos são aceitos ao criar. Sem senha: a conta nasce com uma
@@ -57,10 +59,12 @@ export async function POST(req: NextRequest) {
   const nome = normalizarEspacos(body.nomeCompleto);
   const dados = { email, nomeCompleto: nome, perfil: body.perfil || "", funcao: body.funcao || null };
 
-  const { usuarios, erro: erroLista } = await carregarUsuarios();
+  const [{ usuarios, erro: erroLista }, cad] = await Promise.all([carregarUsuarios(), carregarFuncoes(getSupabaseAdmin())]);
   if (erroLista) return NextResponse.json({ erro: erroLista }, { status: 500 });
+  if (cad.erro) return NextResponse.json({ erro: cad.erro }, { status: 500 });
 
-  const r = validarUsuario(dados, { usuarios, modo: "criar" });
+  // Função: só cadastrada e ativa (lib/validacao/funcao.ts).
+  const r = validarUsuario(dados, { usuarios, modo: "criar", funcoes: cad.funcoes });
   if (temErros(r)) {
     const duplicado = !!usuarioComEmail(email, usuarios);
     return NextResponse.json(
