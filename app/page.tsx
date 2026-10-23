@@ -20,7 +20,7 @@ export default function PaginaInicial() {
   return (
     <main className="landing">
       <div className="landing-conteudo">
-        <Image src="/assets/asp-badge.svg" alt="ASP" width={80} height={80} priority />
+        <Image src="/assets/asp-logo-branco.svg" alt="ASP — Advanced Services Provider" width={238} height={88} priority />
 
         <span className="landing-marca">ASP</span>
 

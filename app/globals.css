@@ -169,13 +169,16 @@ h4 { font-size: var(--fs-md); }
   box-shadow: var(--sombra-2);
 }
 .login-marca { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 16px; }
+/* Assinatura completa (símbolo + ADVANCED SERVICES PROVIDER): azul no tema
+   claro, palavras em branco no escuro — só uma das duas imagens aparece. */
 .card-login .logo {
-  width: 60px;
   height: 60px;
-  border-radius: 50%;
-  object-fit: cover;
+  width: auto;
   display: block;
 }
+.card-login .logo-escuro { display: none; }
+[data-theme="dark"] .card-login .logo-claro { display: none; }
+[data-theme="dark"] .card-login .logo-escuro { display: block; }
 .login-mascote { height: 60px; width: auto; }
 .card-login h1 {
   margin: 0;
