@@ -3,9 +3,9 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { NovoContatoInput, TipoEnte } from "@/lib/orgaos/types";
-import { clientesCadastrados } from "@/lib/orgaos/validacao-api";
+import { cidadesDaUf, clientesCadastrados } from "@/lib/orgaos/validacao-api";
 import {
-  cnpjRepetido, contatoParaGravar, contatoVazio, mesclar, normalizarCnpj, normalizarEspacos, primeiroErro,
+  cnpjRepetido, contatoParaGravar, contatoVazio, mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, primeiroErro,
   ROTULOS_CLIENTE, temErros, validarCliente, validarContatos,
 } from "@/lib/validacao";
 
@@ -21,6 +21,20 @@ interface NovoOrgaoBody {
   uf: string;
   endereco?: string;
   contatos?: NovoContatoInput[];
+}
+
+async function limparLixeiraVencida() {
+  const admin = getSupabaseAdmin();
+  const corte = new Date(Date.now() - DIAS_LIXEIRA * 86400000).toISOString();
+  const { data: vencidos } = await admin.from("gp_orgaos").select("id").lt("excluido_em", corte);
+  const ids = (vencidos || []).map((o: any) => o.id as string);
+  if (!ids.length) return;
+  const { data: usados } = await admin.from("gp_projetos").select("cliente_id").in("cliente_id", ids);
+  const comProjeto = new Set((usados || []).map((p: any) => p.cliente_id));
+  for (const id of ids.filter((x) => !comProjeto.has(x))) {
+    // Outras referências (processos, propostas…) recusam com 23503: fica.
+    await admin.from("gp_orgaos").delete().eq("id", id);
+  }
 }
 
 /** Lista órgãos cadastrados, em ordem alfabética por razão social, com
@@ -39,9 +53,10 @@ export async function GET(req: NextRequest) {
   const ate = searchParams.get("ate")?.trim();
   const lixeira = searchParams.get("lixeira") === "1";
 
-  // Limpeza preguiçosa dos clientes que passaram de 30 dias na lixeira.
-  const corte = new Date(Date.now() - DIAS_LIXEIRA * 86400000).toISOString();
-  await getSupabaseAdmin().from("gp_orgaos").delete().lt("excluido_em", corte);
+  // Limpeza preguiçosa dos clientes que passaram de 30 dias na lixeira — só
+  // os que nenhum projeto referencia (os demais ficam na lixeira; excluir
+  // de vez exige excluir os projetos antes).
+  await limparLixeiraVencida();
 
   const supabase = getSupabaseRouteClient();
   let query = supabase
@@ -87,8 +102,8 @@ export async function POST(req: NextRequest) {
   // Contatos são opcionais no cadastro, mas um bloco começado é validado
   // inteiro. Regras em lib/validacao/cliente.ts (as mesmas da tela); a lista
   // vai inteira para o índice das mensagens casar com o bloco na tela.
-  const ctx = { clientes: await clientesCadastrados() };
-  const resultado = mesclar(validarCliente(body, ctx), validarContatos(body.contatos || []));
+  const ctx = { clientes: await clientesCadastrados(), cidades: await cidadesDaUf(body.uf) };
+  const resultado = mesclar(validarCliente({ ...body, endereco: body.endereco ?? "" }, ctx), validarContatos(body.contatos || []));
   const contatos = (body.contatos || []).filter((c) => !contatoVazio(c));
   if (!body.tipoEnte) resultado.erros.tipoEnte = ["Informe o tipo do ente."];
   if (temErros(resultado)) {
@@ -109,8 +124,8 @@ export async function POST(req: NextRequest) {
       tipo_ente: body.tipoEnte,
       razao_social: normalizarEspacos(body.razaoSocial),
       cnpj: cnpjDigitos,
-      cidade: normalizarEspacos(body.cidade),
-      uf: body.uf.trim(),
+      cidade: normalizarCidade(body.cidade),
+      uf: body.uf.trim().toUpperCase(),
       endereco: normalizarEspacos(body.endereco) || null,
     })
     .select("*")

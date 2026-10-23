@@ -5,13 +5,14 @@
  * formulário completo (tipo, razão social, CNPJ, cidade, UF e contatos),
  * em vez do atalho reduzido que existia antes.
  * Validação: lib/validacao/cliente.ts (CNPJ válido e único, razão social
- * parecida, contatos), mensagens junto de cada campo + resumo no botão. */
+ * parecida, cidade com outra grafia na mesma UF, endereço em branco,
+ * contatos), mensagens junto de cada campo + resumo no botão. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NovoContatoInput, OrgaoComAcoes, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import {
-  ClienteRef, mesclar, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao,
+  cidadesParecidas, ClienteRef, mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao,
   ROTULOS_CLIENTE, temErros, validarCliente, validarContatos,
 } from "@/lib/validacao";
 
@@ -36,6 +37,35 @@ export function useClientesConflitantes(cnpj: string, razaoSocial: string, exclu
     return () => clearTimeout(t);
   }, [digitos, razao, excluirId]);
   return clientes;
+}
+
+/** Grafias de cidade já usadas por clientes na UF (/api/orgaos/verificar). */
+export function useCidadesDaUf(uf: string, excluirId?: string): string[] {
+  const [cidades, setCidades] = useState<string[]>([]);
+  useEffect(() => {
+    let vivo = true;
+    if (!uf) { setCidades([]); return; }
+    const q = new URLSearchParams({ uf, excluirId: excluirId || "" });
+    fetch(`/api/orgaos/verificar?${q}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && vivo) setCidades(d.cidades || []); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [uf, excluirId]);
+  return cidades;
+}
+
+/** Botões "Usar “São José dos Campos”" para a cidade com outra grafia. */
+export function SugestoesCidade({ cidade, cidades, onUsar }: { cidade: string; cidades: string[]; onUsar: (c: string) => void }) {
+  const sugestoes = cidadesParecidas(cidade, cidades);
+  if (!sugestoes.length) return null;
+  return (
+    <>
+      {sugestoes.map((c) => (
+        <button key={c} type="button" className="val-acao" onClick={() => onUsar(c)}>Usar “{c}”</button>
+      ))}
+    </>
+  );
 }
 
 function novoContatoVazio(): NovoContatoInput {
@@ -65,9 +95,14 @@ export default function FormularioOrgao({
   const [servidor, setServidor] = useState<ResultadoValidacao>(novoResultado());
 
   const conflitantes = useClientesConflitantes(cnpj, razaoSocial);
+  const cidadesUf = useCidadesDaUf(uf);
   const resultado = useMemo(
-    () => mesclar(validarCliente({ razaoSocial, cnpj, cidade, uf }, { clientes: conflitantes }), validarContatos(contatos), servidor),
-    [razaoSocial, cnpj, cidade, uf, conflitantes, contatos, servidor]
+    () => mesclar(
+      validarCliente({ razaoSocial, cnpj, cidade, uf, endereco }, { clientes: conflitantes, cidades: cidadesUf }),
+      validarContatos(contatos),
+      servidor
+    ),
+    [razaoSocial, cnpj, cidade, uf, endereco, conflitantes, cidadesUf, contatos, servidor]
   );
   /** Erro de campo vazio só aparece depois de tentar salvar. */
   const mostrar = (valor: string | undefined) => tentou || !!valor?.trim();
@@ -145,13 +180,17 @@ export default function FormularioOrgao({
         </div>
         <div className="field">
           <label>Cidade *</label>
-          <input value={cidade} onChange={(e) => setCidade(e.target.value)} />
-          <MensagensCampo r={resultado} campo="cidade" mostrarErros={tentou} />
+          <input value={cidade} onChange={(e) => setCidade(e.target.value)} onBlur={() => setCidade((v) => normalizarCidade(v))} />
+          <MensagensCampo r={resultado} campo="cidade" mostrarErros={tentou}>
+            <SugestoesCidade cidade={cidade} cidades={cidadesUf} onUsar={setCidade} />
+          </MensagensCampo>
         </div>
         <div className="field">
           <label>Endereço</label>
           <input value={endereco} onChange={(e) => setEndereco(e.target.value)}
+            onBlur={() => setEndereco((v) => normalizarEspacos(v))}
             placeholder="Rua, número, bairro — usado como padrão nos projetos" />
+          {tentou && <MensagensCampo r={resultado} campo="endereco" />}
         </div>
         <div className="field">
           <label>UF *</label>

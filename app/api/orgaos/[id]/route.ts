@@ -3,8 +3,12 @@ import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { podeExcluirProjeto } from "@/lib/asp/permissoes";
 import { TipoEnte } from "@/lib/orgaos/types";
-import { clientesCadastrados } from "@/lib/orgaos/validacao-api";
-import { cnpjRepetido, normalizarCnpj, normalizarEspacos, primeiroErro, ROTULOS_CLIENTE, temErros, validarCliente } from "@/lib/validacao";
+import { mesmaVersao } from "@/lib/asp/usuario-api";
+import { cidadesDaUf, clientesCadastrados, projetosParaExclusao } from "@/lib/orgaos/validacao-api";
+import {
+  cnpjRepetido, conflitoRestauracao, decisaoExcluirCliente, msgVersaoCliente, normalizarCidade, normalizarCnpj, normalizarEspacos,
+  primeiroErro, ROTULOS_CLIENTE, temErros, validarCliente,
+} from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
@@ -86,9 +90,13 @@ interface EditarOrgaoBody {
   uf: string;
   /** Endereço da sede — vira sugestão de "Endereço da obra" nos projetos. */
   endereco?: string;
+  /** updated_at lido ao abrir a edição (concorrência otimista). */
+  versao?: string;
 }
 
-/** Edita os dados cadastrais do órgão (tipo, razão social, CNPJ, cidade, UF, endereço). */
+/** Edita os dados cadastrais do órgão (tipo, razão social, CNPJ, cidade, UF,
+ * endereço). Grava só se ninguém salvou depois de `versao` (senão 409).
+ * Também: { restaurar: true } tira da lixeira. */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {
@@ -96,22 +104,50 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const body = (await req.json()) as EditarOrgaoBody & { restaurar?: boolean };
+  const admin = getSupabaseAdmin();
+  const { data: atual, error: eAtual } = await admin.from("gp_orgaos").select("*").eq("id", params.id).maybeSingle();
+  if (eAtual) return NextResponse.json({ erro: eAtual.message }, { status: 500 });
+  if (!atual) return NextResponse.json({ erro: "Cliente não encontrado — pode ter sido excluído. Recarregue." }, { status: 404 });
 
-  // Restaurar da lixeira (mesma permissão de excluir).
+  // Restaurar da lixeira (mesma permissão de excluir). Não volta se o CNPJ
+  // ou a razão social já estão num cliente ativo.
   if (body.restaurar) {
     if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Sem permissão para restaurar." }, { status: 403 });
-    const { error } = await getSupabaseAdmin()
+    const conflito = conflitoRestauracao(atual, await clientesCadastrados());
+    if (conflito) return NextResponse.json({ erro: conflito.mensagem, conflito: conflito.cliente }, { status: 409 });
+    const { error } = await admin
       .from("gp_orgaos")
       .update({ excluido_em: null, excluido_por: null, updated_at: new Date().toISOString() })
       .eq("id", params.id);
-    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    if (error) {
+      const duplicado = (error as any)?.code === "23505";
+      return NextResponse.json(
+        { erro: duplicado ? "Não dá para restaurar: o CNPJ já está em outro cliente." : error.message },
+        { status: duplicado ? 409 : 500 }
+      );
+    }
     return NextResponse.json({ ok: true });
+  }
+
+  if (atual.excluido_em) {
+    return NextResponse.json({ erro: "Este cliente está na lixeira — restaure-o antes de editar." }, { status: 409 });
+  }
+  if (!body.versao) {
+    return NextResponse.json({ erro: "Versão do cliente ausente — recarregue a página e tente de novo." }, { status: 400 });
+  }
+  if (!mesmaVersao(body.versao, atual.updated_at)) {
+    return NextResponse.json({ erro: msgVersaoCliente(atual.updated_at), conflitoVersao: true }, { status: 409 });
   }
 
   // Regras em lib/validacao/cliente.ts (as mesmas da tela); CNPJ comparado
   // só pelos dígitos, inclusive com clientes na lixeira.
-  const ctx = { clientes: await clientesCadastrados(), excluirId: params.id };
-  const resultado = validarCliente(body, ctx);
+  const ctx = {
+    clientes: await clientesCadastrados(),
+    excluirId: params.id,
+    cidades: await cidadesDaUf(body.uf, params.id),
+    razaoSocialAtual: atual.razao_social,
+  };
+  const resultado = validarCliente({ ...body, endereco: body.endereco ?? "" }, ctx);
   if (!body.tipoEnte) resultado.erros.tipoEnte = ["Informe o tipo do ente."];
   if (temErros(resultado)) {
     const conflito = cnpjRepetido(body.cnpj, ctx);
@@ -124,22 +160,23 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const supabase = getSupabaseRouteClient();
   const cnpjDigitos = normalizarCnpj(body.cnpj);
 
-  const { data, error } = await supabase
+  // Grava só se a versão ainda é a lida (ninguém salvou no meio).
+  const { data: salvos, error } = await supabase
     .from("gp_orgaos")
     .update({
       tipo_ente: body.tipoEnte,
       razao_social: normalizarEspacos(body.razaoSocial),
       cnpj: cnpjDigitos,
-      cidade: normalizarEspacos(body.cidade),
-      uf: body.uf.trim(),
+      cidade: normalizarCidade(body.cidade),
+      uf: body.uf.trim().toUpperCase(),
       endereco: normalizarEspacos(body.endereco) || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", params.id)
-    .select("*")
-    .single();
+    .eq("updated_at", atual.updated_at)
+    .select("*");
 
-  if (error || !data) {
+  if (error) {
     const duplicado = (error as any)?.code === "23505";
     return NextResponse.json(
       {
@@ -150,19 +187,51 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       { status: duplicado ? 409 : 500 }
     );
   }
+  if (!salvos || salvos.length === 0) {
+    const { data: agora } = await admin.from("gp_orgaos").select("updated_at").eq("id", params.id).maybeSingle();
+    return NextResponse.json({ erro: msgVersaoCliente((agora as any)?.updated_at), conflitoVersao: true }, { status: 409 });
+  }
 
-  return NextResponse.json({ ok: true, orgao: data, avisos: resultado.avisos });
+  return NextResponse.json({ ok: true, orgao: salvos[0], avisos: resultado.avisos });
 }
 
-/** Exclusão do cliente — lixeira (soft) por padrão; ?definitivo=1 apaga. */
+/** Exclusão do cliente — lixeira (soft) por padrão; ?definitivo=1 apaga.
+ *  Lixeira: ⛔ com projeto em andamento; ⚠️ com projetos concluídos ou na
+ *  lixeira pede ?confirmar=1 (a resposta 409 traz o texto). Definitivo: só
+ *  sem nenhum projeto (nem na lixeira). */
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   if (!podeExcluirProjeto(profile)) return NextResponse.json({ erro: "Você não tem permissão para excluir clientes." }, { status: 403 });
   const admin = getSupabaseAdmin();
-  if (req.nextUrl.searchParams.get("definitivo") === "1") {
+  const definitivo = req.nextUrl.searchParams.get("definitivo") === "1";
+
+  const { projetos, erro: eProj } = await projetosParaExclusao(params.id);
+  if (eProj) return NextResponse.json({ erro: eProj }, { status: 500 });
+  const decisao = decisaoExcluirCliente(projetos, definitivo);
+  if (decisao.bloqueio) {
+    return NextResponse.json({ erro: decisao.bloqueio, bloqueado: true, projetos: decisao.projetos }, { status: 409 });
+  }
+  if (decisao.confirmar && req.nextUrl.searchParams.get("confirmar") !== "1") {
+    return NextResponse.json(
+      { erro: decisao.confirmar, precisaConfirmar: true, texto: decisao.confirmar, projetos: decisao.projetos },
+      { status: 409 }
+    );
+  }
+
+  if (definitivo) {
     const { error } = await admin.from("gp_orgaos").delete().eq("id", params.id);
-    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+    if (error) {
+      // 23503 = ainda referenciado (projeto criado no meio, processo/proposta
+      // do Follow-up, ofício…): mensagem clara em vez do erro cru do banco.
+      if ((error as any).code === "23503") {
+        return NextResponse.json({
+          erro: "Este cliente ainda é usado por outros registros (projetos, processos do Follow-up, propostas ou ofícios) e não pode ser excluído definitivamente. Ele continua na lixeira.",
+          bloqueado: true,
+        }, { status: 409 });
+      }
+      return NextResponse.json({ erro: error.message }, { status: 500 });
+    }
     return NextResponse.json({ ok: true, definitivo: true });
   }
   const { error } = await admin

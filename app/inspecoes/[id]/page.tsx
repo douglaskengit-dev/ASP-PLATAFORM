@@ -85,7 +85,7 @@ import {
 import { arquivosDaOS, enviarLaudoPdf, examinarLaudoLocal } from "@/lib/asp/laudo-pdf";
 import EncerramentoOS from "@/app/components/EncerramentoOS";
 import EntregasCliente from "@/app/components/EntregasCliente";
-import { agendamentoFuturo, ativoNoCatalogo, textoEncerrada } from "@/lib/validacao";
+import { agendamentoFuturo, ativoNoCatalogo, contatosAtivos, textoEncerrada } from "@/lib/validacao";
 
 interface Projeto {
   id: string;
@@ -423,12 +423,12 @@ export default function InspecaoDetalhePage() {
   const acoes = useMemo(() => (insp ? acoesDisponiveis(perfil, insp.fase) : []), [insp, perfil]);
 
   // Contato do cliente: preenche o campo "Contato" do tópico 1 do relatório.
-  // Usa o primeiro contato cadastrado (o principal); o campo segue editável.
+  // Usa o primeiro contato ATIVO cadastrado (o principal); o campo segue editável.
   const clienteId = insp?.projeto?.cliente?.id;
   useEffect(() => {
     if (!clienteId) { setContatoCliente(""); return; }
     fetch(`/api/orgaos/${clienteId}`).then((r) => (r.ok ? r.json() : {})).then((d: any) => {
-      const c = (d.orgao?.contatos || [])[0];
+      const c = contatosAtivos<any>(d.orgao?.contatos)[0];
       const nome = c?.nome_completo || c?.nome || "";
       setContatoCliente(nome && c?.cargo ? `${nome} (${c.cargo})` : nome);
     }).catch(() => {});

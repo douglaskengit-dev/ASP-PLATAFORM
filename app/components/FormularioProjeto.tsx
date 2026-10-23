@@ -17,7 +17,7 @@ import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo
 import { mascaraTelefone } from "@/lib/mascaras";
 import {
   ContextoProjeto, DadosContato, hojeBrasil, mesclar, normalizarCodigoProjeto, novoResultado,
-  ResultadoValidacao, ROTULOS_PROJETO, temErros, validarContato, validarProjeto, contatosParecidos,
+  ResultadoValidacao, ROTULOS_PROJETO, temErros, validarContato, validarProjeto, contatosParecidos, contatosAtivos,
 } from "@/lib/validacao";
 
 interface Orgao {
@@ -34,6 +34,10 @@ interface Contato {
   cargo: string;
   telefone: string | null;
   email: string;
+  /** false = desativado: não aparece para nova escolha. */
+  ativo?: boolean;
+  /** Versão do contato (concorrência ao "Atualizar contato"). */
+  updated_at?: string;
 }
 
 export interface DadosFormProjeto {
@@ -139,8 +143,10 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
     fetch(`/api/orgaos/${clienteId}`)
       .then((r) => (r.ok ? r.json() : {}))
       .then((d: any) => {
-        const lista: Contato[] = d.orgao?.contatos || [];
-        setContatos(lista);
+        const todos: Contato[] = d.orgao?.contatos || [];
+        // Desativados não entram em escolha nova (a edição ainda resolve o atual).
+        const lista = contatosAtivos(todos);
+        setContatos(todos);
         if (d.orgao?.endereco) {
           setOrgaos((p) => p.map((o) => (o.id === clienteId ? { ...o, endereco: d.orgao.endereco } : o)));
         }
@@ -149,7 +155,7 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
         if (!lista.length && !edicao) setUsarContato(false);
         // Na edição, se o responsável já é um contato, ele fica marcado.
         if (edicao) {
-          const atual = lista.find((c) => c.nome_completo.trim() === (inicial?.responsavelProjeto || "").trim());
+          const atual = todos.find((c) => c.nome_completo.trim() === (inicial?.responsavelProjeto || "").trim());
           if (atual) { setUsarContato(true); setContatoSel(atual.id); setContatoUsado(atual.id); }
         }
       })
@@ -179,6 +185,11 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
 
   const cliente = orgaos.find((o) => o.id === form.clienteId);
   const contatoEscolhido = contatos.find((c) => c.id === contatoSel) || null;
+  /** Contatos oferecidos para escolha: ativos + o que o projeto já usa. */
+  const contatosEscolha = useMemo(
+    () => contatos.filter((c) => c.ativo !== false || c.id === contatoUsado),
+    [contatos, contatoUsado]
+  );
 
   /** "Usar como está": responsável = nome do contato; endereço da obra =
    *  endereço do cliente, só se ainda estiver vazio. */
@@ -206,19 +217,29 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
     }
   }
 
-  async function salvarContato() {
+  async function salvarContato(confirmarRenomeacao = false) {
     if (!editor || !form.clienteId) return;
     setSalvandoContato(true);
     try {
       const url = editor.modo === "novo"
         ? `/api/orgaos/${form.clienteId}/contatos`
         : `/api/orgaos/${form.clienteId}/contatos/${editor.dados.id}`;
+      const versao = contatos.find((c) => c.id === editor.dados.id)?.updated_at;
       const r = await fetch(url, {
         method: editor.modo === "novo" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editor.dados),
+        body: JSON.stringify(editor.modo === "novo" ? editor.dados : { ...editor.dados, versao, confirmarRenomeacao }),
       });
       const d = await r.json();
+      if (r.status === 409 && d.precisaConfirmar) {
+        // O contato é responsável de outros projetos deste cliente: confirma
+        // e o nome novo vai para eles também (RDOs/relatórios não mudam).
+        setSalvandoContato(false);
+        if (confirm(`⚠️ ${d.texto}
+
+Salvar e atualizar o responsável desses projetos?`)) await salvarContato(true);
+        return;
+      }
       if (!r.ok) {
         setEditor((e) => e && { ...e, servidor: { erros: d.erros || { nomeCompleto: [d.erro || "Falha ao salvar o contato."] }, avisos: d.avisos || {} } });
         return;
@@ -253,12 +274,12 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
 
   const resultadoContato = useMemo(() => {
     if (!editor) return novoResultado();
-    return mesclar(validarContato(editor.dados, contatos.map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email }))), editor.servidor || novoResultado());
+    return mesclar(validarContato(editor.dados, contatos.map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email, ativo: c.ativo !== false }))), editor.servidor || novoResultado());
   }, [editor, contatos]);
 
   /** Erro só aparece depois de mexer no campo, se ele já tem valor, ou na tentativa de salvar. */
   const mostrar = (campo: keyof DadosFormProjeto) => tentou || tocados.has(campo) || !!form[campo]?.trim();
-  const parecidos = usarContato === false ? contatosParecidos(form.responsavelProjeto, contatos) : [];
+  const parecidos = usarContato === false ? contatosParecidos(form.responsavelProjeto, contatosEscolha) : [];
 
   async function salvar() {
     setTentou(true);
@@ -329,7 +350,7 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
       {form.clienteId && (
         carregandoContatos ? (
           <p className="detalhe" style={{ margin: 0 }}>Carregando contatos do cliente…</p>
-        ) : contatos.length === 0 ? (
+        ) : contatosEscolha.length === 0 ? (
           <div className="val-contato">
             <p className="val-msg val-aviso">⚠️ Este cliente não tem contatos cadastrados. Cadastre um para o responsável ficar padronizado.</p>
             {!editor && (
@@ -349,12 +370,12 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
             </div>
             {usarContato === true && !editor && (
               <div className="val-contato" style={{ marginTop: 8 }}>
-                {contatos.length > 1 && (
+                {contatosEscolha.length > 1 && (
                   <div role="radiogroup" aria-label="Contato do cliente">
-                    {contatos.map((c) => (
+                    {contatosEscolha.map((c) => (
                       <label key={c.id} className="val-contato-opcao">
                         <input type="radio" name="contato-projeto" checked={contatoSel === c.id} onChange={() => setContatoSel(c.id)} />
-                        <span>{c.nome_completo}{c.cargo ? ` — ${c.cargo}` : ""}{contatoUsado === c.id ? " ✓" : ""}</span>
+                        <span>{c.nome_completo}{c.cargo ? ` — ${c.cargo}` : ""}{c.ativo === false ? " (desativado)" : ""}{contatoUsado === c.id ? " ✓" : ""}</span>
                       </label>
                     ))}
                   </div>
@@ -401,7 +422,7 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
           </div>
           <p className="detalhe" style={{ margin: 0 }}>Fica gravado no cadastro do cliente e passa a ser o responsável do projeto.</p>
           <div className="val-acoes">
-            <button type="button" className="btn-azul" disabled={salvandoContato || temErros(validarContato(editor.dados, contatos.map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email }))))} onClick={salvarContato}>
+            <button type="button" className="btn-azul" disabled={salvandoContato || temErros(validarContato(editor.dados, contatos.map((c) => ({ id: c.id, nome_completo: c.nome_completo, email: c.email, ativo: c.ativo !== false }))))} onClick={() => salvarContato()}>
               {salvandoContato ? "Salvando…" : "Salvar contato e usar"}
             </button>
             <button type="button" className="btn-azul btn-sec" onClick={() => setEditor(null)} disabled={salvandoContato}>Cancelar</button>
@@ -418,7 +439,7 @@ export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtu
             className={mostrar("responsavelProjeto") && resultado.erros.responsavelProjeto ? "val-invalido" : undefined}
             placeholder={usarContato === true ? "escolha o contato acima" : "responsável pelo projeto"} />
           <datalist id="sug-responsavel">
-            {contatos.map((c) => <option key={c.id} value={c.nome_completo} />)}
+            {contatosEscolha.map((c) => <option key={c.id} value={c.nome_completo} />)}
           </datalist>
           <MensagensCampo r={resultado} campo="responsavelProjeto" mostrarErros={tentou}>
             {parecidos.map((c) => (

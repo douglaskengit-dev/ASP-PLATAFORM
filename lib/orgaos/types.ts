@@ -47,6 +47,12 @@ export interface Contato {
   telefone: string;
   email: string;
   created_at: string;
+  /** false = desativado: some das novas escolhas, segue onde já foi usado.
+   *  Ausente antes da migração 20261102100000 (= ativo). */
+  ativo?: boolean;
+  desativado_em?: string | null;
+  /** Versão (concorrência otimista) — ausente antes da migração. */
+  updated_at?: string;
 }
 
 export interface Orgao {
