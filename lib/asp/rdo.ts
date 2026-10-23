@@ -25,6 +25,7 @@
 import {
   addAviso, addErro, novoResultado, type ResultadoValidacao,
 } from "../validacao/resultado";
+import { encontrarFuncao, FUNCOES_PADRAO, ordenarFuncoes, type FuncaoRef } from "../validacao/funcao";
 import { duplicadosEmLista, normalizarNome, normalizarTexto, semPontuacao } from "../validacao/texto";
 import { UNIDADE_CLORO_PADRAO, unidadeCloroValida, type UnidadeCloro } from "./fotos-execucao";
 
@@ -222,15 +223,31 @@ export function linhaTempo(rotulo: string, t: Tempo | null): string {
   return `${rotulo}: ` + OPCOES_TEMPO.map((o) => `(${o.id === t ? "x" : " "}) ${o.rotulo}`).join(" ");
 }
 
-/** Função do cadastro do usuário (Coordenador/Engenheiro/Técnico) → função
- *  usada no RDO. Sem função cadastrada, fica em branco para escolher. */
-export function funcaoDoPerfil(funcao?: string | null): string {
+/** Função do cadastro do usuário → cargo usado no RDO: o "nome no RDO" da
+ *  função em gp_funcoes (Administração de usuários → Funções). Sem a lista
+ *  (ou função fora dela), vale o mapeamento antigo. Sem função cadastrada,
+ *  fica em branco para escolher. */
+export function funcaoDoPerfil(funcao?: string | null, catalogo?: Pick<FuncaoRef, "nome" | "nome_rdo">[] | null): string {
+  const cad = encontrarFuncao(funcao, catalogo || FUNCOES_PADRAO);
+  if (cad?.nome_rdo?.trim()) return cad.nome_rdo.trim();
   const f = (funcao || "").trim().toLowerCase();
   if (f.startsWith("coord")) return "Coordenador de operações";
   if (f.startsWith("eng")) return "Engenheiro de operações";
   if (f.startsWith("t")) return "Técnico de operações";
   if (f.startsWith("aux")) return "Auxiliar de operações";
   return "";
+}
+
+/** Cargos sugeridos no RDO: "nome no RDO" das funções ativas, na ordem do
+ *  cadastro. Sem a lista, os fixos (FUNCOES_RDO). */
+export function cargosRdo(catalogo?: Pick<FuncaoRef, "nome" | "nome_rdo" | "ativo" | "ordem">[] | null): string[] {
+  if (!catalogo || catalogo.length === 0) return [...FUNCOES_RDO];
+  const out: string[] = [];
+  for (const f of ordenarFuncoes(catalogo)) {
+    const c = (f.nome_rdo || "").trim();
+    if (f.ativo && c && !out.some((x) => x.toLowerCase() === c.toLowerCase())) out.push(c);
+  }
+  return out;
 }
 
 /** Assinatura padrão da ASP: o primeiro Coordenador da equipe, senão o primeiro. */

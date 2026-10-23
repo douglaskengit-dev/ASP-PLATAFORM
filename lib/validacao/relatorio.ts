@@ -7,7 +7,8 @@
  *      OS/tipo · tipo segue a fase (inspeção até a 5, execução da 6 em
  *      diante) · arquivo PDF/DOCX de verdade, até 30 MB · o mesmo arquivo já
  *      enviado nesta OS · revisão/código só mudam à mão por Admin, Gerência
- *      ou Coordenador · datas válidas; data do relatório nem futura nem antes
+ *      ou função com "Editar revisão/código" · datas válidas; data do
+ *      relatório nem futura nem antes
  *      da coleta · horários da limpeza em ordem · cliente/TAG/procedimento
  *      iguais ao cadastro · fotos: repetida, sem legenda, duas na mesma vaga,
  *      formato ≠ PNG/JPEG, mais de 10 MB
@@ -380,8 +381,8 @@ export function validarRelatorio(s: SnapshotRelatorio, ctx: ContextoRelatorio): 
   const revMudou = rev !== String(ctx.revisaoEsperada);
   const codMudou = cod !== normalizarEspacos(ctx.codigoEsperado);
   if (!ctx.podeEditarRevisao) {
-    if (revMudou) addErro(r, "revisao", `A revisão é calculada pelo sistema (Rev${ctx.revisaoEsperada}) — só Admin, Gerência ou Coordenador podem alterar.`);
-    if (codMudou) addErro(r, "relatorioCodigo", `O código é calculado pelo sistema (“${ctx.codigoEsperado || "sem código do projeto"}”) — só Admin, Gerência ou Coordenador podem alterar.`);
+    if (revMudou) addErro(r, "revisao", `A revisão é calculada pelo sistema (Rev${ctx.revisaoEsperada}) — só Admin, Gerência ou uma função com “Editar revisão/código” podem alterar.`);
+    if (codMudou) addErro(r, "relatorioCodigo", `O código é calculado pelo sistema (“${ctx.codigoEsperado || "sem código do projeto"}”) — só Admin, Gerência ou uma função com “Editar revisão/código” podem alterar.`);
   } else {
     if (rev && !/^\d{1,3}$/.test(rev)) addErro(r, "revisao", "A revisão é um número inteiro (0, 1, 2…).");
     else if (revMudou) addAviso(r, "revisao", `Diferente da calculada pelo sistema (Rev${ctx.revisaoEsperada}).`);

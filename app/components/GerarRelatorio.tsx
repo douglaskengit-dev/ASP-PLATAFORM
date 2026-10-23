@@ -9,7 +9,7 @@
  *
  * Fase 4 (validação): cliente, TAG, endereço e procedimento vêm do cadastro
  * (só leitura); revisão e código são calculados (editáveis só por Admin,
- * Gerência ou Coordenador); datas são campos de data (ISO, saem dd/mm/aaaa);
+ * Gerência ou função com "Editar revisão/código"); datas são campos de data (ISO, saem dd/mm/aaaa);
  * pessoas são escolhidas por usuário (id); as fotos são conferidas (formato,
  * tamanho, repetida, legenda, vaga) e salvas com o rascunho. Regras em
  * lib/validacao/relatorio.ts — a API repete as que bloqueiam.
@@ -79,7 +79,7 @@ interface Props {
   /** Revisão (reprovações do mesmo tipo) e código da capa, calculados. */
   revisaoEsperada: number;
   codigoEsperado: string;
-  /** Admin, Gerência ou Coordenador: podem corrigir revisão/código à mão. */
+  /** Admin, Gerência ou função com "Editar revisão/código": podem corrigir revisão/código à mão. */
   podeEditarRevisao: boolean;
   /** Equipe do agendamento do mesmo tipo (ids) — já vem marcada. */
   equipeAgendada: string[];
@@ -1490,7 +1490,7 @@ export default function GerarRelatorio({
                 onChange={(e) => mudarRevisao(e.target.value)} />
               <span className="detalhe">
                 Reprovações (“Ajustar”) deste tipo de relatório nesta OS: Rev{revisaoEsperada}. Compõe o campo Relatório.
-                {!podeEditarRevisao && " Só Admin, Gerência ou Coordenador corrigem à mão."}
+                {!podeEditarRevisao && " Só Admin, Gerência ou uma função com “Editar revisão/código” corrigem à mão."}
               </span>
               <MensagensCampo r={r} campo="revisao" />
             </div>

@@ -134,7 +134,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 /** Exclusão do projeto. Padrão = lixeira (soft): marca excluido_em e o projeto
  * fica recuperável por 30 dias. ?definitivo=1 apaga de vez. Permissão:
- * Comercial/Gerência/Admin ou Função Coordenador. */
+ * Comercial/Gerência/Admin ou função com "Excluir projetos/OS". */
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });

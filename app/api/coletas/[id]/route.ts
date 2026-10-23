@@ -38,12 +38,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const travada = await garantirOsAberta(coleta.inspecao_id);
   if (travada) return travada;
 
-  // A aprovação tem regra PRÓPRIA (Gerência/Admin/Coordenador) e é avaliada
-  // antes da permissão de coleta — um Coordenador de outra área pode validar
+  // A aprovação tem regra PRÓPRIA (Gerência/Admin/função com "Aprovar medição") e é avaliada
+  // antes da permissão de coleta — quem tem a função de outra área pode validar
   // a medição sem poder editá-la.
   if (corpo.aprovar === true || corpo.aprovar === false) {
     if (!podeAprovarColeta(profile)) {
-      return NextResponse.json({ erro: "Só Gerência, Admin ou Coordenador podem aprovar a medição." }, { status: 403 });
+      return NextResponse.json({ erro: "Só Gerência, Admin ou uma função com a permissão “Aprovar medição” podem aprovar a medição." }, { status: 403 });
     }
     if (coleta.excluido_em) return NextResponse.json({ erro: "A coleta está na lixeira." }, { status: 400 });
     if (!corpo.aprovar) {

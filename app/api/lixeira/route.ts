@@ -54,7 +54,7 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
-    podeGerenciar: podeExcluirProjeto({ perfil: profile.perfil, funcao: (profile as any).funcao }),
+    podeGerenciar: podeExcluirProjeto(profile),
     itens,
   });
 }
@@ -63,7 +63,7 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!podeExcluirProjeto({ perfil: profile.perfil, funcao: (profile as any).funcao })) {
+  if (!podeExcluirProjeto(profile)) {
     return NextResponse.json({ erro: "Sem permissão para restaurar." }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));
@@ -114,7 +114,7 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
-  if (!podeExcluirProjeto({ perfil: profile.perfil, funcao: (profile as any).funcao })) {
+  if (!podeExcluirProjeto(profile)) {
     return NextResponse.json({ erro: "Sem permissão para excluir." }, { status: 403 });
   }
   const tipo = req.nextUrl.searchParams.get("tipo");

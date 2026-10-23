@@ -4,7 +4,9 @@
  *
  *   ⛔ e-mail válido e único (sem diferença de caixa/espaço)
  *   ⛔ nome completo: nome + sobrenome (partículas não contam)
- *   ⛔ Área/Acesso e Função só das listas (perfis legados não se atribuem)
+ *   ⛔ Área/Acesso da lista (perfis legados não se atribuem); Função só das
+ *      cadastradas e ativas em gp_funcoes (lib/validacao/funcao.ts) — quem
+ *      já tem uma função desativada continua com ela
  *   ⛔ senha (quando informada — ex.: modal "Redefinir senha") com pelo menos
  *      6 caracteres. Criar NÃO pede senha: o usuário recebe por e-mail o
  *      link "Criar minha senha" (lib/validacao/acesso.ts).
@@ -20,12 +22,12 @@ import { normalizarEspacos, normalizarNome } from "./texto";
 import { emailValido, normalizarEmail } from "./formatos";
 import { iniciaisDoNome } from "./codigoProjeto";
 import { periodoDe, textoPeriodo } from "./periodo";
+import { checarFuncaoUsuario, type FuncaoRef } from "./funcao";
 
 /** Perfis que o admin pode atribuir (a "Área" deriva deles). */
 export const PERFIS_ATRIBUIVEIS = ["comercial", "operacoes", "gerencia", "admin"] as const;
 /** Perfis antigos: ainda aceitos no banco, mas não se atribuem mais. */
 export const PERFIS_LEGADO = ["editor", "visualizador"] as const;
-export const FUNCOES_USUARIO = ["Coordenador", "Engenheiro", "Técnico"] as const;
 
 export const SENHA_MINIMA = 6;
 
@@ -79,6 +81,11 @@ export interface ContextoUsuario {
   id?: string | null;
   /** Nome gravado antes da edição (aviso de renomear). */
   nomeAnterior?: string | null;
+  /** Funções cadastradas (gp_funcoes). Sem a lista, a função não é
+   * conferida aqui (a API sempre manda; o banco tem a FK). */
+  funcoes?: Pick<FuncaoRef, "nome" | "ativo">[] | null;
+  /** Função gravada antes da edição (desativada continua aceita). */
+  funcaoAnterior?: string | null;
 }
 
 /** Outro usuário com o mesmo e-mail (sem diferença de caixa/espaço). */
@@ -160,8 +167,8 @@ export function validarUsuario(d: DadosUsuario, ctx: ContextoUsuario): Resultado
   }
 
   if (presente("funcao")) {
-    const f = d.funcao || "";
-    if (f && !(FUNCOES_USUARIO as readonly string[]).includes(f)) addErro(r, "funcao", "Função inválida — use Coordenador, Engenheiro ou Técnico.");
+    const erro = ctx.funcoes ? checarFuncaoUsuario(d.funcao, ctx.funcoes, ctx.funcaoAnterior) : null;
+    if (erro) addErro(r, "funcao", erro);
   }
 
   return r;

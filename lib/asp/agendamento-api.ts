@@ -12,6 +12,7 @@
  *  e-mail/.ics saem como evento de vários dias. Uma execução ativa por OS
  *  (índice uq_gp_agendamentos_execucao_ativa): a anterior sai de cena ANTES
  *  de a nova ser gravada (tirarDeCena → insert → ligarSubstituidos). */
+import { carregarFuncoes } from "@/lib/asp/funcoes";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarEmail } from "@/lib/email";
 import { emailAgendamentoHtml } from "@/lib/email-templates";
@@ -123,7 +124,7 @@ export async function contextoAgendamento(opts: {
   const admin = getSupabaseAdmin();
   const inicio = opts.dataVisita && ISO.test(opts.dataVisita) ? opts.dataVisita : null;
   const fim = inicio && opts.dataFim && ISO.test(opts.dataFim) && opts.dataFim > inicio ? opts.dataFim : inicio;
-  const [info, daOS, noDia, ativos, catalogo, relInsp] = await Promise.all([
+  const [info, daOS, noDia, ativos, catalogo, relInsp, funcoesCad] = await Promise.all([
     infoDaOS(opts.inspecaoId),
     admin.from("gp_agendamentos").select(CAMPOS_REF).eq("inspecao_id", opts.inspecaoId).is("substituido_em", null),
     // Outras OSs com algum dia em comum: começa até o fim E termina (data_fim,
@@ -135,6 +136,7 @@ export async function contextoAgendamento(opts: {
     admin.from("gp_profiles").select("id, funcao").eq("ativo", true),
     admin.from("gp_equipamentos").select("*"),
     admin.from("gp_relatorios").select("versao, status").eq("inspecao_id", opts.inspecaoId).eq("tipo", "inspecao").is("excluido_em", null),
+    carregarFuncoes(admin),
   ]);
   const equipCatalogo = (catalogo.data || []) as any[];
   let equipamentosProcedimento: string[] | undefined;
@@ -156,6 +158,8 @@ export async function contextoAgendamento(opts: {
     // Sugestões ("seria …?"): só equipamentos ativos no Catálogo.
     catalogo: equipCatalogo.filter((e: any) => e.ativo !== false).map((e: any) => e.nome).filter(Boolean),
     funcoes: Object.fromEntries((ativos.data || []).map((u: any) => [u.id, u.funcao || null])),
+    // Quais funções contam como liderança (gp_funcoes). Erro ao ler: não avisa.
+    ...(funcoesCad.erro ? { funcoes: undefined } : { catalogoFuncoes: funcoesCad.funcoes }),
     // OS sem inspeção: o relatório de inspeção não é cobrado na execução.
     relatoriosInspecao: info && !info.comInspecao ? []
       : relInsp.error ? undefined : (relInsp.data || []).map((r: any) => ({ versao: r.versao, status: r.status })),
