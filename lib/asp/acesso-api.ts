@@ -17,7 +17,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarEmail } from "@/lib/email";
 import { assuntoEmailAcesso, emailAcessoHtml, emailAcessoTexto } from "@/lib/email-templates";
 import {
-  baseAppUrl, expiraEm, montarLinkAcesso, resultadoEnvio, VALIDADE_LINK_TEXTO, type TipoLinkAcesso,
+  baseAppUrl, expiraEm, montarLinkAcesso, remetenteEmail, resultadoEnvio, VALIDADE_LINK_TEXTO, type TipoLinkAcesso,
 } from "@/lib/validacao";
 
 export const TABELA_LINKS = "gp_links_acesso";
@@ -179,12 +179,13 @@ export async function emitirLinkAcesso(o: {
   const link = montarLinkAcesso(baseDaRequisicao(o.req), token);
   const dados = { tipo: o.tipo, nome: o.usuario.nome_completo, email: o.usuario.email, link, validade: VALIDADE_LINK_TEXTO[o.tipo] };
   const r = await enviarEmail([o.usuario.email], assuntoEmailAcesso(o.tipo), emailAcessoHtml(dados), undefined, { texto: emailAcessoTexto(dados) });
-  const env = resultadoEnvio(r, process.env.EMAIL_REMETENTE || "onboarding@resend.dev");
-  if (env.status === "falhou") console.error("[acesso] envio:", o.tipo, (r.erro || "").slice(0, 300));
+  const env = resultadoEnvio(r, remetenteEmail(process.env, r.provedor).from);
+  const tecnico = r.detalhe || r.erro || "";
+  if (env.status === "falhou") console.error("[acesso] envio:", o.tipo, r.provedor, tecnico.slice(0, 300));
 
   const { error: errEnvio } = await admin.from(TABELA_LINKS).update({
     envio_status: env.status,
-    envio_erro: env.status === "enviado" ? null : `${env.motivo || ""}${r.erro ? ` [${r.erro.slice(0, 300)}]` : ""}`.slice(0, 500),
+    envio_erro: env.status === "enviado" ? null : `${env.motivo || ""}${tecnico ? ` [${tecnico.slice(0, 300)}]` : ""}`.slice(0, 500),
     enviado_em: env.status === "enviado" ? new Date().toISOString() : null,
   }).eq("id", (linha as any).id);
   if (errEnvio) console.error("[acesso] gravar envio:", errEnvio.code, errEnvio.message);

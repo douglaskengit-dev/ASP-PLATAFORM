@@ -137,8 +137,17 @@ npm run dev                  # http://localhost:3000
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | chave publicável (client) |
 | `SUPABASE_SECRET_KEY` | chave secreta / service_role (só servidor) |
 | `NEXT_PUBLIC_APP_URL` | URL pública do app (links de e-mail) — opcional |
-| `RESEND_API_KEY` | envio de e-mail (opcional; sem ela, e-mail é no-op) |
-| `EMAIL_REMETENTE` | remetente, ex.: `ASP <no-reply@seudominio>` (opcional) |
+| `SMTP_HOST` | servidor SMTP, ex.: `smtp.gmail.com` — definido, o e-mail sai por SMTP |
+| `SMTP_PORT` | `465` (TLS direto, padrão) ou `587` (STARTTLS) |
+| `SMTP_USER` | conta que envia, ex.: `conta@gmail.com` |
+| `SMTP_PASS` | senha de app do Google (16 letras; espaços são ignorados) |
+| `RESEND_API_KEY` | envio pelo Resend (usado quando não há `SMTP_HOST`) |
+| `EMAIL_PROVEDOR` | `smtp` ou `resend` para forçar um provedor (opcional) |
+| `EMAIL_REMETENTE` | remetente, ex.: `ASP <conta@gmail.com>` (opcional) |
+| `EMAIL_RESPONDER_PARA` | endereço de resposta (Reply-To) (opcional) |
+
+Sem nenhum provedor configurado o e-mail é no-op (as notificações in-app
+seguem funcionando).
 
 **Migrations:** aplique os arquivos de `supabase/migrations/` no banco (SQL
 Editor do Supabase ou `supabase db push`). Os relevantes ao fluxo ASP:
@@ -152,9 +161,42 @@ Editor do Supabase ou `supabase db push`). Os relevantes ao fluxo ASP:
 20260731100000_asp_soft_delete_inspecao_cliente.sql lixeira de inspeção/cliente
 ```
 
-**E-mail (Resend):** crie a conta, verifique um domínio em *Domains* (registros
-SPF/DKIM) e defina `RESEND_API_KEY`/`EMAIL_REMETENTE`. Enquanto não configurado,
-as notificações in-app funcionam normalmente e o e-mail fica desativado.
+### E-mail via Gmail
+
+Envia convites, redefinição de senha e agendamentos (com o `.ics`) por uma
+conta Gmail, sem precisar de domínio próprio:
+
+1. Na conta Google que vai enviar, ative a **Verificação em duas etapas**
+   (Conta do Google → Segurança).
+2. Crie uma **senha de app**: Conta do Google → Segurança → *Senhas de app*
+   (myaccount.google.com/apppasswords), nome **Plataforma ASP**. Copie os 16
+   caracteres (o Google mostra em blocos de 4 — espaços podem ficar).
+3. Na Vercel (*Settings → Environment Variables*, ambiente Production e, se
+   quiser, Preview) defina:
+   ```
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=465
+   SMTP_USER=<conta>@gmail.com
+   SMTP_PASS=<senha de app, 16 caracteres>
+   EMAIL_REMETENTE="ASP <conta@gmail.com>"
+   EMAIL_RESPONDER_PARA=<opcional: endereço para respostas>
+   ```
+4. **Redeploy** (*Deployments → ⋯ → Redeploy*) — variáveis novas só valem
+   após um novo deploy.
+5. Logado como admin, abra `/api/diag` (deve mostrar `"provedor": "smtp"`,
+   `SMTP_PASS_presente: true`) e depois `/api/diag?email=seu@email.com` para
+   enviar um teste; o erro, se houver, vem em português.
+
+Observações:
+- O Gmail só envia como a própria conta: se o endereço de `EMAIL_REMETENTE`
+  for outro, o sistema usa o `SMTP_USER` e mantém o nome (o `/api/diag` avisa).
+- Limites do Gmail: ~500 e-mails/dia (conta pessoal) e ~2.000/dia (Google
+  Workspace). Acima disso aparece "Limite diário de envio do Gmail atingido".
+- `RESEND_API_KEY` pode continuar definida: com `SMTP_HOST` o SMTP tem
+  precedência. `EMAIL_PROVEDOR=resend` volta para o Resend sem apagar nada.
+
+**E-mail (Resend, alternativa):** crie a conta, verifique um domínio em
+*Domains* (registros SPF/DKIM) e defina `RESEND_API_KEY`/`EMAIL_REMETENTE`.
 
 ---
 

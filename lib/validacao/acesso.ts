@@ -160,14 +160,27 @@ export function validarNovaSenha(senha: unknown, confirmacao: unknown): { campo:
   return null;
 }
 
-/** Resultado do envio (lib/email.ts) → status gravado + motivo em português. */
-export function resultadoEnvio(r: { ok: boolean; ignorado?: boolean; erro?: string }, remetente?: string | null): {
+/** Resultado do envio (lib/email.ts) → status gravado + motivo em português.
+ *  As mensagens do Resend (remetente de teste, domínio não verificado) só
+ *  aparecem quando o provedor é o Resend; no SMTP o erro já vem traduzido. */
+export function resultadoEnvio(
+  r: { ok: boolean; ignorado?: boolean; erro?: string; provedor?: "smtp" | "resend" | "nenhum" },
+  remetente?: string | null,
+): {
   status: "enviado" | "nao_configurado" | "falhou";
   motivo: string | null;
 } {
   if (r.ok && !r.ignorado) return { status: "enviado", motivo: null };
   if (r.ok && r.ignorado) {
-    return { status: "nao_configurado", motivo: "o envio de e-mail não está configurado no servidor (RESEND_API_KEY ausente)." };
+    const motivo = r.provedor === "smtp"
+      ? "o envio de e-mail por SMTP está incompleto no servidor (defina SMTP_USER e SMTP_PASS)."
+      : r.provedor === "resend"
+        ? "o envio de e-mail não está configurado no servidor (RESEND_API_KEY ausente)."
+        : "o envio de e-mail não está configurado no servidor (configure o Gmail via SMTP_* ou o Resend).";
+    return { status: "nao_configurado", motivo };
+  }
+  if (r.provedor === "smtp") {
+    return { status: "falhou", motivo: r.erro || "o servidor SMTP não aceitou o envio. Tente de novo em instantes." };
   }
   const e = (r.erro || "").toLowerCase();
   const sandbox = /resend\.dev/.test((remetente || "").toLowerCase());
