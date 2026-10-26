@@ -181,7 +181,7 @@ function buildHeader(): Header {
           new ImageRun({
             type: "png",
             data: logo,
-            transformation: { width: 130, height: 34 },
+            transformation: { width: 100, height: 37 },
           }),
         ],
       }),
@@ -200,7 +200,7 @@ function buildFooter(): Footer {
           new ImageRun({
             type: "png",
             data: bar,
-            transformation: { width: 620, height: 48 },
+            transformation: { width: 620, height: 52 },
           }),
         ],
       }),
