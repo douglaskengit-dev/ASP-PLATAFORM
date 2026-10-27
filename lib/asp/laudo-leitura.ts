@@ -42,7 +42,7 @@ const NOMES: RegExp[] = [
   /cor\s+aparente/i,
   /turbidez/i,
   /coliformes\s+totais/i,
-  /escherichia\s+coli/i,
+  /escherichia\s+coli|\bE\.\s*coli\b/i,
   /bact[ée]rias\s+heterotr[óo]ficas/i,
 ];
 
