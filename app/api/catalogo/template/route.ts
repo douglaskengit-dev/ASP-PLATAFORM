@@ -44,7 +44,9 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, caminho, nome: (f as File).name || "modelo.docx" });
 }
 
-/** Serve o modelo para o gerador (roda no navegador): ?caminho=... */
+/** Serve o modelo para o gerador (roda no navegador): ?caminho=...
+ *  Com &baixar=1 vai como anexo, para salvar no computador; &nome= dá o nome
+ *  do arquivo (ex.: "Modelo POP 001.docx"). */
 export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
@@ -55,9 +57,15 @@ export async function GET(req: NextRequest) {
   }
   try {
     const buf = await baixarArquivo(caminho);
-    return new NextResponse(new Uint8Array(buf), {
-      headers: { "Content-Type": DOCX_MIME, "Cache-Control": "private, max-age=300" },
-    });
+    const headers: Record<string, string> = { "Content-Type": DOCX_MIME, "Cache-Control": "private, max-age=300" };
+    if (req.nextUrl.searchParams.get("baixar") === "1") {
+      const nome = (req.nextUrl.searchParams.get("nome") || "modelo").replace(/[\\/:*?"<>|\r\n]+/g, " ").trim().slice(0, 80) || "modelo";
+      const arquivo = nome.toLowerCase().endsWith(".docx") ? nome : `${nome}.docx`;
+      // filename= só aceita ASCII; o nome com acento vai no filename* (RFC 5987)
+      const ascii = arquivo.normalize("NFD").replace(/[^\x20-\x7e]/g, "").replace(/"/g, "");
+      headers["Content-Disposition"] = `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(arquivo)}`;
+    }
+    return new NextResponse(new Uint8Array(buf), { headers });
   } catch {
     return NextResponse.json({ erro: "Modelo não encontrado." }, { status: 404 });
   }

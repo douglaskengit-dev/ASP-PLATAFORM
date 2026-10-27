@@ -202,22 +202,56 @@ function esc(t: string): string {
 
 /** Texto visível de um trecho de XML (remove tags). */
 function textoDe(xml: string): string {
-  return xml.replace(/<[^>]+>/g, "").trim();
+  // Só o texto VISÍVEL (<w:t>). Tirar todas as tags deixava passar o conteúdo
+  // de desenhos: a posição de uma imagem ancorada (<wp:posOffset>4160520…)
+  // virava "41605201523365004. Equipamento Utilizado" e o título deixava de
+  // ser reconhecido; o texto das caixas de texto sobre as fotos também entrava.
+  const semDesenhos = xml
+    .replace(/<mc:AlternateContent\b[\s\S]*?<\/mc:AlternateContent>/g, "")
+    .replace(/<w:drawing\b[\s\S]*?<\/w:drawing>/g, "")
+    .replace(/<w:pict\b[\s\S]*?<\/w:pict>/g, "")
+    .replace(/<w:object\b[\s\S]*?<\/w:object>/g, "");
+  let texto = "";
+  const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(semDesenhos))) texto += m[1];
+  return texto.trim();
+}
+
+/**
+ * Fim (exclusivo) do <w:p> ou <w:tbl> que abre em `ini`, contando os
+ * aninhados. Não basta o primeiro "</w:p>": uma foto com CAIXA DE TEXTO
+ * (as setas "Oxidação/corrosão…" dos relatórios) traz parágrafos dentro do
+ * <w:drawing>, e tabela pode ter tabela dentro da célula — o primeiro
+ * fechamento seria o do elemento de dentro e o bloco sairia cortado (o título
+ * "4. Equipamento Utilizado" da Syngenta sumia assim). Também trata o
+ * parágrafo vazio autofechado (<w:p w14:paraId="…"/>). -1 = XML truncado.
+ */
+function fimDoElemento(body: string, ini: number, tag: "p" | "tbl"): number {
+  const re = new RegExp(`<(/?)w:${tag}(?=[\\s>/])([^>]*?)(/?)>`, "g");
+  re.lastIndex = ini;
+  let nivel = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body))) {
+    if (m[1]) nivel--;                 // </w:p>
+    else if (!m[3]) nivel++;           // <w:p …>
+    // <w:p …/> autofechado: abre e fecha no mesmo ponto
+    if (nivel === 0) return m.index + m[0].length;
+  }
+  return -1;
 }
 
 /** Quebra o corpo do documento nos blocos de nível superior (<w:p> e <w:tbl>). */
 function separarBlocos(body: string): { ini: number; fim: number; xml: string; texto: string }[] {
   const blocos: { ini: number; fim: number; xml: string; texto: string }[] = [];
+  const reInicio = /<w:(p|tbl)(?=[\s>/])/g;
   let i = 0;
   while (i < body.length) {
-    const pA = body.indexOf("<w:p ", i);
-    const pB = body.indexOf("<w:p>", i);
-    const tb = body.indexOf("<w:tbl>", i);
-    const cands = [pA, pB, tb].filter((x) => x !== -1);
-    if (cands.length === 0) break;
-    const ini = Math.min(...cands);
-    const ehTabela = ini === tb;
-    const fim = ehTabela ? body.indexOf("</w:tbl>", ini) + 8 : body.indexOf("</w:p>", ini) + 6;
+    reInicio.lastIndex = i;
+    const achou = reInicio.exec(body);
+    if (!achou) break;
+    const ini = achou.index;
+    const fim = fimDoElemento(body, ini, achou[1] as "p" | "tbl");
     if (fim < ini) break;
     const xml = body.slice(ini, fim);
     blocos.push({ ini, fim, xml, texto: textoDe(xml) });
