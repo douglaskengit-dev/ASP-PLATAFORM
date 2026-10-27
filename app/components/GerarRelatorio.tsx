@@ -541,6 +541,24 @@ export default function GerarRelatorio({
   /** Fase 8: relatório de execução de procedimento com laudo — o PDF do
    *  laudo é obrigatório para enviar para aprovação. */
   const exigeLaudoPdf = !!execucao && procedimentoUsaLaudo(proc);
+
+  /** Seção que ninguém preencheu (sem texto, foto ou dado do usuário) não
+   *  sai no documento — nem o título; as seguintes são renumeradas. Só vale
+   *  para as seções cujo conteúdo depende do usuário: as de texto padrão do
+   *  modelo (Recomendações, Método…) e as com dados do cadastro sempre saem. */
+  const temTexto = (html?: string) => !!(html || "").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+  const temFoto = (n: number) => fotos.some((f) => f.topico === n);
+  const temLaudo = [d.laudoAntes, d.laudoDepois].some((g) => (g || []).some((l) => String(l?.[0] ?? "").trim()));
+  const nLimpeza = topicosModelo.length ? numeroDaSecao(topicosModelo, "limpeza") : undefined;
+  const secoesVazias = new Set<number>();
+  for (const t of topicosGenericos) {
+    let cheio = temTexto(textosTopico[t.numero]) || temFoto(t.numero);
+    if (limpeza && t.numero === N.analise) cheio ||= temLaudo || temTexto(d.conclusaoAnalises) || !!(d.amostraAntes || d.amostraDepois);
+    if (t.numero === nLimpeza) cheio ||= !!d.volumeSedimento?.trim();
+    if (!cheio) secoesVazias.add(t.numero);
+  }
+  if (N.anexos !== undefined && !temTexto(d.anexos)) secoesVazias.add(N.anexos);
+  if (N.fotosInternas !== undefined && !temTexto(d.fotosInternas) && !temFoto(N.fotosInternas)) secoesVazias.add(N.fotosInternas);
   // Coluna "Limite" do laudo: os da Portaria 888/2021 nas células vazias,
   // uma vez (editáveis; o documento sai com o que estiver preenchido).
   const limitesAplicados = useRef(false);
@@ -1011,7 +1029,7 @@ export default function GerarRelatorio({
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,
         elaboradoPor: nomeDe("elaboradoPor"), revisadoPor: nomeDe("revisadoPor"),
-        topicos: TOPICOS_EM_USO.map((t) => ({ ...t, visivel: ativo(t.numero) })),
+        topicos: TOPICOS_EM_USO.map((t) => ({ ...t, visivel: ativo(t.numero) && !secoesVazias.has(t.numero) })),
         imagens: imgs,
       });
   }
@@ -1314,6 +1332,9 @@ export default function GerarRelatorio({
             onChange={(e) => setVisiveis((v) => ({ ...v, [numero]: e.target.checked }))} />
           <span>{numero === 0 ? nome : `${numero}. ${nome}`}</span>
           {nota && <span className="detalhe" style={{ fontWeight: 400 }}>— {nota}</span>}
+          {on && secoesVazias.has(numero) && (
+            <span className="detalhe" style={{ fontWeight: 400 }}>— não preenchido: fica fora do relatório</span>
+          )}
         </label>
         {on && (
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
