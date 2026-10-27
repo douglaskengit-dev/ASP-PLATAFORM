@@ -551,12 +551,13 @@ export default function GerarRelatorio({
    *  modelo (Recomendações, Método…) e as com dados do cadastro sempre saem. */
   const temTexto = (html?: string) => !!(html || "").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
   const temFoto = (n: number) => fotos.some((f) => f.topico === n);
-  const temLaudo = [d.laudoAntes, d.laudoDepois].some((g) => (g || []).some((l) => String(l?.[0] ?? "").trim()));
   const nLimpeza = topicosModelo.length ? numeroDaSecao(topicosModelo, "limpeza") : undefined;
   const secoesVazias = new Set<number>();
   for (const t of topicosGenericos) {
+    // Análise Físico Química e Laboratorial tem texto fixo padrão do modelo
+    // (CVS 36-91, AWWA, ensaios antes/após) — sempre sai, como Recomendações.
+    if (t.numero === N.analise) continue;
     let cheio = temTexto(textosTopico[t.numero]) || temFoto(t.numero);
-    if (limpeza && t.numero === N.analise) cheio ||= temLaudo || temTexto(d.conclusaoAnalises) || !!(d.amostraAntes || d.amostraDepois);
     if (t.numero === nLimpeza) cheio ||= !!d.volumeSedimento?.trim();
     if (!cheio) secoesVazias.add(t.numero);
   }
