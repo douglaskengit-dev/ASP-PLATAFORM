@@ -42,7 +42,7 @@ import {
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
   CAMPOS_PH_CLORO, COL_LIMITE, converterPhCloroLegado, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
-  sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
+  dadosDasRdos, mesmaPessoa, sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
 
@@ -830,6 +830,41 @@ export default function GerarRelatorio({
   const nomesEquipe = listaEquipe.join(", ");        // prévia na tela
   const equipeDoc = listaEquipe.join("\n");          // documento: um por linha
 
+  /** Preenche equipe, datas/horários e Observações com o que as RDOs da OS
+   *  registraram. Só no clique — nada muda sozinho. pH e cloro ficam no
+   *  modal das coletas. */
+  const rdosDaOs = execucao?.rdos || [];
+  const [msgRdos, setMsgRdos] = useState<string | null>(null);
+  function puxarDasRdos() {
+    const x = dadosDasRdos(rdosDaOs, inspecaoId);
+    const feito: string[] = [];
+    if (x.equipe.length > 0) {
+      const achados = usuarios.filter((u) => x.equipe.some((m) => mesmaPessoa(m.nome, u.nome)));
+      const semCadastro = x.equipe.filter((m) => !usuarios.some((u) => mesmaPessoa(m.nome, u.nome))).map((m) => m.nome);
+      setEquipeIds(achados.map((u) => u.id));
+      feito.push(`equipe: ${achados.length} marcada(s)` +
+        (semCadastro.length ? ` — sem cadastro no sistema: ${semCadastro.join(", ")}` : ""));
+    }
+    if (x.dataExecucao || x.dataOperacao || x.horarios.some(Boolean)) {
+      setD((v) => ({
+        ...v,
+        dataExecucao: x.dataExecucao || v.dataExecucao,
+        dataOperacao: x.dataOperacao || v.dataOperacao,
+        horarios: (v.horarios || ["", "", "", ""]).map((h, i) => x.horarios[i] || h),
+      }));
+      feito.push("datas e horários");
+    }
+    if (x.observacoes) {
+      const atual = (d.observacoesTanque || "").trim();
+      if (!atual || atual === x.observacoes || confirm("Substituir o texto atual de Observações pelo das RDOs?")) {
+        setD((v) => ({ ...v, observacoesTanque: x.observacoes }));
+        feito.push("observações");
+      }
+    }
+    setMsgRdos(feito.length ? `Preenchido a partir das RDOs: ${feito.join("; ")}. Revise antes de gerar.`
+      : "As RDOs desta OS não têm equipe nem atividades para usar.");
+  }
+
   /** Anexa fotos escolhidas: confere formato (PNG/JPEG; WebP/GIF/HEIC
    *  convertidos quando possível), tamanho (10 MB) e se a MESMA imagem já
    *  está no relatório. As recusadas aparecem logo abaixo do campo (`chave`). */
@@ -1562,6 +1597,24 @@ export default function GerarRelatorio({
           ABNT (NBR 14724): Arial 12, entrelinha 1,5, texto justificado, margens 3/2/3/2 cm e legendas
           de figura em Arial 10. {qtdOcultos > 0 && <strong>{qtdOcultos} tópico(s) oculto(s) — os demais são renumerados.</strong>}
         </p>
+
+        {execucao && (
+          <div className="rel-bloco">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <label style={{ ...rotulo, margin: 0 }}>
+                Dados das RDOs <span className="detalhe">— {rdosDaOs.length} RDO(s) desta OS</span>
+              </label>
+              <button type="button" className="btn-dl btn-sec" disabled={rdosDaOs.length === 0} onClick={puxarDasRdos}>
+                ⬇ Puxar das RDOs
+              </button>
+            </div>
+            <span className="detalhe">
+              Preenche a equipe de trabalho, a data de execução, a data e os horários da operação e as
+              Observações (texto corrido das atividades, dia a dia). pH e cloro ficam em “Valores das coletas”.
+            </span>
+            {msgRdos && <p className="detalhe" style={{ margin: "6px 0 0" }} aria-live="polite">{msgRdos}</p>}
+          </div>
+        )}
 
         <div className="rel-bloco">
           <label style={rotulo}>Medição utilizada <span className="detalhe">(define altura, diâmetro, capacidade e volume)</span></label>
