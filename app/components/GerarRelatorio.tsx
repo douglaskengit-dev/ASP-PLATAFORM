@@ -162,6 +162,10 @@ const campoLeitura: React.CSSProperties = { ...campo, background: "var(--bg-suav
  *  também precisa dele: os números do modelo do POP 001 não significam o
  *  mesmo que os de TOPICOS_PADRAO. */
 
+/** Os dois laudos do laboratório e a grade de valores de cada um. */
+type QualLaudo = "antes" | "depois";
+const CHAVE_DO_LAUDO: Record<QualLaudo, ChaveLaudo> = { antes: "laudoAntes", depois: "laudoDepois" };
+
 /** Legenda de uma vaga como lista no formulário: sem o "Figura N –" do
  *  modelo (o número sai certo só no documento) nem o marcador do valor. */
 function legendaDaVaga(legenda: string) {
@@ -199,14 +203,17 @@ export default function GerarRelatorio({
   const [legado] = useState(() => (salvo ? converterPhCloroLegado({ ...inicial, ...salvo.d }) : null));
   const [d, setD] = useState<Partial<DadosRelatorio>>(legado ? legado.d : inicial);
   /** PDF do laudo do laboratório (Fase 8): sobe ao escolher; vai no snapshot. */
+  // Dois laudos do laboratório: o de ANTES (`laudoPdf`, que nas versões
+  // antigas era o único) e o de APÓS a limpeza.
   const [laudoPdf, setLaudoPdf] = useState<LaudoPdf | null>(salvo?.laudoPdf || null);
+  const [laudoPdfDepois, setLaudoPdfDepois] = useState<LaudoPdf | null>(salvo?.laudoPdfDepois || null);
   /** Laudos lidos do PDF (Relatório de Ensaio): o que veio de cada um, para
    *  destacar as células preenchidas por ele, e os avisos da leitura. */
   const [doPdf, setDoPdf] = useState<Partial<Record<ChaveLaudo, { nome: string; laudo: LaudoLido }>>>({});
   const [msgPdf, setMsgPdf] = useState<Partial<Record<ChaveLaudo, { ok?: string; erro?: string; avisos: string[] }>>>({});
   const [lendoPdf, setLendoPdf] = useState<ChaveLaudo | null>(null);
   const [enviandoLaudo, setEnviandoLaudo] = useState(false);
-  const [msgLaudo, setMsgLaudo] = useState<string | null>(null);
+  const [msgLaudo, setMsgLaudo] = useState<Partial<Record<QualLaudo, string>>>({});
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
     salvo?.visiveis || Object.fromEntries(TODOS_TOPICOS.map((t) => [t.numero, true]))
   );
@@ -608,20 +615,31 @@ export default function GerarRelatorio({
   }
   /** Escolheu o PDF do laudo: confere (PDF de verdade, 30 MB, não repetido
    *  na OS) e já sobe ao storage — fica no rascunho ao salvar. */
-  async function escolherLaudo(f: File | undefined | null) {
+  /** Anexa o laudo de antes ou de após: confere e guarda o PDF e, em
+   *  seguida, lê os valores dele para a tabela (Relatório de Ensaio padrão).
+   *  O mesmo arquivo não pode ser os dois laudos. */
+  async function escolherLaudo(qual: QualLaudo, f: File | undefined | null) {
     if (!f) return;
-    setMsgLaudo(null);
+    const msg = (m: string | undefined) => setMsgLaudo((x) => ({ ...x, [qual]: m }));
+    const atual = qual === "antes" ? laudoPdf : laudoPdfDepois;
+    const outro = qual === "antes" ? laudoPdfDepois : laudoPdf;
+    msg(undefined);
     setEnviandoLaudo(true);
+    let anexado = false;
     try {
       const ex = await examinarLaudoLocal(f, execucao?.arquivosOS || []);
-      if (ex.erro || !ex.hash) { setMsgLaudo(ex.erro || "Arquivo inválido."); return; }
-      if (laudoPdf?.hash === ex.hash) { setMsgLaudo("É o mesmo PDF que já está anexado."); return; }
-      setLaudoPdf(await enviarLaudoPdf(inspecaoId, f, ex.hash));
+      if (ex.erro || !ex.hash) { msg(ex.erro || "Arquivo inválido."); return; }
+      if (atual?.hash === ex.hash) { msg("É o mesmo PDF que já está anexado."); return; }
+      if (outro?.hash === ex.hash) { msg(`Este PDF já está anexado como o laudo de ${qual === "antes" ? "APÓS" : "ANTES"} a limpeza — anexe o de cada amostra.`); return; }
+      const l = await enviarLaudoPdf(inspecaoId, f, ex.hash);
+      (qual === "antes" ? setLaudoPdf : setLaudoPdfDepois)(l);
+      anexado = true;
     } catch (e) {
-      setMsgLaudo(e instanceof Error ? e.message : "Falha ao enviar o laudo.");
+      msg(e instanceof Error ? e.message : "Falha ao enviar o laudo.");
     } finally {
       setEnviandoLaudo(false);
     }
+    if (anexado) await lerLaudoPdf(CHAVE_DO_LAUDO[qual], f);
   }
   const extras: { titulo: string; apos?: number }[] =
     Array.isArray(proc?.topicos_extras) ? proc!.topicos_extras : [];
@@ -1000,8 +1018,12 @@ export default function GerarRelatorio({
       // O PDF do laudo é um arquivo à parte; o tópico Anexos (se o modelo
       // tiver) só o cita.
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-      const anexosDoc = laudoPdf && execucao && !(d.anexos || "").includes(esc(laudoPdf.nome))
-        ? `${d.anexos || ""}<p>Laudo anexo: ${esc(laudoPdf.nome)}</p>` : d.anexos;
+      const anexosDoc = execucao
+        ? [[laudoPdf, "antes"], [laudoPdfDepois, "após"]].reduce((txt, [l, q]) => {
+            const lp = l as LaudoPdf | null;
+            return lp && !(txt || "").includes(esc(lp.nome)) ? `${txt || ""}<p>Laudo anexo (${q} da limpeza): ${esc(lp.nome)}</p>` : txt;
+          }, d.anexos)
+        : d.anexos;
       // Pessoas: o documento leva o NOME do usuário escolhido (por id).
       const nomeDe = (k: PapelPessoa) => (pessoas[k] ? usuarios.find((u) => u.id === pessoas[k])?.nome : "") || d[k] || "";
       return gerarRelatorioDocx({
@@ -1074,7 +1096,7 @@ export default function GerarRelatorio({
     return {
       versaoSnapshot: 2, d: { ...d, ...nomes }, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras, textosTopico,
       pessoas, revisaoManual, medicaoBase, fotos: fotosSalvas,
-      ...(execucao ? { laudoPdf } : {}),
+      ...(execucao ? { laudoPdf, laudoPdfDepois } : {}),
     };
   }
 
@@ -1483,30 +1505,46 @@ export default function GerarRelatorio({
           entra no .docx) e é exigido para enviar para aprovação. */}
       {execucao && (
         <div style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
-          <label style={rotulo} htmlFor="laudo-pdf">
-            PDF do laudo do laboratório{exigeLaudoPdf ? " *" : ""}{" "}
-            <span className="detalhe">— obrigatório para enviar para aprovação; o rascunho pode ser salvo sem ele</span>
+          <label style={rotulo}>
+            PDFs dos laudos do laboratório{exigeLaudoPdf ? " *" : ""}{" "}
+            <span className="detalhe">— antes e após a limpeza; obrigatórios para enviar para aprovação (o rascunho pode ser salvo sem eles). Ao anexar, os valores do laudo já entram na tabela.</span>
           </label>
-          {laudoPdf ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere", flex: "1 1 200px" }}>
-                📎 {laudoPdf.nome}{laudoPdf.tamanho ? ` (${(laudoPdf.tamanho / 1048576).toFixed(1).replace(".", ",")} MB)` : ""}
-              </span>
-              <label className="btn-dl btn-sec" style={{ cursor: enviandoLaudo ? "wait" : "pointer" }}>
-                Trocar
-                <input type="file" accept="application/pdf,.pdf" hidden disabled={enviandoLaudo}
-                  onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
-              </label>
-              <button type="button" className="btn-dl btn-sec btn-perigo"
-                disabled={enviandoLaudo} onClick={() => { setLaudoPdf(null); setMsgLaudo(null); }}>Remover</button>
-            </div>
-          ) : (
-            <input id="laudo-pdf" type="file" accept="application/pdf,.pdf" disabled={enviandoLaudo}
-              onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
-          )}
+          {(["antes", "depois"] as const).map((qual) => {
+            const l = qual === "antes" ? laudoPdf : laudoPdfDepois;
+            const chave = CHAVE_DO_LAUDO[qual];
+            return (
+              <div key={qual} style={{ marginTop: 6 }}>
+                <strong style={{ fontSize: 12.5 }}>{qual === "antes" ? "Antes da limpeza" : "Após a limpeza"}</strong>
+                {l ? (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere", flex: "1 1 200px" }}>
+                      📎 {l.nome}{l.tamanho ? ` (${(l.tamanho / 1048576).toFixed(1).replace(".", ",")} MB)` : ""}
+                    </span>
+                    <label className="btn-dl btn-sec" style={{ cursor: enviandoLaudo ? "wait" : "pointer" }}>
+                      Trocar
+                      <input type="file" accept="application/pdf,.pdf" hidden disabled={enviandoLaudo}
+                        onChange={(e) => { escolherLaudo(qual, e.target.files?.[0]); e.target.value = ""; }} />
+                    </label>
+                    <button type="button" className="btn-dl btn-sec btn-perigo" disabled={enviandoLaudo}
+                      onClick={() => { (qual === "antes" ? setLaudoPdf : setLaudoPdfDepois)(null); setMsgLaudo((x) => ({ ...x, [qual]: undefined })); }}>
+                      Remover
+                    </button>
+                  </div>
+                ) : (
+                  <input type="file" accept="application/pdf,.pdf" disabled={enviandoLaudo}
+                    aria-label={`PDF do laudo de ${qual === "antes" ? "antes" : "após"} a limpeza`}
+                    onChange={(e) => { escolherLaudo(qual, e.target.files?.[0]); e.target.value = ""; }} />
+                )}
+                {msgLaudo[qual] && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgLaudo[qual]}</p>}
+                {lendoPdf === chave && <span className="detalhe" style={{ display: "block" }}>Lendo os valores do laudo…</span>}
+                {msgPdf[chave]?.erro && <p className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ Valores não lidos: {msgPdf[chave]!.erro}</p>}
+                {msgPdf[chave]?.ok && <p className="detalhe" style={{ margin: "4px 0 0" }}>✓ {msgPdf[chave]!.ok}</p>}
+                {msgPdf[chave]?.avisos.map((a) => <p key={a} className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ {a}</p>)}
+                <MensagensCampo r={r} campo={qual === "antes" ? "laudoPdf" : "laudoPdfDepois"} />
+              </div>
+            );
+          })}
           {enviandoLaudo && <span className="detalhe" style={{ display: "block" }}>Conferindo e enviando o laudo…</span>}
-          {msgLaudo && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgLaudo}</p>}
-          <MensagensCampo r={r} campo="laudoPdf" />
         </div>
       )}
       </>
@@ -1576,17 +1614,24 @@ export default function GerarRelatorio({
             <strong style={{ fontSize: 13 }}>Preencher pelos PDFs dos laudos</strong>
             <span className="detalhe" style={{ display: "block" }}>
               Relatório de Ensaio do laboratório, no PDF original (com texto). Preenche o nº da amostra e os
-              resultados, incerteza, LQ, LD e limite.
+              resultados, incerteza, LQ, LD e limite{execucao ? " — e o PDF fica anexado como o laudo daquela amostra" : ""}.
             </span>
             <div style={{ ...grade, marginTop: 6 }}>
               {(["laudoAntes", "laudoDepois"] as const).map((chave) => (
                 <div key={chave}>
                   <label className="btn-dl btn-sec" style={{ cursor: lendoPdf ? "wait" : "pointer", display: "inline-block" }}>
                     {lendoPdf === chave ? "Lendo…" : `📄 Laudo ${chave === "laudoAntes" ? "ANTES" : "APÓS"} (PDF)`}
-                    <input type="file" accept="application/pdf,.pdf" hidden disabled={!!lendoPdf}
-                      onChange={(e) => { lerLaudoPdf(chave, e.target.files?.[0]); e.target.value = ""; }} />
+                    <input type="file" accept="application/pdf,.pdf" hidden disabled={!!lendoPdf || enviandoLaudo}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        // no relatório de execução o PDF também fica anexado (é o laudo obrigatório)
+                        if (execucao) escolherLaudo(chave === "laudoAntes" ? "antes" : "depois", f);
+                        else lerLaudoPdf(chave, f);
+                        e.target.value = "";
+                      }} />
                   </label>
                   {doPdf[chave] && <span className="detalhe" style={{ display: "block", overflowWrap: "anywhere" }}>📎 {doPdf[chave]!.nome}</span>}
+                  {msgLaudo[chave === "laudoAntes" ? "antes" : "depois"] && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }}>⛔ {msgLaudo[chave === "laudoAntes" ? "antes" : "depois"]}</p>}
                   {msgPdf[chave]?.erro && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgPdf[chave]!.erro}</p>}
                   {msgPdf[chave]?.ok && <p className="detalhe" style={{ margin: "4px 0 0" }} aria-live="polite">✓ {msgPdf[chave]!.ok}</p>}
                   {msgPdf[chave]?.avisos.map((a) => <p key={a} className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ {a}</p>)}

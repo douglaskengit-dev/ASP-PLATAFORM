@@ -169,12 +169,14 @@ export async function arquivosParaEntrega(inspecaoId: string): Promise<(ArquivoE
   }
   const laudos = new Set<string>();
   for (const r of (rels.data || []) as any[]) {
-    const l = r.dados?.laudoPdf;
-    if (r.tipo !== "execucao" || r.status === "substituido" || !l?.caminho || laudos.has(l.caminho)) continue;
-    laudos.add(l.caminho);
-    out.push({ chave: `laudo:${l.caminho}`, tipo: "laudo", id: r.id, caminho: l.caminho,
-      nome: `Laudo do laboratório — ${l.nome || "PDF"}`, hash: l.hash || null, data: l.enviado_em || r.enviado_em || null,
-      href: `/api/relatorios/${r.id}/download?arquivo=laudo` });
+    if (r.tipo !== "execucao" || r.status === "substituido") continue;
+    for (const [l, qual, quando] of [[r.dados?.laudoPdf, "laudo", ""], [r.dados?.laudoPdfDepois, "laudo-depois", " (após a limpeza)"]] as const) {
+      if (!l?.caminho || laudos.has(l.caminho)) continue;
+      laudos.add(l.caminho);
+      out.push({ chave: `laudo:${l.caminho}`, tipo: "laudo", id: r.id, caminho: l.caminho,
+        nome: `Laudo do laboratório${quando} — ${l.nome || "PDF"}`, hash: l.hash || null, data: l.enviado_em || r.enviado_em || null,
+        href: `/api/relatorios/${r.id}/download?arquivo=${qual}` });
+    }
   }
   for (const r of (rdos.data || []) as any[]) {
     if (!r.arquivo_path) continue;

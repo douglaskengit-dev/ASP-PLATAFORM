@@ -24,10 +24,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const supabase = getSupabaseRouteClient();
 
   // PDF do laudo do laboratório (Fase 8), guardado no snapshot do relatório.
-  if (qual === "laudo") {
+  // ?arquivo=laudo → laudo de antes (ou o único, nas versões antigas);
+  // ?arquivo=laudo-depois → laudo de após a limpeza.
+  if (qual === "laudo" || qual === "laudo-depois") {
     const { data: rl } = await supabase.from("gp_relatorios")
-      .select("id, inspecao_id, tipo, versao, laudo:dados->laudoPdf").eq("id", params.id).maybeSingle();
-    const l: any = (rl as any)?.laudo;
+      .select("id, inspecao_id, tipo, versao, laudo:dados->laudoPdf, laudoDepois:dados->laudoPdfDepois").eq("id", params.id).maybeSingle();
+    const l: any = qual === "laudo-depois" ? (rl as any)?.laudoDepois : (rl as any)?.laudo;
     if (!rl || !l?.caminho || !caminhoLaudoValido(l.caminho, (rl as any).inspecao_id)) {
       return NextResponse.json({ erro: "Este relatório não tem PDF do laudo." }, { status: 404 });
     }

@@ -526,7 +526,8 @@ export function procedimentoUsaLaudo(proc: { limpeza_robotizada?: unknown; codig
   return ehLimpezaRobotizada(proc);
 }
 
-export const MSG_LAUDO_OBRIGATORIO = "Anexe o PDF do laudo do laboratório — sem ele o relatório de execução não pode ser enviado para aprovação.";
+export const MSG_LAUDO_OBRIGATORIO = "Anexe o PDF do laudo do laboratório de ANTES da limpeza — sem ele o relatório de execução não pode ser enviado para aprovação.";
+export const MSG_LAUDO_DEPOIS_OBRIGATORIO = "Anexe o PDF do laudo do laboratório de APÓS a limpeza — sem ele o relatório de execução não pode ser enviado para aprovação.";
 
 // ── Validação do formulário ──────────────────────────────────────────────────
 
@@ -600,7 +601,10 @@ export function cruzarEquipe(relatorio: string[], rdos: RdoResumo[]): { soNoRela
 
 export interface SnapshotExecucao {
   d: Partial<DadosRelatorio>;
+  /** PDF do laudo de ANTES da limpeza (versões antigas: o único laudo). */
   laudoPdf?: LaudoPdf | null;
+  /** PDF do laudo de APÓS a limpeza. */
+  laudoPdfDepois?: LaudoPdf | null;
 }
 
 export function validarRelatorioExecucao(s: SnapshotExecucao, ctx: ContextoRelatorioExecucao): ResultadoValidacao {
@@ -681,16 +685,25 @@ export function validarRelatorioExecucao(s: SnapshotExecucao, ctx: ContextoRelat
   if (ctx.usaLaudo && !temLaudo(d.laudoAntes) && !temLaudo(d.laudoDepois)) {
     addAviso(r, "laudoAntes", "Nenhum resultado de laudo preenchido — a tabela da Análise Físico Química sairá toda com “—”. Use “Laudo ANTES/APÓS (PDF)” ou digite os valores.");
   }
-  if (ctx.usaLaudo && !s.laudoPdf?.caminho) {
-    if (ctx.exigirLaudoPdf) addErro(r, "laudoPdf", MSG_LAUDO_OBRIGATORIO);
-    else addAviso(r, "laudoPdf", `${temLaudo(d.laudoAntes) || temLaudo(d.laudoDepois) ? "" : "Sem laudo. "}O PDF do laudo do laboratório é obrigatório para enviar para aprovação (o rascunho pode ser salvo sem ele).`);
+  // Dois laudos do laboratório: o de antes e o de após a limpeza.
+  if (ctx.usaLaudo) {
+    const pdfs: [ "laudoPdf" | "laudoPdfDepois", LaudoPdf | null | undefined, string][] = [
+      ["laudoPdf", s.laudoPdf, MSG_LAUDO_OBRIGATORIO], ["laudoPdfDepois", s.laudoPdfDepois, MSG_LAUDO_DEPOIS_OBRIGATORIO]];
+    for (const [k, l, msg] of pdfs) {
+      if (l?.caminho) continue;
+      if (ctx.exigirLaudoPdf) addErro(r, k, msg);
+      else addAviso(r, k, `${msg.replace(" — sem ele o relatório de execução não pode ser enviado para aprovação.", "")} — obrigatório para enviar para aprovação (o rascunho pode ser salvo sem ele).`);
+    }
+    if (s.laudoPdf?.hash && s.laudoPdf.hash === s.laudoPdfDepois?.hash) {
+      addErro(r, "laudoPdfDepois", "O laudo de APÓS a limpeza é o mesmo arquivo do laudo de ANTES — anexe o PDF de cada amostra.");
+    }
   }
   return r;
 }
 
 export const ROTULOS_RELATORIO_EXECUCAO: Record<string, string> = {
   phAntes: "pH antes", cloroAntes: "Cloro livre antes", phDepois: "pH depois", cloroDepois: "Cloro livre depois",
-  rdos: "RDOs", equipe: "Equipe de trabalho", laudoPdf: "PDF do laudo", conclusao: "Conclusão",
+  rdos: "RDOs", equipe: "Equipe de trabalho", laudoPdf: "PDF do laudo (antes)", laudoPdfDepois: "PDF do laudo (após)", conclusao: "Conclusão",
 };
 
 // ── Dados do relatório a partir das RDOs ─────────────────────────────────────

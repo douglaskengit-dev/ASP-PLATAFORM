@@ -220,7 +220,8 @@ export async function verificarLaudoPdf(
 export async function limparLaudoAntigo(inspecaoId: string, caminho: string): Promise<void> {
   if (!caminhoLaudoValido(caminho, inspecaoId)) return;
   try {
-    const usado = (await relatoriosDaOS(inspecaoId)).some((r) => (r.dados as any)?.laudoPdf?.caminho === caminho);
+    const usado = (await relatoriosDaOS(inspecaoId)).some((r) =>
+      (r.dados as any)?.laudoPdf?.caminho === caminho || (r.dados as any)?.laudoPdfDepois?.caminho === caminho);
     if (!usado) await getSupabaseAdmin().storage.from(BUCKET).remove([caminho]);
   } catch { /* melhor esforço */ }
 }
@@ -280,17 +281,20 @@ export async function validarSnapshotServidor(
     });
     const proc = await procedimentoDaOS(info.cadastro.procedimento);
     const cloro = cloroDoProcedimento(proc);
-    if (s.laudoPdf) {
-      const lv = await verificarLaudoPdf(s.laudoPdf, { inspecaoId: info.id, rels, profileId: profile.id || null, anterior: anterior?.laudoPdf });
-      if (lv.erro) addErro(r, "laudoPdf", lv.erro);
-      else s.laudoPdf = lv.laudo;
+    // Os dois laudos (antes e após a limpeza), conferidos no storage.
+    for (const k of ["laudoPdf", "laudoPdfDepois"] as const) {
+      if (!s[k]) continue;
+      const lv = await verificarLaudoPdf(s[k], { inspecaoId: info.id, rels, profileId: profile.id || null, anterior: anterior?.[k] });
+      if (lv.erro) addErro(r, k, k === "laudoPdfDepois" ? lv.erro.replace("PDF do laudo", "PDF do laudo de após") : lv.erro);
+      else s[k] = lv.laudo;
     }
     rExec = validarRelatorioExecucao(s, {
       inspecaoId: info.id, hoje: hojeBrasil(), unidadeCloro: cloro.unidade, limiteCloro: cloro.limite,
       usaLaudo: procedimentoUsaLaudo(proc), exigirLaudoPdf: !!opcoes.enviar,
     });
-  } else if (s.laudoPdf) {
+  } else if (s.laudoPdf || s.laudoPdfDepois) {
     s.laudoPdf = null;   // laudo é só do relatório de execução
+    s.laudoPdfDepois = null;
   }
   const v = validarRelatorio(s, {
     hoje: hojeBrasil(),

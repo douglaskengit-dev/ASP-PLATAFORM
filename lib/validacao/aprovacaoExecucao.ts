@@ -30,6 +30,7 @@ import { pendenciasColeta, type RegistroFotosExecucao, type UnidadeCloro } from 
 export interface SnapshotAprovacaoExecucao {
   d?: Record<string, any> | null;
   laudoPdf?: LaudoPdf | null;
+  laudoPdfDepois?: LaudoPdf | null;
 }
 
 /** RDO como a página o tem (só o que importa aqui). */
@@ -98,6 +99,8 @@ export function avisosAprovacaoExecucao(c: ContextoAprovacaoExecucao): Resultado
   // 1) PDF do laudo (relatório enviado antes da Fase 8)
   if (c.usaLaudo && !c.dados?.laudoPdf?.caminho) {
     addAviso(r, "laudoPdf", "Esta versão não tem o PDF do laudo do laboratório (enviada antes de o laudo ser exigido) — confira o laudo antes de aprovar ou reprove com a categoria Laudo/Laboratório.");
+  } else if (c.usaLaudo && !c.dados?.laudoPdfDepois?.caminho) {
+    addAviso(r, "laudoPdf", "Esta versão tem só um PDF de laudo (enviada antes de serem exigidos os dois, antes e após a limpeza) — confira os dois laudos antes de aprovar.");
   }
 
   // 2) Fora do limite e não citado na Conclusão

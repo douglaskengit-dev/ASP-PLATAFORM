@@ -203,8 +203,10 @@ export async function POST(req: NextRequest) {
         if (error) { await descartar(); return NextResponse.json({ erro: error.message }, { status: 500 }); }
         if (!data) continue;   // foi enviado/excluído no meio do caminho
         if (alvo.arquivo_path && alvo.arquivo_path !== caminho) await removerArquivos([alvo.arquivo_path]);
-        if (alvo.dados?.laudoPdf?.caminho && alvo.dados.laudoPdf.caminho !== dados?.laudoPdf?.caminho) {
-          await limparLaudoAntigo(inspecaoId, alvo.dados.laudoPdf.caminho);
+        // laudos trocados no rascunho (antes e após)
+        const novosLaudos = new Set([dados?.laudoPdf?.caminho, dados?.laudoPdfDepois?.caminho].filter(Boolean));
+        for (const c of [alvo.dados?.laudoPdf?.caminho, alvo.dados?.laudoPdfDepois?.caminho]) {
+          if (c && !novosLaudos.has(c)) await limparLaudoAntigo(inspecaoId, c);
         }
         const novas = new Set(fotosDeRascunho(dados, inspecaoId));
         await limparFotosRascunho(inspecaoId, fotosDeRascunho(alvo.dados, inspecaoId).filter((c) => !novas.has(c)));

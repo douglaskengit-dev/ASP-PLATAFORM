@@ -94,7 +94,7 @@ import {
   PERFIS_TROCAR_ASSINADO, resumoValidacao, ROTULOS_REPROVACAO, validarReprovacao,
   aguaPotavelDesmarcada, avisosExecucao, CHECKLIST_PADRAO, diasSemRdo, execucaoAtiva, nomesEquipamentosProcedimento,
   periodoDe, periodoMudou, periodosSobrepoem, textoDiasSemRdo, textoPeriodo, equipamentosFaltando,
-  MSG_LAUDO_OBRIGATORIO, procedimentoUsaLaudo, type LaudoPdf,
+  MSG_LAUDO_DEPOIS_OBRIGATORIO, MSG_LAUDO_OBRIGATORIO, procedimentoUsaLaudo, type LaudoPdf,
 } from "@/lib/validacao";
 import { arquivosDaOS, enviarLaudoPdf, examinarLaudoLocal } from "@/lib/asp/laudo-pdf";
 import EncerramentoOS from "@/app/components/EncerramentoOS";
@@ -1261,6 +1261,10 @@ export default function InspecaoDetalhePage() {
       setErroRelatorio(`${MSG_LAUDO_OBRIGATORIO} Clique em Editar, anexe o PDF no bloco do laudo e salve o rascunho de novo.`);
       return;
     }
+    if (rel.tipo === "execucao" && exigeLaudoExecucao && !rel.dados?.laudoPdfDepois?.caminho) {
+      setErroRelatorio(`${MSG_LAUDO_DEPOIS_OBRIGATORIO} Clique em Editar, anexe o PDF no bloco do laudo e salve o rascunho de novo.`);
+      return;
+    }
     const plano = planejarEnvio(refsRelatorio, rel.tipo, rel.id);
     const linhas = [`Enviar o rascunho do relatório de ${ROTULO_TIPO[rel.tipo as TipoRelatorio] || rel.tipo} para aprovação como v${plano.versao}?`];
     plano.substitui.forEach((x) => linhas.push(`⚠️ A versão v${x.versao} em aprovação será substituída (sai da fila da Gerência).`));
@@ -2280,8 +2284,10 @@ export default function InspecaoDetalhePage() {
                     </div>
                   )}
                   {r.motivo_ajuste && <div className="detalhe" style={{ margin: 0 }}>Ajuste: {formatarMotivo(r.motivo_categoria, r.motivo_ajuste)}</div>}
-                  {r.status === "rascunho" && r.tipo === "execucao" && exigeLaudoExecucao && !r.dados?.laudoPdf?.caminho && (
-                    <div className="val-msg val-aviso aviso-plano" style={{ margin: "2px 0" }}>⚠️ Sem o PDF do laudo do laboratório — obrigatório para enviar para aprovação.</div>
+                  {r.status === "rascunho" && r.tipo === "execucao" && exigeLaudoExecucao && (!r.dados?.laudoPdf?.caminho || !r.dados?.laudoPdfDepois?.caminho) && (
+                    <div className="val-msg val-aviso aviso-plano" style={{ margin: "2px 0" }}>
+                      ⚠️ Falta o PDF do laudo do laboratório {!r.dados?.laudoPdf?.caminho && !r.dados?.laudoPdfDepois?.caminho ? "de antes e de após" : !r.dados?.laudoPdf?.caminho ? "de antes" : "de após"} a limpeza — obrigatório para enviar para aprovação.
+                    </div>
                   )}
                   {r.enviado_em && (
                     <div className="detalhe" style={{ margin: 0 }}>
@@ -2304,7 +2310,7 @@ export default function InspecaoDetalhePage() {
                   {podeRelatorio && r.status === "rascunho" && (
                     <>
                       <button className="btn-dl" disabled={enviandoRelatorio}
-                        title={r.tipo === "execucao" && exigeLaudoExecucao && !r.dados?.laudoPdf?.caminho
+                        title={r.tipo === "execucao" && exigeLaudoExecucao && (!r.dados?.laudoPdf?.caminho || !r.dados?.laudoPdfDepois?.caminho)
                           ? "Falta o PDF do laudo do laboratório — clique em Editar e anexe" : "Submeter este rascunho à Gerência"}
                         onClick={() => enviarParaAprovacao(r)}>
                         {enviandoRelatorio ? "Enviando…" : "↗ Enviar para aprovação"}
@@ -2340,7 +2346,12 @@ export default function InspecaoDetalhePage() {
                     onClick={() => marcarBaixado(r.id)}>{r.status === "assinado" ? "Baixar original" : "Baixar"}</a>
                   {r.dados?.laudoPdf?.caminho && (
                     <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download?arquivo=laudo`} target="_blank" rel="noopener noreferrer"
-                      title={`PDF do laudo do laboratório: ${r.dados.laudoPdf.nome || ""}`}>🧪 Laudo</a>
+                      title={`PDF do laudo do laboratório${r.dados?.laudoPdfDepois?.caminho ? " (antes da limpeza)" : ""}: ${r.dados.laudoPdf.nome || ""}`}>
+                      🧪 Laudo{r.dados?.laudoPdfDepois?.caminho ? " antes" : ""}</a>
+                  )}
+                  {r.dados?.laudoPdfDepois?.caminho && (
+                    <a className="btn-dl btn-sec" href={`/api/relatorios/${r.id}/download?arquivo=laudo-depois`} target="_blank" rel="noopener noreferrer"
+                      title={`PDF do laudo do laboratório (após a limpeza): ${r.dados.laudoPdfDepois.nome || ""}`}>🧪 Laudo após</a>
                   )}
                 </span>
               </div>
