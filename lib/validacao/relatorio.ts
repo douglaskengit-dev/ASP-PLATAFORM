@@ -274,6 +274,7 @@ export interface SnapshotRelatorio {
   fotos?: FotoSalva[];
   /** PDF do laudo do laboratório (relatório de execução, Fase 8). */
   laudoPdf?: LaudoPdf | null;
+  laudoPdfDepois?: LaudoPdf | null;
 }
 
 /** Campos que vêm do cadastro (só leitura no formulário). */

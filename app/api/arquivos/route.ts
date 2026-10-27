@@ -23,7 +23,7 @@ export async function GET() {
       "id, codigo_projeto, pedido_compra, criado_em, cliente:gp_orgaos(id, razao_social)," +
         " inspecoes:gp_inspecoes(id, identificacao, fase," +
         " coletas:gp_coletas(id, tipo, pdf_path, criado_em)," +
-        " relatorios:gp_relatorios(id, tipo, versao, status, arquivo_path, assinado_path, enviado_em, laudo:dados->laudoPdf))"
+        " relatorios:gp_relatorios(id, tipo, versao, status, arquivo_path, assinado_path, enviado_em, laudo:dados->laudoPdf, laudoDepois:dados->laudoPdfDepois))"
     )
     .order("criado_em", { ascending: false });
 

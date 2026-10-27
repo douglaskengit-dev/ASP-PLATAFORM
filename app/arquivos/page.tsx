@@ -14,22 +14,25 @@ interface Coleta { id: string; tipo: string; pdf_path: string | null; criado_em:
 interface LaudoArq { caminho: string; nome?: string; enviado_em?: string | null }
 interface Relatorio {
   id: string; tipo: string; versao: number; status: string; arquivo_path: string | null; assinado_path?: string | null; enviado_em: string | null;
-  /** PDF do laudo do laboratório (relatório de execução, Fase 8). */
+  /** PDF do laudo do laboratório (relatório de execução, Fase 8): o de
+   *  antes da limpeza (ou o único, nas versões antigas) e o de após. */
   laudo?: LaudoArq | null;
+  laudoDepois?: LaudoArq | null;
 }
 /** Laudo da OS (o mesmo PDF pode estar em várias versões do relatório):
  *  baixa pelo relatório mais recente que o usa. */
-interface LaudoOS { relId: string; nome: string; enviado_em: string | null; versoes: number[] }
+interface LaudoOS { relId: string; nome: string; enviado_em: string | null; versoes: number[]; qual: "laudo" | "laudo-depois" }
 
 /** Laudos distintos (por arquivo) dos relatórios da OS. */
 function laudosDa(relatorios: Relatorio[]): LaudoOS[] {
   const m = new Map<string, LaudoOS>();
   for (const r of [...relatorios].sort((a, b) => b.versao - a.versao)) {
-    const l = r.laudo;
-    if (!l?.caminho) continue;
-    const atual = m.get(l.caminho);
-    if (atual) atual.versoes.push(r.versao);
-    else m.set(l.caminho, { relId: r.id, nome: l.nome || "laudo.pdf", enviado_em: l.enviado_em || null, versoes: [r.versao] });
+    for (const [l, qual] of [[r.laudo, "laudo"], [r.laudoDepois, "laudo-depois"]] as const) {
+      if (!l?.caminho) continue;
+      const atual = m.get(l.caminho);
+      if (atual) atual.versoes.push(r.versao);
+      else m.set(l.caminho, { relId: r.id, nome: l.nome || "laudo.pdf", enviado_em: l.enviado_em || null, versoes: [r.versao], qual });
+    }
   }
   return Array.from(m.values());
 }
@@ -171,7 +174,7 @@ export default function ArquivosPage() {
           for (const l of i.laudos || []) {
             const dt = l.enviado_em ? new Date(l.enviado_em).getTime() : 0;
             if (apenasNovos && dt <= corte) continue;
-            const resp = await fetch(`/api/relatorios/${l.relId}/download?arquivo=laudo`);
+            const resp = await fetch(`/api/relatorios/${l.relId}/download?arquivo=${l.qual}`);
             if (!resp.ok) continue;
             zip.file(caminhoArquivo(p, i, l, "laudo"), await resp.blob());
             count++;
@@ -310,11 +313,11 @@ export default function ArquivosPage() {
                     <div style={{ marginTop: 4 }}>
                       <span className="detalhe" style={{ margin: 0, fontWeight: 600 }}>Laudos</span>
                       {(i.laudos || []).map((l) => (
-                        <div key={l.relId} className="downloads" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                        <div key={`${l.relId}-${l.qual}`} className="downloads" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
                           <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere" }}>
-                            🧪 {l.nome} · relatório de execução v{l.versoes.sort((a, b) => a - b).join(", v")}{l.enviado_em ? ` · ${fmt(l.enviado_em)}` : ""}
+                            🧪 {l.qual === "laudo-depois" ? "Após a limpeza: " : ""}{l.nome} · relatório de execução v{l.versoes.sort((a, b) => a - b).join(", v")}{l.enviado_em ? ` · ${fmt(l.enviado_em)}` : ""}
                           </span>
-                          <a className="btn-dl btn-sec" href={`/api/relatorios/${l.relId}/download?arquivo=laudo`} target="_blank" rel="noopener noreferrer">⬇ Laudo</a>
+                          <a className="btn-dl btn-sec" href={`/api/relatorios/${l.relId}/download?arquivo=${l.qual}`} target="_blank" rel="noopener noreferrer">⬇ Laudo</a>
                         </div>
                       ))}
                     </div>

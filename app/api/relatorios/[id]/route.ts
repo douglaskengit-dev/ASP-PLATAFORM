@@ -7,7 +7,7 @@ import {
 } from "@/lib/asp/relatorio-api";
 import { ehViolacaoUnica } from "@/lib/asp/os-validacao-api";
 import {
-  erroTipoNaFase, MSG_LAUDO_OBRIGATORIO, planejarEnvio, primeiroErro, ROTULOS_RELATORIO, ROTULOS_RELATORIO_EXECUCAO, temErros,
+  erroTipoNaFase, MSG_LAUDO_DEPOIS_OBRIGATORIO, MSG_LAUDO_OBRIGATORIO, planejarEnvio, primeiroErro, ROTULOS_RELATORIO, ROTULOS_RELATORIO_EXECUCAO, temErros,
 } from "@/lib/validacao";
 
 import { garantirOsAberta } from "@/lib/asp/os-encerrada";
@@ -58,10 +58,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const r = await validarSnapshotServidor(rel.dados, { info, rels: refs, tipo: rel.tipo, profile, anterior: rel.dados, enviar: true });
     if (temErros(r)) {
       // Fase 8: sem o PDF do laudo, a mensagem diz o que fazer.
-      const semLaudo = (r.erros.laudoPdf || []).includes(MSG_LAUDO_OBRIGATORIO);
+      const semLaudo = (r.erros.laudoPdf || []).includes(MSG_LAUDO_OBRIGATORIO)
+        ? MSG_LAUDO_OBRIGATORIO
+        : (r.erros.laudoPdfDepois || []).includes(MSG_LAUDO_DEPOIS_OBRIGATORIO) ? MSG_LAUDO_DEPOIS_OBRIGATORIO : null;
       return NextResponse.json({
         erro: semLaudo
-          ? `${MSG_LAUDO_OBRIGATORIO} Clique em Editar, anexe o PDF no bloco do laudo e salve o rascunho de novo.`
+          ? `${semLaudo} Clique em Editar, anexe o PDF no bloco do laudo e salve o rascunho de novo.`
           : `O rascunho está desatualizado — clique em Editar, confira e salve de novo. (${primeiroErro(r, { ...ROTULOS_RELATORIO, ...ROTULOS_RELATORIO_EXECUCAO })})`,
         erros: r.erros,
       }, { status: 400 });
