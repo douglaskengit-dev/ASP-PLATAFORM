@@ -660,7 +660,8 @@ export default function GerarRelatorio({
     }
     const t = TOPICOS_EM_USO.find((x) => x.numero === f.topico);
     const nome = t ? `${t.numero}. ${t.titulo}` : `Tópico ${f.topico}`;
-    const onde = f.ancora ? ` · ${f.ancora}` : f.vaga ? "" : " · fim da seção";
+    const onde = f.ancora?.startsWith("sub:") ? ` · subtópico “${f.ancora.slice(4)}” no fim da seção`
+      : f.ancora ? ` · ${f.ancora}` : f.vaga ? "" : " · fim da seção";
     return `${nome}${onde}${ativo(f.topico) ? "" : " — tópico desmarcado, não sai"}`;
   }
 

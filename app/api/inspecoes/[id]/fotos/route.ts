@@ -43,9 +43,13 @@ async function garantirRegistro(supabase: Supa, inspecaoId: string, autor: strin
   if (data) return data as Linha;
   const padrao = await aguaPotavelDoProcedimento(supabase, inspecaoId);
   if (padrao === null) return "OS não encontrada.";
-  const { data: novo, error } = await supabase.from(TABELA)
-    .insert({ inspecao_id: inspecaoId, agua_antes: padrao, agua_depois: padrao, itens: {}, criado_por: autor })
-    .select("*").single();
+  const base = { inspecao_id: inspecaoId, agua_antes: padrao, agua_depois: padrao, itens: {}, criado_por: autor };
+  let { data: novo, error } = await supabase.from(TABELA)
+    .insert({ ...base, robo_higienizacao: padrao }).select("*").single();
+  // coluna robo_higienizacao ainda não criada (migração não rodada): grava sem ela
+  if (error && /robo_higienizacao/.test(error.message || "")) {
+    ({ data: novo, error } = await supabase.from(TABELA).insert(base).select("*").single());
+  }
   if (novo) return novo as Linha;
   // corrida com outra gravação simultânea (unique em inspecao_id): relê
   const { data: outro } = await supabase.from(TABELA).select("*").eq("inspecao_id", inspecaoId).maybeSingle();
@@ -199,7 +203,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   return resposta(r);
 }
 
-/** Caixinhas e valores: { agua_antes?, agua_depois?, limpeza_confirmada?,
+/** Caixinhas e valores: { agua_antes?, agua_depois?, robo_higienizacao?, limpeza_confirmada?,
  *  valor?: { slot, valor: number | null } }. */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
@@ -212,7 +216,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (travada) return travada;
   const b = await req.json().catch(() => ({}));
   const flags: Partial<RegistroFotosExecucao> = {};
-  for (const k of ["agua_antes", "agua_depois", "limpeza_confirmada"] as const) {
+  for (const k of ["agua_antes", "agua_depois", "robo_higienizacao", "limpeza_confirmada"] as const) {
     if (typeof b?.[k] === "boolean") flags[k] = b[k];
   }
   let valor: { slot: string; valor: number | null } | null = null;
