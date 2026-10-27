@@ -41,7 +41,9 @@ export interface ImagemRelatorio {
   /** Em qual tópico entra (número original). */
   topico: number;
   /** Subtópico de destino ("6.1", "6.2", "6.3"). A figura entra logo abaixo
-   *  daquele subtítulo, em vez de no fim da seção. */
+   *  daquele subtítulo, em vez de no fim da seção.
+   *  "sub:<título>" = subtópico NOVO, criado no fim do tópico com o próximo
+   *  número livre ("9.3 <título>") — usado pela coleta para envio de análise. */
   ancora?: string;
   /** true = a foto ocupa uma VAGA do modelo ([imagem], [IMAGEM DO LAUDO]).
    *  As vagas de um tópico são preenchidas na ordem em que as fotos chegam;
@@ -1478,6 +1480,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.
   const figurasDoTopico = new Map<number, string>();
   const figurasDaAncora = new Map<string, string>();
+  /** Subtópicos novos ("sub:<título>"), por tópico e título, na ordem em que
+   *  as fotos chegam. Entram no fim do tópico, numerados em sequência. */
+  const subtopicosNovos = new Map<number, Map<string, string>>();
   /** Fotos destinadas às VAGAS do modelo, na ordem, por tópico. Ficam sem
    *  legenda gerada porque o modelo já traz a legenda de cada vaga. */
   const vagasDoTopico = new Map<number, string[]>();
@@ -1528,6 +1533,11 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
         lista.push(so);
         vagasDoTopico.set(img.topico, lista);
       }
+    } else if (img.ancora?.startsWith("sub:")) {
+      const titulo = img.ancora.slice(4).trim();
+      const doTopico = subtopicosNovos.get(img.topico) || new Map<string, string>();
+      doTopico.set(titulo, (doTopico.get(titulo) || "") + bloco);
+      subtopicosNovos.set(img.topico, doTopico);
     } else if (img.ancora) {
       figurasDaAncora.set(img.ancora, (figurasDaAncora.get(img.ancora) || "") + bloco);
     } else {
@@ -1711,6 +1721,21 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       }
       // figuras de tópicos sem marcador próprio entram ao final da seção
       if (figuras && !figurasUsadas) saida += figuras;
+      // subtópicos novos: continuam a numeração dos subtítulos do modelo
+      // (9.1, 9.2 → 9.3), já com o número final do tópico.
+      const novosSub = subtopicosNovos.get(nTop);
+      if (novosSub?.size) {
+        const reSub = new RegExp("^\\s*" + nTop + "\\.(\\d+)");
+        let ultimo = 0;
+        for (let k = idx; k < fim; k++) {
+          const m = reSub.exec(blocos[k].texto);
+          if (m) ultimo = Math.max(ultimo, Number(m[1]));
+        }
+        for (const [titulo, figs] of novosSub) {
+          saida += tituloSubtopico(`${novo}.${++ultimo}`, titulo) + figs;
+        }
+        subtopicosNovos.delete(nTop);
+      }
       emitirExtrasAte(nTop);                    // os que vêm logo depois dele
       idx = fim;
       continue;

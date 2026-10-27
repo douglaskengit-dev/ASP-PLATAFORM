@@ -59,7 +59,8 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
   for (let i = 0; i < alvo.length; i += 100) {
     const lote = alvo.slice(i, i + 100);
     fotos.push(...await todas<any>(() => supabase.from("gp_fotos_execucao")
-      .select("inspecao_id, agua_antes, agua_depois, limpeza_confirmada, itens").in("inspecao_id", lote).order("inspecao_id")));
+      // "*": inclui robo_higienizacao sem quebrar antes da migração rodar
+      .select("*").in("inspecao_id", lote).order("inspecao_id")));
   }
 
   return {

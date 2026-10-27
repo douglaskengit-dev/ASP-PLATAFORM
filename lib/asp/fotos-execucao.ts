@@ -37,7 +37,7 @@ export function cloroDoProcedimento(p: { cloro_unidade?: unknown; cloro_limite_a
   };
 }
 
-export type SecaoFotosId = "tanque" | "robo" | "agua_antes" | "agua_depois" | "limpeza";
+export type SecaoFotosId = "tanque" | "robo" | "robo_higienizacao" | "agua_antes" | "agua_depois" | "limpeza";
 type Fase = "antes" | "durante" | "depois";
 
 export interface SlotFoto {
@@ -54,6 +54,9 @@ export interface SlotFoto {
   palavras: string[];
   /** Momento da foto em relação à limpeza — evita casar "antes" com "depois". */
   fase?: Fase;
+  /** A foto sai num subtópico próprio com este título, criado no fim da seção
+   *  de destino do relatório (nunca ocupa as vagas do modelo). */
+  subtopico?: string;
 }
 
 export interface SecaoFotos {
@@ -61,11 +64,13 @@ export interface SecaoFotos {
   titulo: string;
   descricao?: string;
   /** Seção opcional: só é exigida com esta caixinha marcada na inspeção. */
-  flag?: "agua_antes" | "agua_depois";
+  flag?: "agua_antes" | "agua_depois" | "robo_higienizacao";
   slots: SlotFoto[];
 }
 
 export const MINIMO_FOTOS_LIMPEZA = 3;
+/** Subtópico do relatório que recebe as fotos da coleta para análise. */
+export const SUBTOPICO_ANALISE = "Coleta de água para envio de análise";
 
 function slotsAgua(pref: "agua_antes" | "agua_depois"): SlotFoto[] {
   const fase: Fase = pref === "agua_antes" ? "antes" : "depois";
@@ -80,8 +85,12 @@ function slotsAgua(pref: "agua_antes" | "agua_depois"): SlotFoto[] {
       legenda: `Medição de pH ${quando}`, palavras: ["ph"] },
     { id: `${pref}_cloro`, rotulo: "Cloro", fase, valor: { nome: "Cloro", unidade: "mg/L" },
       legenda: `Medição de cloro ${quando}`, palavras: ["cloro"] },
-    { id: `${pref}_procedimento`, rotulo: "Procedimento de coleta", fase,
-      legenda: `Procedimento de coleta (${quando})`, palavras: ["procedimento", "frasco"] },
+    // id mantido (`_procedimento`): as fotos já coletadas continuam na vaga.
+    { id: `${pref}_procedimento`, rotulo: "Procedimento de pH e cloro", fase,
+      legenda: `Procedimento de medição de pH e cloro (${quando})`, palavras: ["procedimento"] },
+    { id: `${pref}_analise`, rotulo: "Coleta de água para envio de análise", fase,
+      legenda: `Coleta de água para envio de análise (${quando})`,
+      palavras: ["analise", "laborat", "frasco"], subtopico: SUBTOPICO_ANALISE },
   ];
 }
 
@@ -97,6 +106,16 @@ export const SECOES_FOTOS: SecaoFotos[] = [
   {
     id: "robo", titulo: "Robô no local da inspeção",
     slots: [{ id: "robo", rotulo: "Robô no local", legenda: "Robô no local da inspeção", palavras: ["robo"] }],
+  },
+  {
+    id: "robo_higienizacao", titulo: "Higienização do robô", flag: "robo_higienizacao",
+    descricao: "Exigida em reservatório de água potável.",
+    slots: [
+      { id: "robo_higienizacao_procedimento", rotulo: "Procedimento de higienização",
+        legenda: "Procedimento de higienização do robô", palavras: ["procedimento", "higieniz", "sanitiza"] },
+      { id: "robo_higienizado", rotulo: "Robô higienizado",
+        legenda: "Robô higienizado", palavras: ["higienizado", "sanitizado"] },
+    ],
   },
   {
     id: "agua_antes", titulo: "Coleta de água ANTES da limpeza", flag: "agua_antes",
@@ -144,12 +163,15 @@ export interface RegistroFotosExecucao {
   inspecao_id?: string;
   agua_antes: boolean;
   agua_depois: boolean;
+  /** Seção "Higienização do robô" exigida. Ausente = coluna ainda não criada. */
+  robo_higienizacao?: boolean;
   limpeza_confirmada: boolean;
   itens: Record<string, ItemColetado | FotoColetada[]>;
 }
 
 export function registroVazio(aguaPotavel = false): RegistroFotosExecucao {
-  return { id: null, agua_antes: aguaPotavel, agua_depois: aguaPotavel, limpeza_confirmada: false, itens: {} };
+  return { id: null, agua_antes: aguaPotavel, agua_depois: aguaPotavel, robo_higienizacao: aguaPotavel,
+    limpeza_confirmada: false, itens: {} };
 }
 
 export function slotPorId(id: string): { secao: SecaoFotos; slot: SlotFoto } | null {
@@ -277,10 +299,14 @@ export function pendenciasColeta(reg: RegistroFotosExecucao | null | undefined):
  *       padrão); senão "Identificação do tanque".
  *   Robô no local → "Limpeza robotizada"; senão "Sanitização"; senão
  *       "Inspeção visual interna".
+ *   Higienização do robô (procedimento, robô higienizado) → "Sanitização";
+ *       senão "Limpeza robotizada"; senão "Inspeção visual interna".
  *   Água antes/depois (local, ponto, pH, cloro, procedimento) → "Coletas das
  *       amostras"; senão "Análise Físico Química e Laboratorial"; senão
  *       "Inspeção visual interna". pH/cloro: valor na legenda e nos
- *       marcadores [dado coletado] do modelo.
+ *       marcadores [dado coletado] do modelo. A coleta para envio de análise
+ *       sai num subtópico próprio, "Coleta de água para envio de análise",
+ *       no fim dessa seção (âncora "sub:<título>").
  *   Limpeza antes e durante → "Limpeza robotizada"; senão "Inspeção visual
  *       interna".
  *   Limpeza depois → "Imagens após a limpeza"; senão "Limpeza robotizada";
@@ -298,6 +324,7 @@ export function pendenciasColeta(reg: RegistroFotosExecucao | null | undefined):
 const DESTINOS: Record<SecaoFotosId | "limpeza_depois", { chave: string; ancora?: string; soNumero?: number }[]> = {
   tanque: [{ chave: "reservatorio", ancora: "6.3", soNumero: 6 }, { chave: "tanque" }],
   robo: [{ chave: "limpeza" }, { chave: "sanitizacao" }, { chave: "fotos-internas" }],
+  robo_higienizacao: [{ chave: "sanitizacao" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
   agua_antes: [{ chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
   agua_depois: [{ chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
   limpeza: [{ chave: "limpeza" }, { chave: "fotos-internas" }],
@@ -376,6 +403,7 @@ export function planejarFotosNoRelatorio(
         topico = n; ancora = d.ancora;
         break;
       }
+      if (!ancora && slot.subtopico) ancora = `sub:${slot.subtopico}`;
       const valor = textoDoValor(slot, valorDoSlot(reg, slot.id), modelo.unidadeCloro);
       fotos.forEach((f, k) => {
         const foto: FotoPlanejada = {

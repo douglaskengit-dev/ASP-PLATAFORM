@@ -246,7 +246,7 @@ export default function ColetaFotosExecucao({
     aplicarResposta(res, "Falha ao remover a foto.");
   }
 
-  async function marcar(chave: "agua_antes" | "agua_depois" | "limpeza_confirmada", valor: boolean) {
+  async function marcar(chave: "agua_antes" | "agua_depois" | "robo_higienizacao" | "limpeza_confirmada", valor: boolean) {
     setErro(null);
     setRegistro((r) => r && { ...r, [chave]: valor });
     const res = await enviarJson(url, "PATCH", { [chave]: valor }, "Coleta de fotos da execução");
@@ -386,7 +386,7 @@ export default function ColetaFotosExecucao({
         )}
         {secao.flag && aguaPotavel && !exigida && (
           <p className="val-msg val-aviso aviso-plano" style={{ margin: "6px 0 0" }}>
-            ⚠️ O procedimento desta OS é de água potável, mas esta coleta está desmarcada — as fotos e análises não serão cobradas nem entram no relatório.
+            ⚠️ O procedimento desta OS é de água potável, mas {secao.id === "robo_higienizacao" ? "a higienização do robô está desmarcada — as fotos" : "esta coleta está desmarcada — as fotos e análises"} não serão cobradas nem entram no relatório.
           </p>
         )}
         {!exigida ? (
