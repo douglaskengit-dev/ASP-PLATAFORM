@@ -30,6 +30,11 @@ export interface PushPayload {
   titulo: string;
   mensagem?: string;
   link?: string;
+  /** Mesma tag = a notificação nova substitui a anterior no aparelho. */
+  tag?: string;
+  /** Botões da notificação (Android/desktop; o iPhone ignora). O clique em
+   *  cada um é tratado no sw.js pelo `acao`. */
+  acoes?: { acao: string; titulo: string }[];
 }
 
 /** Envia um push para todos os dispositivos inscritos dos usuários dados.
@@ -54,6 +59,8 @@ export async function enviarPushParaUsuarios(
     titulo: payload.titulo,
     mensagem: payload.mensagem || "",
     link: payload.link || "/dashboard",
+    ...(payload.tag ? { tag: payload.tag } : {}),
+    ...(payload.acoes?.length ? { acoes: payload.acoes } : {}),
   });
 
   let enviados = 0;
