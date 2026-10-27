@@ -488,10 +488,18 @@ export default function CatalogoPage() {
                 <span className="detalhe" style={{ display: "block" }}>
                   {(p.equipamentos || []).length} equipamento(s) previsto(s)
                   {p.metodos ? " · texto de métodos definido" : " · sem texto de métodos"}
+                  {p.template_path ? " · modelo próprio" : " · modelo padrão"}
                 </span>
               </div>
             </div>
-            <span style={{ display: "flex", gap: 6 }}>
+            <span style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <a className="btn-dl btn-sec" title="Baixar o modelo .docx usado por este procedimento"
+                href={p.template_path
+                  ? `/api/catalogo/template?caminho=${encodeURIComponent(p.template_path)}&baixar=1&nome=${encodeURIComponent(`Modelo ${p.codigo}`)}`
+                  : "/templates/relatorio-asp-v3.docx"}
+                {...(p.template_path ? {} : { download: `Modelo padrão ASP (${p.codigo}).docx` })}>
+                ⬇ Modelo
+              </a>
               <button className="btn-dl btn-sec" onClick={() => abrir("procedimento", { ...p })}>
                 {podeEditar ? "Editar" : "Ver"}
               </button>
