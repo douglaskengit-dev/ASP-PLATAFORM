@@ -1107,41 +1107,9 @@ export default function GerarRelatorio({
     );
   }
 
-  /** Fotos que ocupam as VAGAS do modelo, na ordem. Sem campo de legenda:
-   *  ela já está escrita no .docx, ao lado de cada vaga. */
-  function BlocoVagas(topico: number, max: number) {
-    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.vaga && x.f.topico === topico);
-    return (
-      <div style={{ marginTop: 6 }}>
-        {minhas.length < max && (
-          <input type="file" accept={ACEITA_FOTO} multiple disabled={processandoFotos}
-            onChange={(e) => {
-              adicionarArquivos(e.target.files, max - minhas.length, `v-${topico}`, { legenda: "", topico, vaga: true });
-              e.target.value = "";
-            }} />
-        )}
-        <span className="detalhe" style={{ display: "block" }}>{minhas.length} de {max} vaga(s)</span>
-        {MsgFotos(`v-${topico}`)}
-        {distribuirVagas(minhas, Math.max(max, minhas.length)).map((x, ordem) => x && (
-          <div key={x.i} style={{ marginTop: 4 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                {ordem + 1}. {x.f.coleta || x.f.arquivo.name}
-              </span>
-              <button className="btn-dl btn-sec btn-perigo"
-                onClick={() => setFotos((p) => p.filter((_, k) => k !== x.i))}>Remover</button>
-            </div>
-            <MensagensCampo r={r} campo={`fotos.${x.i}`} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  /** Vagas de imagem de QUALQUER tópico — não só os 5 hardcoded da limpeza
-   *  robotizada. Se o modelo tem marcador [imagem] sob este título, a foto
-   *  entra na posição certa com a legenda que o próprio modelo já traz,
-   *  igual ao card de Análise Físico Química e Laboratorial. Sem vaga
+  /** Vagas de imagem de QUALQUER tópico do modelo em uso. Se o modelo tem
+   *  marcador [imagem] sob este título, a foto entra na posição certa com a
+   *  legenda que o próprio modelo já traz. Sem vaga
    *  lida para este número, retorna null — o chamador cai no upload de
    *  fotos livre de sempre. */
   function BlocoVagasDoTopico(numero: number) {
@@ -1830,18 +1798,10 @@ export default function GerarRelatorio({
               <input style={campo} value={d.volumeSedimento || ""} onChange={(e) => mudarVolume(e.target.value)} />
               <MensagensCampo r={r} campo="volumeSedimento" /></div>
           </div>
-          {([
-            [8, "Análise Físico Química e Laboratorial — 4 fotos", 4],
-            [9, "Análise Físico Química e Laboratorial — imagens", 12],
-            [10, "Análise Físico Química e Laboratorial — imagens", 12],
-            [11, "Análise Físico Química e Laboratorial — imagens", 8],
-            [12, "Análise Físico Química e Laboratorial — prints do laudo (antes e depois)", 2],
-          ] as const).map(([num, rot, max]) => (
-            <div key={num} style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
-              <strong style={{ fontSize: 12.5 }}>{rot}</strong>
-              {BlocoVagas(num, max)}
-            </div>
-          ))}
+          {/* As vagas de foto de cada seção (Sanitização, Coletas, Limpeza…)
+              aparecem no bloco da própria seção, com o título do modelo em uso —
+              antes havia aqui uma lista fixa dos números 8 a 12 do modelo
+              antigo, que caía na seção errada com outra numeração. */}
           {/* Fase 8: o PDF do laudo do laboratório é arquivo próprio (não
               entra no .docx) e é exigido para enviar para aprovação. */}
           {execucao && (

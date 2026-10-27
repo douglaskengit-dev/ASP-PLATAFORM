@@ -347,7 +347,9 @@ export function pendenciasColeta(reg: RegistroFotosExecucao | null | undefined):
  * cada uma e deixa trocar a vaga ou remover.
  */
 const DESTINOS: Record<SecaoFotosId | "limpeza_depois", { chave: string; ancora?: string; soNumero?: number }[]> = {
-  tanque: [{ chave: "reservatorio", ancora: "6.3", soNumero: 6 }, { chave: "tanque" }],
+  // 6.3 "Fotos do tanque" do modelo padrão; noutro modelo, a seção "Dados do
+  // reservatório" com o número que tiver (vagas ou fim da seção).
+  tanque: [{ chave: "reservatorio", ancora: "6.3", soNumero: 6 }, { chave: "reservatorio" }, { chave: "tanque" }],
   robo: [{ chave: "limpeza" }, { chave: "sanitizacao" }, { chave: "fotos-internas" }],
   robo_higienizacao: [{ chave: "sanitizacao" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
   agua_antes: [{ chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
@@ -377,6 +379,10 @@ function faseDaLegenda(legenda: string): Fase | null {
   const depois = /\b(depois|apos)\b/.test(t);
   return antes === depois ? null : antes ? "antes" : "depois";
 }
+
+/** Todas as vagas da coleta — para saber se a legenda de uma vaga do modelo
+ *  é "neutra" (não cita nenhuma delas). */
+const TODAS_AS_VAGAS: SlotFoto[] = SECOES_FOTOS.flatMap((s) => s.slots);
 
 /** Quanto a legenda de uma vaga combina com a foto (0 = não combina). */
 function afinidade(slot: SlotFoto, legenda: string): number {
@@ -464,11 +470,16 @@ export function planejarFotosNoRelatorio(
         ocupada[i] = true; pendentes.delete(melhor);
       }
     });
-    // 2) as demais ocupam as vagas livres na ordem da coleta; sem vaga, ficam
-    //    como figura livre no fim da seção
+    // 2) as demais ocupam vagas livres — primeiro uma cuja legenda combine
+    //    com a foto (a 9ª foto de "antes" vai para a 9ª vaga de "antes"), depois
+    //    uma vaga NEUTRA (legenda que não cita nenhuma foto da coleta). Nunca
+    //    a vaga de outra coisa: a foto de "antes" que sobrou não pode cair na
+    //    vaga de "durante". Sem vaga, fica como figura livre no fim da seção.
+    const neutra = vagas.map((v) => TODAS_AS_VAGAS.every((s) => afinidade(s, v.legenda) === 0));
     for (const c of pendentes) {
-      const i = ocupada.indexOf(false);
-      if (i < 0) break;
+      let i = vagas.findIndex((v, k) => !ocupada[k] && afinidade(c.slot, v.legenda) > 0);
+      if (i < 0) i = vagas.findIndex((_, k) => !ocupada[k] && neutra[k]);
+      if (i < 0) continue;
       c.foto.vaga = true; c.foto.vagaIndice = i; ocupada[i] = true;
     }
   }
