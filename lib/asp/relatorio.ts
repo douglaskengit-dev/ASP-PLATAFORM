@@ -294,6 +294,86 @@ function separarBlocos(body: string): { ini: number; fim: number; xml: string; t
   return blocos;
 }
 
+// ── Acabamento do corpo ──────────────────────────────────────────────────────
+
+/** "12. Análise Físico Química e Laboratorial:" / "10.1 Imagens das coletas:" */
+const RE_TITULO_SECAO = /^\d+(\.\d+)*\.?\s+\S.{0,90}:$/;
+
+/** Põe um elemento no <w:pPr> do parágrafo (cria o pPr se faltar). `antesDe`
+ *  são as tags que vêm DEPOIS dele na ordem do schema (CT_PPr). */
+function noPPr(p: string, el: string, antesDe: string[]): string {
+  const ab = /<w:pPr>|<w:pPr\s[^>]*>/.exec(p);
+  if (!ab) return p.replace(/^<w:p\b[^>]*?(\/?)>/, (m, auto) =>
+    auto ? m.replace(/\/>$/, `><w:pPr>${el}</w:pPr></w:p>`) : `${m}<w:pPr>${el}</w:pPr>`);
+  const iniPPr = ab.index + ab[0].length;
+  const fimPPr = p.indexOf("</w:pPr>", iniPPr);
+  const dentro = p.slice(iniPPr, fimPPr);
+  let pos = dentro.length;
+  for (const t of antesDe) {
+    const k = dentro.search(new RegExp(`<w:${t}[\\s/>]`));
+    if (k >= 0 && k < pos) pos = k;
+  }
+  return p.slice(0, iniPPr + pos) + el + p.slice(iniPPr + pos);
+}
+
+const DEPOIS_DE_KEEPNEXT = ["keepLines", "pageBreakBefore", "framePr", "widowControl", "numPr", "suppressLineNumbers",
+  "pBdr", "shd", "tabs", "suppressAutoHyphens", "kinsoku", "wordWrap", "overflowPunct", "topLinePunct",
+  "autoSpaceDE", "autoSpaceDN", "bidi", "adjustRightInd", "snapToGrid", "spacing", "ind", "contextualSpacing",
+  "mirrorIndents", "suppressOverlap", "jc", "textDirection", "textAlignment", "textboxTightWrap",
+  "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr", "pPrChange"];
+const DEPOIS_DE_SPACING = DEPOIS_DE_KEEPNEXT.slice(DEPOIS_DE_KEEPNEXT.indexOf("ind"));
+
+function comKeepNext(p: string): string {
+  return /<w:keepNext(\s[^>]*)?\/>/.test(p) ? p : noPPr(p, "<w:keepNext/>", DEPOIS_DE_KEEPNEXT);
+}
+
+/** Entrelinha 1,5 (mantém o espaço antes/depois que o parágrafo já tinha). */
+function comEntrelinhaAbnt(p: string): string {
+  const pPr = /<w:pPr\b[\s\S]*?<\/w:pPr>/.exec(p)?.[0] || "";
+  const sp = /<w:spacing\b[^>]*\/>/.exec(pPr)?.[0];
+  if (sp) {
+    const novo = sp.replace(/\s*w:line="[^"]*"/, "").replace(/\s*w:lineRule="[^"]*"/, "")
+      .replace(/\/>$/, ' w:line="360" w:lineRule="auto"/>');
+    return p.replace(sp, novo);
+  }
+  return noPPr(p, '<w:spacing w:line="360" w:lineRule="auto"/>', DEPOIS_DE_SPACING);
+}
+
+/**
+ * Acabamento do corpo, para qualquer modelo:
+ *  - título de seção/subtítulo não fica sozinho no pé da página: ganha
+ *    keepNext, e os parágrafos VAZIOS logo abaixo dele também — senão a
+ *    corrente para no vazio, que fica com o título na página de cima;
+ *  - texto corrido (da seção 1 em diante, fora de tabela, legenda e caixa de
+ *    texto) no padrão ABNT: entrelinha 1,5 e Arial 12 onde o modelo trazia
+ *    10–11,5 pt (os textos fixos copiados dos relatórios antigos).
+ */
+function acabamentoDoCorpo(body: string): string {
+  const blocos = separarBlocos(body);
+  let saida = "", ultimo = 0, noCorpo = false, amarrando = false;
+  for (const b of blocos) {
+    let x = b.xml;
+    if (b.xml.startsWith("<w:p")) {
+      const t = b.texto.trim();
+      const titulo = RE_TITULO_SECAO.test(t);
+      const desenho = /<w:drawing\b|<w:pict\b|<w:object\b|<w:txbxContent\b/.test(x);
+      const vazio = !t && !desenho && !/<w:br\s+w:type="page"/.test(x);
+      if (titulo && /^1\.?\s/.test(t)) noCorpo = true;
+      if (titulo) amarrando = true;
+      else if (!vazio) amarrando = false;
+      if (amarrando) x = comKeepNext(x);
+      if (noCorpo && t && !titulo && !desenho && !/^(Figura|Fonte)\b/i.test(t)) {
+        x = comEntrelinhaAbnt(x)
+          .replace(/<w:sz w:val="(2[0-3])"\/>/g, '<w:sz w:val="24"/>')
+          .replace(/<w:szCs w:val="(2[0-3])"\/>/g, '<w:szCs w:val="24"/>');
+      }
+    }
+    saida += body.slice(ultimo, b.ini) + x;
+    ultimo = b.fim;
+  }
+  return saida + body.slice(ultimo);
+}
+
 /** Renumera um título dentro de um bloco.
  *
  *  O Word quebra o texto em vários <w:r>/<w:t> (marcas de revisão), então
@@ -1971,6 +2051,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   let nFig = 0;
   saida = saida.split(MARCA_FIG).reduce((acc, parte, i) =>
     i === 0 ? parte : acc + String(++nFig) + parte, "");
+  saida = acabamentoDoCorpo(saida);
 
   xml = xml.slice(0, iniBody) + saida + xml.slice(fimBody);
   zip.file("word/document.xml", xml);

@@ -24,7 +24,7 @@ import { contemDia, textoPeriodoLongo, type Periodo } from "./periodo";
 import { diasSemRdo, textoDiasSemRdo } from "./execucao";
 import { ehLimpezaRobotizada, LAUDO_COLUNAS, LAUDO_PARAMETROS, type DadosRelatorio } from "../asp/relatorio";
 import { numeroBr, valorDoSlot, type RegistroFotosExecucao, type UnidadeCloro } from "../asp/fotos-execucao";
-import { CLORO_MINIMO, type AtividadeRdo, type MembroRdo } from "../asp/rdo";
+import { CLORO_MINIMO, semFraseCloro, type AtividadeRdo, type MembroRdo } from "../asp/rdo";
 
 // ── Números em pt-BR ─────────────────────────────────────────────────────────
 
@@ -570,3 +570,108 @@ export const ROTULOS_RELATORIO_EXECUCAO: Record<string, string> = {
   phAntes: "pH antes", cloroAntes: "Cloro livre antes", phDepois: "pH depois", cloroDepois: "Cloro livre depois",
   rdos: "RDOs", equipe: "Equipe de trabalho", laudoPdf: "PDF do laudo", conclusao: "Conclusão",
 };
+
+// ── Dados do relatório a partir das RDOs ─────────────────────────────────────
+
+/** O que as RDOs da OS dão para o relatório: equipe, datas/horários da
+ *  operação e o texto corrido das atividades (Observações). Só preenche ao
+ *  clicar em "Puxar das RDOs" — pH e cloro continuam no modal das coletas. */
+export interface DadosDasRdos {
+  /** Pessoas das RDOs, sem repetir (na ordem em que aparecem). */
+  equipe: MembroRdo[];
+  /** Data (ISO) da primeira RDO — início da execução. */
+  dataExecucao?: string;
+  /** Dia (ISO) em que a limpeza começou; sem limpeza registrada, o da 1ª RDO. */
+  dataOperacao?: string;
+  /** [chegada, início da limpeza, conclusão, saída] do dia da operação. */
+  horarios: string[];
+  /** Um parágrafo por dia, em HTML. */
+  observacoes: string;
+}
+
+const RE_CHEGADA = /\bcheg(a|ou|ada)\b.*\bsite\b|\bchegada\b/i;
+const RE_SAIDA = /\bdeix(a|ou)\b.*\bsite\b|\bsa[íi]da\b/i;
+const RE_INICIO_LIMPEZA = /\b(in[íi]cio|inicia|iniciou|come[çc]a|come[çc]o)\b.*\blimpeza\b/i;
+const RE_FIM_LIMPEZA = /\b(fim|t[ée]rmino|termina|terminou|conclus[ãa]o|conclui|concluiu|finaliza)\b.*\blimpeza\b/i;
+const RE_ALMOCO = /\balmo[çc]o\b/i;
+
+/** Atividades do dia que valem para esta OS: as marcadas com ela e as sem
+ *  OS (chegada, PT, saída…), que valem para todas as que o RDO cobre. */
+function atividadesDaOs(rdo: RdoResumo, inspecaoId: string): AtividadeRdo[] {
+  return (rdo.dados?.atividades || [])
+    .filter((a) => a && (a.texto || "").trim() && (!a.inspecaoId || a.inspecaoId === inspecaoId))
+    .slice()
+    .sort((a, b) => (a.inicio || "").localeCompare(b.inicio || ""));
+}
+
+/** "Liberação da PT." → "liberação da PT." (sigla no começo fica como está). */
+function minusculaInicial(t: string): string {
+  return /^[A-ZÀ-Ý][A-ZÀ-Ý]/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1);
+}
+
+function hora(h?: string): string {
+  return h && /^\d{2}:\d{2}$/.test(h) ? `${h}h` : "";
+}
+
+/** Frase de uma atividade no texto corrido: "às 08:10h, equipe ASP …". */
+function fraseAtividade(a: AtividadeRdo): string {
+  let t = semFraseCloro(a.texto.trim()).replace(/\s+/g, " ");
+  if (!/[.!?]$/.test(t)) t += ".";
+  const ini = hora(a.inicio), fim = hora(a.fim);
+  const quando = ini && fim ? `das ${ini} às ${fim}` : ini ? `às ${ini}` : "";
+  return quando ? `${quando}, ${minusculaInicial(t)}` : t;
+}
+
+function escaparHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+export function dadosDasRdos(rdos: RdoResumo[] | null | undefined, inspecaoId: string): DadosDasRdos {
+  const lista = (rdos || [])
+    .filter((r) => r && dataIsoValida(r.data) && ((r.inspecoes || []).length === 0 || (r.inspecoes || []).includes(inspecaoId)))
+    .slice()
+    .sort((a, b) => a.data.localeCompare(b.data));
+
+  const equipe: MembroRdo[] = [];
+  for (const r of lista) for (const m of r.dados?.equipe || []) {
+    const nome = (m?.nome || "").trim();
+    if (nome && !equipe.some((x) => mesmaPessoa(x.nome, nome))) equipe.push({ nome, funcao: (m.funcao || "").trim() });
+  }
+
+  const dias = lista.map((r) => ({ data: r.data, atividades: atividadesDaOs(r, inspecaoId) }))
+    .filter((d) => d.atividades.length > 0);
+
+  // Dia da operação: o primeiro em que a limpeza começou.
+  const diaLimpeza = dias.find((d) => d.atividades.some((a) => RE_INICIO_LIMPEZA.test(a.texto)))
+    || dias.find((d) => d.atividades.some((a) => /\blimpeza\b/i.test(a.texto) && !/coleta/i.test(a.texto)));
+  const diaOp = diaLimpeza || dias[0];
+  const horarios = ["", "", "", ""];
+  if (diaOp) {
+    const at = diaOp.atividades;
+    const achar = (re: RegExp) => at.find((a) => re.test(a.texto));
+    const inicio = achar(RE_INICIO_LIMPEZA);
+    const fim = [...at].reverse().find((a) => RE_FIM_LIMPEZA.test(a.texto));
+    horarios[0] = achar(RE_CHEGADA)?.inicio || "";
+    horarios[1] = inicio?.inicio || "";
+    // "10:50 às 15:20 – limpeza de fundo": a mesma atividade dá início e fim.
+    horarios[2] = fim?.inicio || inicio?.fim || "";
+    horarios[3] = [...at].reverse().find((a) => RE_SAIDA.test(a.texto))?.inicio || "";
+  }
+
+  const observacoes = dias.map((d) => {
+    const frases = d.atividades.filter((a) => !RE_ALMOCO.test(a.texto)).map(fraseAtividade);
+    if (frases.length === 0) return "";
+    const [primeira, ...resto] = frases;
+    const texto = [`No dia ${dataBr(d.data)}, ${primeira}`,
+      ...resto.map((f) => f.charAt(0).toUpperCase() + f.slice(1))].join(" ");
+    return `<p>${escaparHtml(texto)}</p>`;
+  }).join("");
+
+  return {
+    equipe,
+    dataExecucao: lista[0]?.data,
+    dataOperacao: diaOp?.data,
+    horarios,
+    observacoes,
+  };
+}
