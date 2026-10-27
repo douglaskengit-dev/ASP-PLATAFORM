@@ -654,12 +654,22 @@ export default function CatalogoPage() {
                   <span className="detalhe" style={{ margin: 0, wordBreak: "break-all" }}>
                     Modelo próprio: {edProc.template_path.split("/").pop()}
                   </span>
+                  <a className="btn-dl btn-sec btn-sm"
+                    href={`/api/catalogo/template?caminho=${encodeURIComponent(edProc.template_path)}&baixar=1&nome=${encodeURIComponent(`Modelo ${edProc.codigo || "procedimento"}`)}`}>
+                    ⬇ Baixar modelo
+                  </a>
                   {editavel && (
                     <button type="button" className="btn-dl btn-sec btn-perigo"
                       onClick={() => setEdProc({ ...edProc, template_path: null })}>Voltar ao padrão</button>
                   )}
                 </div>
-              ) : editavel && (
+              ) : (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="detalhe" style={{ margin: 0 }}>Usando o modelo padrão da ASP.</span>
+                  <a className="btn-dl btn-sec btn-sm" href="/templates/relatorio-asp-v3.docx" download="Modelo padrão ASP.docx">⬇ Baixar modelo padrão</a>
+                </div>
+              )}
+              {!edProc.template_path && editavel && (
                 <input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={enviandoModelo}
                   aria-label="Enviar modelo .docx"
                   onChange={(ev) => { const f = ev.target.files?.[0]; if (f) enviarModelo(f); ev.target.value = ""; }} />
