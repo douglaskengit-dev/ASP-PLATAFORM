@@ -19,7 +19,7 @@
  * conferido célula a célula (com os limites da Portaria 888/2021), PDF do
  * laudo obrigatório para enviar para aprovação, data da operação × período ×
  * RDOs e equipe × RDOs. Regras em lib/validacao/relatorioExecucao.ts. */
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import {
@@ -42,7 +42,7 @@ import {
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
   CAMPOS_PH_CLORO, COL_LIMITE, converterPhCloroLegado, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
-  sugestaoConclusao, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
+  sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
 
@@ -159,6 +159,20 @@ const campoLeitura: React.CSSProperties = { ...campo, background: "var(--bg-suav
  *  `ehLimpezaRobotizada` mora na lib porque a resolução da lista de tópicos
  *  também precisa dele: os números do modelo do POP 001 não significam o
  *  mesmo que os de TOPICOS_PADRAO. */
+
+/** Legenda de uma vaga como lista no formulário: sem o "Figura N –" do
+ *  modelo (o número sai certo só no documento) nem o marcador do valor. */
+function legendaDaVaga(legenda: string) {
+  return legenda.replace(/^Figura\s+\S+\s*[–-]\s*/i, "").replace(/\s*\(\[dado coletado\]\)/gi, "").trim();
+}
+
+/** Blocos de seção do formulário na ordem do número no modelo
+ *  (`data-secao`), que é a ordem em que saem no documento. */
+function emOrdemDoModelo(blocos: React.ReactNode[]) {
+  return blocos
+    .filter(isValidElement)
+    .sort((a, b) => Number((a.props as any)["data-secao"] ?? 0) - Number((b.props as any)["data-secao"] ?? 0));
+}
 
 export default function GerarRelatorio({
   onFechar, inicial, nomeArquivo, usuarios, coletas, onSalvar, estadoSalvo, coletaFotos,
@@ -344,23 +358,28 @@ export default function GerarRelatorio({
     const origem = caminhoModelo ? `modelo de ${proc?.codigo || "procedimento"}` : "modelo padrão da ASP";
     setInfoModelo(`lendo ${origem}…`);
     setModeloLido(null);
+    // Leitura de um modelo que já foi trocado (ex.: o padrão, pedido antes
+    // de o procedimento carregar) não pode sobrescrever a do atual — o
+    // arquivo menor costuma chegar DEPOIS e apagava as vagas do POP 001.
+    let vigente = true;
     const lidos = lerTopicosDoModelo(url)
       .then((t) => {
+        if (!vigente) return;
         setTopicosModelo(t);
         setInfoModelo(t.length
           ? `${origem} · ${t.length} seções`
           : `${origem} · nenhuma seção reconhecida no arquivo`);
       })
       .catch((e) => {
+        if (!vigente) return;
         setTopicosModelo([]);
         setInfoModelo(`falha ao ler o ${origem}: ${e instanceof Error ? e.message : "erro"}`);
       });
     // Vagas de imagem do modelo — falha aqui não precisa de mensagem própria
     // na tela: sem vaga lida, o tópico só volta a usar o upload de fotos
     // livre, que é o comportamento de sempre.
-    const vagas = lerVagasDeImagem(url).then(setVagasModelo).catch(() => setVagasModelo([]));
-    // leitura de um modelo que já foi trocado não marca o atual como lido
-    let vigente = true;
+    const vagas = lerVagasDeImagem(url).catch(() => [] as VagaImagem[])
+      .then((v) => { if (vigente) setVagasModelo(v); });
     Promise.all([lidos, vagas]).then(() => { if (vigente) setModeloLido(caminhoModelo || ""); });
     return () => { vigente = false; };
   }, [caminhoModelo, proc?.codigo]);
@@ -419,7 +438,7 @@ export default function GerarRelatorio({
     procAplicado.current = id;
     if (primeiraVez && estadoSalvo?.visiveis) return;
     const selecao = selecaoDoCatalogo();
-    if (selecao) setVisiveis(selecao);
+    if (selecao) setVisiveis(comBatimetriaPadrao(selecao));
   }, [proc?.id, listaProc.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Quantos tópicos o procedimento tem configurados no Catálogo (inclui a
@@ -467,6 +486,49 @@ export default function GerarRelatorio({
 
   const qtdOcultos = useMemo(() => TOPICOS_EM_USO.filter((t) => !ativo(t.numero)).length, [visiveis, TOPICOS_EM_USO]);
 
+  /** Número, NO MODELO EM USO, de cada seção que tem bloco fixo no
+   *  formulário (Métodos, Batimetria, Conclusão…). Os blocos nasceram no
+   *  modelo padrão, onde são 1 a 10; outro modelo numera diferente (no
+   *  POP 001, "7" é Dados do reservatório) e o bloco não pode marcar/ocultar
+   *  nem receber fotos com o número errado. Achado pelo título, como faz o
+   *  gerador. undefined = o modelo não tem a seção — o bloco não aparece. */
+  const N = useMemo(() => {
+    const base = topicosModelo.length > 0 ? topicosModelo : null;
+    const num = (chave: string, padrao: number) => (base ? numeroDaSecao(base, chave) : padrao);
+    return {
+      local: num("local", 1), tanque: num("tanque", 2), metodos: num("metodos", 3),
+      equipamentos: num("equipamentos", 4), equipe: num("equipe", 5), reservatorio: num("reservatorio", 6),
+      batimetria: num("batimetria", 7), fotosInternas: num("fotos-internas", 8),
+      conclusao: num("conclusao", 9), recomendacoes: num("recomendacoes", 10),
+      // Só existem em modelo próprio (POP 001): sem modelo, ficam de fora.
+      anexos: base ? numeroDaSecao(base, "anexos") : undefined,
+      coletas: base ? numeroDaSecao(base, "coletas") : undefined,
+      analise: base ? numeroDaSecao(base, "analise") : undefined,
+    };
+  }, [topicosModelo]);
+
+  /** Batimetria só entra com medição: OS sem nenhuma medição (coleta de
+   *  batimetria) começa com a seção desmarcada — dá para marcar à mão. */
+  const semMedicao = coletas.length === 0;
+  /** Valores já digitados de pH/cloro, para o aviso da seção de coletas. */
+  const resumoColetas = [
+    d.phAntes && `pH ${d.phAntes} → ${d.phDepois || "?"}`,
+    d.cloroAntes && `cloro ${d.cloroAntes} → ${d.cloroDepois || "?"} ${unidadeCloro}`,
+  ].filter(Boolean).join(" · ");
+  // Só depois de o modelo em uso ser lido: antes disso N é o do modelo
+  // padrão (Batimetria = 7), e no POP 001 a 7 é "Dados do reservatório" —
+  // que ficaria desmarcada por engano.
+  const modeloPronto = modeloLido !== null && modeloLido === (caminhoModelo || "");
+  const comBatimetriaPadrao = (sel: Record<number, boolean>) =>
+    modeloPronto && semMedicao && N.batimetria !== undefined ? { ...sel, [N.batimetria]: false } : sel;
+  const batimetriaAplicada = useRef(false);
+  useEffect(() => {
+    if (!modeloPronto || batimetriaAplicada.current) return;
+    batimetriaAplicada.current = true;
+    if (estadoSalvo?.visiveis || !semMedicao || N.batimetria === undefined) return;
+    setVisiveis((v) => ({ ...v, [N.batimetria!]: false }));
+  }, [modeloPronto]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   /** Preparado / Checado / Aprovado saem dos usuários de Operações. */
   const operacoes = useMemo(() => usuarios.filter((u) => u.perfil === "operacoes"), [usuarios]);
   const gerencia = useMemo(() => usuarios.filter((u) => u.perfil === "gerencia"), [usuarios]);
@@ -498,7 +560,8 @@ export default function GerarRelatorio({
       const add = sugestaoConclusao(foraLimite, v.conclusao);
       return add ? { ...v, conclusao: (v.conclusao || "") + add } : v;
     });
-    if (!ativo(9)) setVisiveis((v) => ({ ...v, 9: true }));
+    const nc = N.conclusao;
+    if (nc !== undefined && !ativo(nc)) setVisiveis((v) => ({ ...v, [nc]: true }));
   }
   /** Muda uma célula do laudo (a grade é sempre completa). */
   function mudarCelula(chave: ChaveLaudo, i: number, j: number, valor: string) {
@@ -751,7 +814,7 @@ export default function GerarRelatorio({
     // O procedimento define o FORMATO do relatório: quais tópicos entram.
     // Sem configuração, mantém o que estiver marcado hoje.
     const selecao = selecaoDoCatalogo();
-    if (selecao) setVisiveis(selecao);
+    if (selecao) setVisiveis(comBatimetriaPadrao(selecao));
   }
 
   /** Marca/desmarca um equipamento e reescreve o texto do tópico 4. */
@@ -887,6 +950,7 @@ export default function GerarRelatorio({
         phDepois: textoPhCloroDoc("phDepois", d.phDepois, unidadeCloro),
         alturaSedimento: d.alturaSedimento,
         laudoAntes: laudoDoc(d.laudoAntes), laudoDepois: laudoDoc(d.laudoDepois),
+        amostraAntes: d.amostraAntes, amostraDepois: d.amostraDepois, conclusaoAnalises: d.conclusaoAnalises,
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
@@ -1069,7 +1133,7 @@ export default function GerarRelatorio({
 
   /** Fotos de um subtópico (6.1, 6.2, 6.3), com limite de quantidade.
    *  Cada envio abre uma nova linha com legenda própria. */
-  function BlocoFotosAncora({ ancora, legendaPadrao, max, topico = 6 }:
+  function BlocoFotosAncora({ ancora, legendaPadrao, max, topico = N.reservatorio ?? 6 }:
       { ancora: string; legendaPadrao: string; max: number; topico?: number }) {
     const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.ancora === ancora);
     const cheio = minhas.length >= max;
@@ -1139,7 +1203,7 @@ export default function GerarRelatorio({
           return (
             <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
               <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                {i + 1}. {v.legenda || "(sem legenda no modelo)"}
+                {i + 1}. {legendaDaVaga(v.legenda) || "(sem legenda no modelo)"}
                 {anexo && ` — ${anexo.f.coleta || anexo.f.arquivo.name}`}
               </span>
               {anexo && (
@@ -1201,17 +1265,20 @@ export default function GerarRelatorio({
    *  `semFotos` tira o upload de fotos livre — usado quando o próprio
    *  `children` já traz um BlocoVagasDoTopico, senão o tópico ganhava dois
    *  uploads de foto ao mesmo tempo. */
-  function Topico({ numero, titulo, children, maxFotos, legendaFoto, semFotos }: {
+  function Topico({ numero, titulo, children, maxFotos, legendaFoto, semFotos, nota }: {
     numero: number; titulo: string; children?: React.ReactNode; maxFotos?: number; legendaFoto?: string;
-    semFotos?: boolean;
+    semFotos?: boolean; nota?: string;
   }) {
     const on = ativo(numero);
+    // O título que aparece é o do modelo em uso (como sai no documento).
+    const nome = (numero > 0 && topicosModelo.find((t) => t.numero === numero)?.titulo) || titulo;
     return (
-      <div className="rel-bloco" style={{ opacity: on ? 1 : 0.55 }}>
+      <div key={`secao-${numero}`} data-secao={numero} className="rel-bloco" style={{ opacity: on ? 1 : 0.55 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontWeight: 700, fontSize: 13.5 }}>
           <input type="checkbox" checked={on}
             onChange={(e) => setVisiveis((v) => ({ ...v, [numero]: e.target.checked }))} />
-          <span>{numero === 0 ? titulo : `${numero}. ${titulo}`}</span>
+          <span>{numero === 0 ? nome : `${numero}. ${nome}`}</span>
+          {nota && <span className="detalhe" style={{ fontWeight: 400 }}>— {nota}</span>}
         </label>
         {on && (
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1220,6 +1287,97 @@ export default function GerarRelatorio({
           </div>
         )}
       </div>
+    );
+  }
+
+  /** Botão do modal de valores medidos (pH, cloro, amostras e laudo). */
+  function BotaoValores(texto: string) {
+    return (
+      <button type="button" className="btn-dl btn-sec" onClick={() => setModalColetas(true)}>
+        {texto}
+      </button>
+    );
+  }
+
+  /** Campos da análise do POP 001: sedimento, conclusão das análises e PDF
+   *  do laudo. Entram na seção "Análise…" do modelo, quando ele tem uma. */
+  function ConteudoAnalise() {
+    return (
+      <>
+      {!caminhoModelo ? (
+        <p className="detalhe" style={{ margin: "4px 0 8px", color: "var(--erro, #b42318)" }}>
+          <strong>⚠ Este procedimento não tem o modelo da limpeza robotizada anexado no Catálogo.</strong>{" "}
+          Sem ele o relatório sai no modelo padrão da ASP, que não tem vaga para essas fotos nem
+          marcador para cloro, pH ou o laudo — o que você preencher aqui não aparece no documento
+          gerado. Anexe o .docx do procedimento em Catálogo → {d.procedimento} → Modelo próprio.
+        </p>
+      ) : (
+        <p className="detalhe" style={{ margin: "4px 0 8px" }}>
+          As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
+          figura vem do próprio modelo; vaga sem foto é removida do documento.
+        </p>
+      )}
+      <div style={grade}>
+        <div><label style={rotulo}>Altura de sedimento <span className="detalhe">(medição)</span></label>
+          <input style={campo} value={d.alturaSedimento || ""} onChange={set("alturaSedimento")} /></div>
+        <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(medição)</span></label>
+          <input style={campo} value={d.volumeSedimento || ""} onChange={(e) => mudarVolume(e.target.value)} />
+          <MensagensCampo r={r} campo="volumeSedimento" /></div>
+      </div>
+      {/* Parágrafo próprio da seção de análise, como nos relatórios de
+          referência. Entra no marcador [conclusão das análises] do modelo. */}
+      <div style={{ marginTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <label style={rotulo}>Conclusão das Análises Laboratoriais</label>
+          <button type="button" className="btn-dl btn-sec btn-sm"
+            title="Monta o texto pelo cloro antes/depois e pelo laudo — revise antes de gerar"
+            onClick={() => {
+              const s = sugestaoConclusaoAnalises(d, unidadeCloro);
+              if (!s) { alert("Preencha cloro e/ou o laudo em “Valores das coletas e do laudo” para sugerir o texto."); return; }
+              if (d.conclusaoAnalises?.trim() && !confirm("Substituir o texto atual pela sugestão?")) return;
+              setD((v) => ({ ...v, conclusaoAnalises: s }));
+            }}>
+            Sugerir texto
+          </button>
+        </div>
+        <EditorTexto valor={d.conclusaoAnalises || ""} altura={90}
+          onChange={(v) => setD((x) => ({ ...x, conclusaoAnalises: v }))} />
+      </div>
+      {/* As vagas de foto de cada seção (Sanitização, Coletas, Limpeza…)
+          aparecem no bloco da própria seção, com o título do modelo em uso —
+          antes havia aqui uma lista fixa dos números 8 a 12 do modelo
+          antigo, que caía na seção errada com outra numeração. */}
+      {/* Fase 8: o PDF do laudo do laboratório é arquivo próprio (não
+          entra no .docx) e é exigido para enviar para aprovação. */}
+      {execucao && (
+        <div style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
+          <label style={rotulo} htmlFor="laudo-pdf">
+            PDF do laudo do laboratório{exigeLaudoPdf ? " *" : ""}{" "}
+            <span className="detalhe">— obrigatório para enviar para aprovação; o rascunho pode ser salvo sem ele</span>
+          </label>
+          {laudoPdf ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere", flex: "1 1 200px" }}>
+                📎 {laudoPdf.nome}{laudoPdf.tamanho ? ` (${(laudoPdf.tamanho / 1048576).toFixed(1).replace(".", ",")} MB)` : ""}
+              </span>
+              <label className="btn-dl btn-sec" style={{ cursor: enviandoLaudo ? "wait" : "pointer" }}>
+                Trocar
+                <input type="file" accept="application/pdf,.pdf" hidden disabled={enviandoLaudo}
+                  onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              <button type="button" className="btn-dl btn-sec btn-perigo"
+                disabled={enviandoLaudo} onClick={() => { setLaudoPdf(null); setMsgLaudo(null); }}>Remover</button>
+            </div>
+          ) : (
+            <input id="laudo-pdf" type="file" accept="application/pdf,.pdf" disabled={enviandoLaudo}
+              onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
+          )}
+          {enviandoLaudo && <span className="detalhe" style={{ display: "block" }}>Conferindo e enviando o laudo…</span>}
+          {msgLaudo && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgLaudo}</p>}
+          <MensagensCampo r={r} campo="laudoPdf" />
+        </div>
+      )}
+      </>
     );
   }
 
@@ -1273,10 +1431,20 @@ export default function GerarRelatorio({
               );
             })}
           </div>
+          <div style={{ ...grade, marginTop: 12 }}>
+            <div><label style={rotulo} htmlFor="campo-amostraAntes">Nº da amostra — antes da limpeza</label>
+              <input id="campo-amostraAntes" style={campo} value={d.amostraAntes || ""} onChange={set("amostraAntes")}
+                placeholder="ex.: 26846/2026.0.A" /></div>
+            <div><label style={rotulo} htmlFor="campo-amostraDepois">Nº da amostra — após a limpeza</label>
+              <input id="campo-amostraDepois" style={campo} value={d.amostraDepois || ""} onChange={set("amostraDepois")}
+                placeholder="ex.: 27066/2026.0.A" /></div>
+          </div>
           <p className="detalhe" style={{ margin: "12px 0 0" }}>
-            Laudo: número (vírgula decimal) ou <strong>&lt;LQ</strong>, <strong>ND</strong>, <strong>Ausente</strong>,{" "}
-            <strong>Presente</strong> — coliformes e E. coli (P/A) só com Ausente/Presente. A coluna Limite vem
-            preenchida com a {FONTE_PORTARIA_888} e pode ser corrigida; sai no documento como estiver.
+            Laudo: escreva como o laboratório — número (vírgula decimal), <strong>&lt;2,50</strong> (abaixo do
+            limite de quantificação), <strong>&lt;LQ</strong>, <strong>ND</strong>, <strong>Ausente</strong>,{" "}
+            <strong>Presente</strong> ou <strong>-</strong> (não analisado). Coliformes e E. coli (P/A): Ausente,
+            Presente ou -. A coluna Limite vem preenchida com a {FONTE_PORTARIA_888} e pode ser corrigida; sai no
+            documento como estiver.
           </p>
           {(["laudoAntes", "laudoDepois"] as const).map((chave) => {
             const g = gradeLaudo(d[chave] as string[][] | undefined);
@@ -1498,7 +1666,7 @@ export default function GerarRelatorio({
               <input style={campoLeitura} readOnly placeholder="sem procedimento no cadastro da OS"
                 value={d.procedimento ? `${d.procedimento}${proc ? ` — ${proc.nome}` : ""}` : ""} />
               <span className="detalhe">
-                {proc ? "Sugere método e equipamentos nos tópicos 3 e 4. Para trocar, edite o cadastro da OS."
+                {proc ? `Sugere método e equipamentos nos tópicos ${N.metodos ?? "—"} e ${N.equipamentos ?? "—"}. Para trocar, edite o cadastro da OS.`
                   : d.procedimento ? (catalogoPronto ? "Procedimento não encontrado no Catálogo — o relatório usa o modelo padrão." : "Carregando o Catálogo…")
                   : "Escolha o procedimento no cadastro da OS para usar o modelo dele."}
               </span>
@@ -1511,7 +1679,11 @@ export default function GerarRelatorio({
           )}
         </> })}
 
-        {Topico({ numero: 1, titulo: "Identificação do local", children: <>
+        {/* Seções na ORDEM DO MODELO em uso: blocos com campos próprios e
+            seções genéricas do modelo saem juntos, ordenados pelo número —
+            como ficam no documento. */}
+        {emOrdemDoModelo([
+        N.local !== undefined && Topico({ numero: N.local, titulo: "Identificação do local", children: <>
           <div style={grade}>
             <div><label style={rotulo}>Cliente <span className="detalhe">(cadastro — o mesmo da capa)</span></label>
               <input style={campoLeitura} value={d.cliente || ""} readOnly /></div>
@@ -1531,9 +1703,9 @@ export default function GerarRelatorio({
             <div><label style={rotulo}>Relatório <span className="detalhe">(o mesmo da capa)</span></label>
               <input style={campoLeitura} value={d.relatorioCodigo || ""} readOnly /></div>
           </div>
-        </> })}
+        </> }),
 
-        {Topico({ numero: 2, titulo: "Identificação do tanque", children: <>
+        N.tanque !== undefined && Topico({ numero: N.tanque, titulo: "Identificação do tanque", children: <>
           <div style={grade}>
             <div><label style={rotulo}>TAG <span className="detalhe">(identificação da OS)</span></label>
               <input style={campoLeitura} value={d.tag || ""} readOnly /></div>
@@ -1594,9 +1766,9 @@ export default function GerarRelatorio({
 
           <div><label style={rotulo}>Observações</label>
             <EditorTexto valor={d.observacoesTanque || ""} onChange={(v) => setD((x) => ({ ...x, observacoesTanque: v }))} altura={70} /></div>
-        </> })}
+        </> }),
 
-        {Topico({ numero: 3, titulo: "Métodos", children: <>
+        N.metodos !== undefined && Topico({ numero: N.metodos, titulo: "Métodos", children: <>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn-dl btn-sec" disabled={!proc} onClick={aplicarSugestao}>
               ✨ Usar sugestão do procedimento
@@ -1610,9 +1782,9 @@ export default function GerarRelatorio({
             </span>
           </div>
           <EditorTexto valor={d.metodos || ""} onChange={(v) => setD((x) => ({ ...x, metodos: v }))} altura={130} />
-        </> })}
+        </> }),
 
-        {Topico({ numero: 4, titulo: "Equipamentos utilizados", children: <>
+        N.equipamentos !== undefined && Topico({ numero: N.equipamentos, titulo: "Equipamentos utilizados", children: <>
           <label style={rotulo}>
             Equipamentos {proc ? <span className="detalhe">— sugeridos por {proc.codigo}</span> : null}
           </label>
@@ -1628,19 +1800,25 @@ export default function GerarRelatorio({
           </div>
           <label style={rotulo}>Texto que irá para o relatório</label>
           <EditorTexto valor={d.equipamentos || ""} onChange={(v) => setD((x) => ({ ...x, equipamentos: v }))} altura={100} />
-        </> })}
+        </> }),
 
-        {/* Anexos existe só no modelo do POP 001 e numa posição diferente da do
+        /* Anexos existe só no modelo do POP 001 e numa posição diferente da do
             modelo de batimetria, por isso não entra na lista numerada: o
-            gerador o localiza pelo título. Em modelo sem "Anexos", é ignorado. */}
-        <div className="rel-bloco">
-          <strong style={{ fontSize: 13.5 }}>
-            Anexos <span className="detalhe">(usado quando o modelo tem o tópico “Anexos”)</span>
-          </strong>
-          <EditorTexto valor={d.anexos || ""} onChange={(v) => setD((x) => ({ ...x, anexos: v }))} altura={90} />
-        </div>
+            gerador o localiza pelo título. Em modelo sem "Anexos", é ignorado. */
+        N.anexos !== undefined
+          ? Topico({ numero: N.anexos, titulo: "Anexos", semFotos: true, children: <>
+              <EditorTexto valor={d.anexos || ""} onChange={(v) => setD((x) => ({ ...x, anexos: v }))} altura={90} />
+            </> })
+          : (
+            <div key="anexos" data-secao={(N.equipamentos ?? 4) + 0.5} className="rel-bloco">
+              <strong style={{ fontSize: 13.5 }}>
+                Anexos <span className="detalhe">(usado quando o modelo tem o tópico “Anexos”)</span>
+              </strong>
+              <EditorTexto valor={d.anexos || ""} onChange={(v) => setD((x) => ({ ...x, anexos: v }))} altura={90} />
+            </div>
+          ),
 
-        {Topico({ numero: 5, titulo: "Equipe de trabalho", children: <>
+        N.equipe !== undefined && Topico({ numero: N.equipe, titulo: "Equipe de trabalho", children: <>
           <label style={rotulo}>Envolvidos — selecione entre os usuários cadastrados</label>
           {equipeAgendada.length > 0 && (
             <span className="detalhe">A equipe do agendamento já vem marcada — sai no relatório exatamente quem estiver marcado aqui.</span>
@@ -1660,39 +1838,46 @@ export default function GerarRelatorio({
           )}
           {nomesEquipe && <p className="detalhe" style={{ margin: "6px 0 0" }}>No relatório: {nomesEquipe}</p>}
           <MensagensCampo r={r} campo="equipe" />
-        </> })}
+        </> }),
 
-        {Topico({ numero: 6, titulo: "Dados reservatório", children: <>
+        N.reservatorio !== undefined && Topico({ numero: N.reservatorio, titulo: "Dados reservatório",
+          semFotos: vagasModelo.some((v) => v.topico === N.reservatorio), children: <>
           <div style={grade}>
             <div><label style={rotulo}>Equipamento <span className="detalhe">(tipo/uso do tanque)</span></label>
               <input style={campo} value={d.equipamentoTanque || ""} onChange={set("equipamentoTanque")}
                 placeholder="ex.: Tanque de combate a incêndio" /></div>
-            <div><label style={rotulo}>Altura <span className="detalhe">(o mesmo do tópico 2)</span></label>
+            <div><label style={rotulo}>Altura <span className="detalhe">(o mesmo do tópico {N.tanque})</span></label>
               <input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} />
               <MensagensCampo r={r} campo="alturaTanque" /></div>
-            <div><label style={rotulo}>Diâmetro <span className="detalhe">(o mesmo do tópico 2)</span></label>
+            <div><label style={rotulo}>Diâmetro <span className="detalhe">(o mesmo do tópico {N.tanque})</span></label>
               <input style={campo} value={d.diametro || ""} onChange={set("diametro")} />
               <MensagensCampo r={r} campo="diametro" /></div>
-            <div><label style={rotulo}>Capacidade <span className="detalhe">(a mesma do tópico 2)</span></label>
+            <div><label style={rotulo}>Capacidade <span className="detalhe">(a mesma do tópico {N.tanque})</span></label>
               <input style={campo} value={d.capacidadeTanque || ""} onChange={set("capacidadeTanque")} />
               <MensagensCampo r={r} campo="capacidadeTanque" /></div>
           </div>
 
+          {/* Modelo com vagas de foto nesta seção (POP 001: 7.1 Fotos do
+              tanque): as fotos vão nas vagas, com a legenda do modelo. Sem
+              vagas, os subtópicos de sempre (vista em planta, lateral…). */}
+          {vagasModelo.some((v) => v.topico === N.reservatorio) ? BlocoVagasDoTopico(N.reservatorio!) : <>
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
-            <strong style={{ fontSize: 12.5 }}>6.1 Vista em planta</strong>
+            <strong style={{ fontSize: 12.5 }}>{N.reservatorio}.1 Vista em planta</strong>
             {BlocoFotosAncora({ ancora: "6.1", legendaPadrao: "Vista superior", max: 1 })}
           </div>
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
-            <strong style={{ fontSize: 12.5 }}>6.2 Vista lateral</strong>
+            <strong style={{ fontSize: 12.5 }}>{N.reservatorio}.2 Vista lateral</strong>
             {BlocoFotosAncora({ ancora: "6.2", legendaPadrao: "Vista lateral", max: 1 })}
           </div>
           <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
-            <strong style={{ fontSize: 12.5 }}>6.3 Fotos do tanque <span className="detalhe">(até 5)</span></strong>
+            <strong style={{ fontSize: 12.5 }}>{N.reservatorio}.3 Fotos do tanque <span className="detalhe">(até 5)</span></strong>
             {BlocoFotosAncora({ ancora: "6.3", legendaPadrao: "Foto do tanque", max: 5 })}
           </div>
-        </> })}
+          </>}
+        </> }),
 
-        {Topico({ numero: 7, titulo: "Batimetria", children: <>
+        N.batimetria !== undefined && Topico({ numero: N.batimetria, titulo: "Batimetria",
+          nota: semMedicao ? "sem medição nesta OS — fica de fora; marque para incluir" : undefined, children: <>
           <div style={grade}>
             <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(automático — medição)</span></label>
               <input style={campo} value={d.volumeSedimento || ""} onChange={(e) => mudarVolume(e.target.value)} placeholder="ex.: 12,480 m³" />
@@ -1706,14 +1891,14 @@ export default function GerarRelatorio({
             O texto do modelo já traz os dois parágrafos; o volume e a faixa de ±5% são substituídos
             automaticamente. As imagens abaixo entram no lugar do marcador de gráficos da batimetria.
           </p>
-        </> })}
+        </> }),
 
-        {Topico({ numero: 8, titulo: "Foto da Inspeção Visual Interna", maxFotos: 5, legendaFoto: "Inspeção visual interna", children: <>
+        N.fotosInternas !== undefined && Topico({ numero: N.fotosInternas, titulo: "Foto da Inspeção Visual Interna", maxFotos: 5, legendaFoto: "Inspeção visual interna", children: <>
           <EditorTexto valor={d.fotosInternas || ""} onChange={(v) => setD((x) => ({ ...x, fotosInternas: v }))} altura={80} />
 
           <div style={{ marginTop: 12, borderTop: "1px solid var(--borda)", paddingTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 12.5 }}>Subtópicos <span className="detalhe">(8.1, 8.2 … numeração automática)</span></strong>
+              <strong style={{ fontSize: 12.5 }}>Subtópicos <span className="detalhe">({N.fotosInternas}.1, {N.fotosInternas}.2 … numeração automática)</span></strong>
               <button type="button" className="btn-dl btn-sec"
                 onClick={() => setSubs8((p) => [...p, { titulo: "" }])}>+ Subtópico</button>
             </div>
@@ -1725,7 +1910,7 @@ export default function GerarRelatorio({
             {subs8.map((st, i) => (
               <div key={i} className="rel-sub" style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <strong style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>8.{i + 1}</strong>
+                  <strong style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>{N.fotosInternas}.{i + 1}</strong>
                   <input style={{ ...campo, flex: 1, minWidth: 160 }} placeholder="Título do subtópico * (ex.: Teto)"
                     value={st.titulo}
                     onChange={(e) => setSubs8((p) => p.map((x, k) => k === i ? { titulo: e.target.value } : x))} />
@@ -1741,16 +1926,16 @@ export default function GerarRelatorio({
                     }}>Remover</button>
                 </div>
                 <MensagensCampo r={r} campo={`subs8.${i}`} />
-                {BlocoFotosAncora({ ancora: `sub8-${i}`, legendaPadrao: st.titulo || "Inspeção visual interna", max: 10, topico: 8 })}
+                {BlocoFotosAncora({ ancora: `sub8-${i}`, legendaPadrao: st.titulo || "Inspeção visual interna", max: 10, topico: N.fotosInternas ?? 8 })}
               </div>
             ))}
           </div>
-        </> })}
+        </> }),
 
-        {/* Seções extras do procedimento: entram aqui, antes da Conclusão,
-            exatamente como sairão no documento. O título vem do Catálogo. */}
-        {extras.length > 0 && (
-          <div className="rel-bloco">
+        /* Seções extras do procedimento: entram aqui, antes da Conclusão,
+            exatamente como sairão no documento. O título vem do Catálogo. */
+        extras.length > 0 && (
+          <div key="extras" data-secao={(N.conclusao ?? 99) - 0.5} className="rel-bloco">
             <strong style={{ fontSize: 13.5 }}>
               Tópicos de {proc?.codigo} <span className="detalhe">(definidos no Catálogo)</span>
             </strong>
@@ -1763,79 +1948,24 @@ export default function GerarRelatorio({
               </div>
             ))}
           </div>
-        )}
+        ),
 
-        {/* Blocos do POP 001. As legendas e as posições das figuras já estão
+        /* Blocos do POP 001. As legendas e as posições das figuras já estão
             no modelo — aqui só entram os valores medidos e as fotos, na ordem
-            das vagas. Em modelo sem essas vagas, nada disso é usado. */}
-        {limpeza && (
-        <div className="rel-bloco">
+            das vagas. Em modelo sem essas vagas, nada disso é usado. */
+        limpeza && N.analise === undefined && (
+        <div key="analise" data-secao={(N.conclusao ?? 99) - 0.25} className="rel-bloco">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ fontSize: 13.5 }}>
               Análise Físico Química e Laboratorial <span className="detalhe">— {d.procedimento}</span>
             </strong>
-            <button type="button" className="btn-dl btn-sec" onClick={() => setModalColetas(true)}>
-              Valores das coletas e do laudo
-            </button>
+            {BotaoValores("Valores das coletas e do laudo")}
           </div>
-          {!caminhoModelo ? (
-            <p className="detalhe" style={{ margin: "4px 0 8px", color: "var(--erro, #b42318)" }}>
-              <strong>⚠ Este procedimento não tem o modelo da limpeza robotizada anexado no Catálogo.</strong>{" "}
-              Sem ele o relatório sai no modelo padrão da ASP, que não tem vaga para essas fotos nem
-              marcador para cloro, pH ou o laudo — o que você preencher aqui não aparece no documento
-              gerado. Anexe o .docx do procedimento em Catálogo → {d.procedimento} → Modelo próprio.
-            </p>
-          ) : (
-            <p className="detalhe" style={{ margin: "4px 0 8px" }}>
-              As fotos entram nas vagas do modelo, na ordem em que você anexar. A legenda de cada
-              figura vem do próprio modelo; vaga sem foto é removida do documento.
-            </p>
-          )}
-          <div style={grade}>
-            <div><label style={rotulo}>Altura de sedimento <span className="detalhe">(medição)</span></label>
-              <input style={campo} value={d.alturaSedimento || ""} onChange={set("alturaSedimento")} /></div>
-            <div><label style={rotulo}>Volume de sedimento <span className="detalhe">(medição)</span></label>
-              <input style={campo} value={d.volumeSedimento || ""} onChange={(e) => mudarVolume(e.target.value)} />
-              <MensagensCampo r={r} campo="volumeSedimento" /></div>
-          </div>
-          {/* As vagas de foto de cada seção (Sanitização, Coletas, Limpeza…)
-              aparecem no bloco da própria seção, com o título do modelo em uso —
-              antes havia aqui uma lista fixa dos números 8 a 12 do modelo
-              antigo, que caía na seção errada com outra numeração. */}
-          {/* Fase 8: o PDF do laudo do laboratório é arquivo próprio (não
-              entra no .docx) e é exigido para enviar para aprovação. */}
-          {execucao && (
-            <div style={{ marginTop: 10, borderTop: "1px solid var(--borda)", paddingTop: 8 }}>
-              <label style={rotulo} htmlFor="laudo-pdf">
-                PDF do laudo do laboratório{exigeLaudoPdf ? " *" : ""}{" "}
-                <span className="detalhe">— obrigatório para enviar para aprovação; o rascunho pode ser salvo sem ele</span>
-              </label>
-              {laudoPdf ? (
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span className="detalhe" style={{ margin: 0, overflowWrap: "anywhere", flex: "1 1 200px" }}>
-                    📎 {laudoPdf.nome}{laudoPdf.tamanho ? ` (${(laudoPdf.tamanho / 1048576).toFixed(1).replace(".", ",")} MB)` : ""}
-                  </span>
-                  <label className="btn-dl btn-sec" style={{ cursor: enviandoLaudo ? "wait" : "pointer" }}>
-                    Trocar
-                    <input type="file" accept="application/pdf,.pdf" hidden disabled={enviandoLaudo}
-                      onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
-                  </label>
-                  <button type="button" className="btn-dl btn-sec btn-perigo"
-                    disabled={enviandoLaudo} onClick={() => { setLaudoPdf(null); setMsgLaudo(null); }}>Remover</button>
-                </div>
-              ) : (
-                <input id="laudo-pdf" type="file" accept="application/pdf,.pdf" disabled={enviandoLaudo}
-                  onChange={(e) => { escolherLaudo(e.target.files?.[0]); e.target.value = ""; }} />
-              )}
-              {enviandoLaudo && <span className="detalhe" style={{ display: "block" }}>Conferindo e enviando o laudo…</span>}
-              {msgLaudo && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgLaudo}</p>}
-              <MensagensCampo r={r} campo="laudoPdf" />
-            </div>
-          )}
+          {ConteudoAnalise()}
         </div>
-        )}
+        ),
 
-        {Topico({ numero: 9, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
+        N.conclusao !== undefined && Topico({ numero: N.conclusao, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
           <MensagensCampo r={r} campo="conclusao">
             {foraLimite.length > 0 && (
@@ -1845,31 +1975,45 @@ export default function GerarRelatorio({
               </div>
             )}
           </MensagensCampo>
-        </> })}
+        </> }),
 
-        {Topico({ numero: 10, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
+        N.recomendacoes !== undefined && Topico({ numero: N.recomendacoes, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
           <EditorTexto valor={d.recomendacoes || ""} onChange={(v) => setD((x) => ({ ...x, recomendacoes: v }))} altura={110} />
-        </> })}
+        </> }),
 
-        {/* Seções do modelo do procedimento que não têm campos próprios no
+        /* Seções do modelo do procedimento que não têm campos próprios no
             formulário (Anexos, Sanitização, Coletas, Análise…). Recebem texto
             genérico sempre e, quando o modelo tem vaga de imagem para o
             tópico, fotos em posição fixa com a legenda do modelo — senão,
-            upload de fotos livre. */}
-        {topicosGenericos.map((t) => {
+            upload de fotos livre. */
+        ...topicosGenericos.map((t) => {
           const temVagas = vagasModelo.some((v) => v.topico === t.numero);
+          const ehAnalise = limpeza && t.numero === N.analise;
+          const ehColeta = limpeza && t.numero === N.coletas;
           return Topico({
             numero: t.numero, titulo: t.titulo, maxFotos: 20, legendaFoto: t.titulo,
             semFotos: temVagas,
             children: (
               <>
+                {(ehColeta || ehAnalise) && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span className="detalhe" style={{ margin: 0 }}>
+                      {ehColeta
+                        ? `pH e cloro antes/depois entram nas legendas das figuras${resumoColetas ? ` — ${resumoColetas}` : ""}.`
+                        : "Nº das amostras e resultados do laudo entram na tabela “Resultados das análises laboratoriais”."}
+                    </span>
+                    {BotaoValores(ehColeta ? "Valores de pH e cloro" : "Amostras e laudo")}
+                  </div>
+                )}
                 <EditorTexto valor={textosTopico[t.numero] || ""} altura={110}
                   onChange={(v) => setTextosTopico((p) => ({ ...p, [t.numero]: v }))} />
+                {ehAnalise && ConteudoAnalise()}
                 {temVagas && BlocoVagasDoTopico(t.numero)}
               </>
             ),
           });
-        })}
+        }),
+        ])}
 
         <div className="rel-bloco">
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>

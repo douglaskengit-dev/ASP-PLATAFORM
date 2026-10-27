@@ -112,6 +112,13 @@ export interface DadosRelatorio {
    *  tabelas do tópico de Análise. */
   laudoAntes?: string[][];
   laudoDepois?: string[][];
+  /** Nº das amostras no laboratório (ex.: "26846/2026.0.A") — cabeçalho
+   *  "Antes da Limpeza (Amostra [amostra antes])" da tabela do laudo. */
+  amostraAntes?: string;
+  amostraDepois?: string;
+  /** "Conclusão das Análises Laboratoriais" (HTML do editor) — entra no
+   *  lugar do marcador [conclusão das análises] da seção de análise. */
+  conclusaoAnalises?: string;
   // Tópico 6 — quadro "Dados do Tanque"
   equipamentoTanque?: string;   // tipo/uso do tanque (manual)
   capacidadeTanque?: string;    // volume calculado (automático)
@@ -443,7 +450,9 @@ function corHex(v?: string | null): string | undefined {
 function htmlParaParagrafos(html: string): string {
   if (!html || !html.trim()) return "";
   if (!/<[a-z][\s\S]*>/i.test(html)) return paragrafoAbnt(html);   // texto puro
-  if (typeof DOMParser === "undefined") return paragrafoAbnt(html.replace(/<[^>]+>/g, ""));
+  // Sem DOMParser (Node): ao menos um parágrafo por <p>/<div>/<li>/<br>, em
+  // vez de juntar tudo numa linha só.
+  if (typeof DOMParser === "undefined") return paragrafoAbnt(htmlParaTexto(html) || "");
 
   const doc = new DOMParser().parseFromString(`<div id="raiz">${html}</div>`, "text/html");
   const raiz = doc.getElementById("raiz");
@@ -561,6 +570,27 @@ function legendaFigura(descricao: string): string {
     `<w:r><w:rPr>${fonte}<w:b/></w:rPr><w:t xml:space="preserve">Figura ${MARCA_FIG}</w:t></w:r>` +
     `<w:r><w:rPr>${fonte}</w:rPr>` +
     `<w:t xml:space="preserve"> – ${esc(descricao)}</w:t></w:r></w:p>`;
+}
+
+/** pPr e rPr da primeira legenda "Figura N –" escrita no modelo (a que fica
+ *  sob uma vaga [imagem]). null = o modelo não tem legendas próprias. */
+function estiloLegendaDoModelo(xml: string): { pPr: string; rPr: string } | null {
+  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
+  let m: RegExpExecArray | null;
+  while ((m = reP.exec(xml)) !== null) {
+    if (!/^figura\s*\d+\s*[-–]/i.test(textoDe(m[0]))) continue;
+    const pPr = m[0].match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] || "";
+    const run = m[0].match(/<w:r\b[^>]*>(?:(?!<\/w:r>)[\s\S])*?<w:t[\s>]/)?.[0] || "";
+    const rPr = run.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] || "";
+    return { pPr, rPr };
+  }
+  return null;
+}
+
+/** Legenda no estilo das legendas do modelo: "Figura N – descrição". */
+function legendaNoEstilo(estilo: { pPr: string; rPr: string }, descricao: string): string {
+  return `<w:p>${estilo.pPr}<w:r>${estilo.rPr}` +
+    `<w:t xml:space="preserve">Figura ${MARCA_FIG} – ${esc(descricao)}</w:t></w:r></w:p>`;
 }
 
 /** Legenda de figura: Arial 10, centralizada, entrelinha simples. */
@@ -945,7 +975,10 @@ function preencherLaudo(xml: string, cabecalho: string, valores?: string[][]): s
   let m: RegExpExecArray | null;
   while ((m = reTbl.exec(xml)) !== null) {
     const tbl = m[0];
-    if (!textoDe(tbl).toLowerCase().includes(cabecalho.toLowerCase())) continue;
+    const tt = textoDe(tbl).toLowerCase();
+    if (!tt.includes(cabecalho.toLowerCase())) continue;
+    // a tabela única (antes e após lado a lado) é de preencherLaudoCombinado
+    if (tt.includes("antes da limpeza") && tt.includes("após a limpeza")) continue;
     const linhas = tbl.match(/<w:tr\b[\s\S]*?<\/w:tr>/g);
     if (!linhas) continue;
     let nova = tbl;
@@ -970,6 +1003,74 @@ function preencherLaudo(xml: string, cabecalho: string, valores?: string[][]): s
       nova = nova.replace(linha, linhaNova);
     });
     return xml.slice(0, m.index) + nova + xml.slice(m.index + tbl.length);
+  }
+  return xml;
+}
+
+/**
+ * Tabela ÚNICA do laudo, como nos relatórios da ASP: Parâmetro | Unidade |
+ * Antes da Limpeza (Amostra …) | Após a Limpeza (Amostra …) | Limite. Cada
+ * linha de parâmetro tem três "[dado coletado]": valor antes, valor depois e
+ * limite (o do laudo DEPOIS; sem ele, o do ANTES). Achada pelo texto: tem
+ * "Antes da Limpeza" e "Após a Limpeza" no mesmo quadro.
+ */
+function preencherLaudoCombinado(xml: string, antes?: string[][], depois?: string[][]): string {
+  if (!antes?.length && !depois?.length) return xml;
+  const reTbl = /<w:tbl>[\s\S]*?<\/w:tbl>/g;
+  let m: RegExpExecArray | null;
+  while ((m = reTbl.exec(xml)) !== null) {
+    const tbl = m[0];
+    const tt = textoDe(tbl).toLowerCase();
+    if (!(tt.includes("antes da limpeza") && tt.includes("após a limpeza") && tt.includes("[dado coletado]"))) continue;
+    const linhas = tbl.match(/<w:tr\b[\s\S]*?<\/w:tr>/g);
+    if (!linhas) continue;
+    let nova = tbl;
+    linhas.slice(1).forEach((linha, i) => {
+      const valores = [antes?.[i]?.[0], depois?.[i]?.[0], depois?.[i]?.[4] || antes?.[i]?.[4]];
+      let k = 0;
+      const linhaNova = linha.replace(/<w:tc\b[\s\S]*?<\/w:tc>/g, (cel) => {
+        if (!textoDe(cel).includes("[dado coletado]")) return cel;
+        const v = valores[k++];
+        return v ? trocarTexto(cel, "[dado coletado]", v) : cel;
+      });
+      nova = nova.replace(linha, linhaNova);
+    });
+    return xml.slice(0, m.index) + nova + xml.slice(m.index + tbl.length);
+  }
+  return xml;
+}
+
+/** Nº das amostras no cabeçalho do laudo. Sem número, o "(Amostra …)" sai. */
+function preencherAmostras(xml: string, antes?: string, depois?: string): string {
+  for (const [marcador, valor] of [["[amostra antes]", antes], ["[amostra depois]", depois]] as const) {
+    if (valor?.trim()) xml = trocarMarcador(xml, marcador, valor.trim());
+    else {
+      xml = trocarMarcador(xml, ` (Amostra ${marcador})`, "");
+      xml = trocarMarcador(xml, `(Amostra ${marcador})`, "");
+      xml = trocarMarcador(xml, marcador, "");
+    }
+  }
+  return xml;
+}
+
+/**
+ * Troca o parágrafo que contém um marcador ("[conclusão das análises]") por
+ * parágrafos de texto. Sem conteúdo, o parágrafo some — e também o título
+ * logo acima dele, se `tituloAcima` casar ("Conclusão das Análises…"), para
+ * não sobrar título sem texto.
+ */
+function substituirParagrafoMarcador(xml: string, marcador: string, conteudo: string, tituloAcima?: RegExp): string {
+  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
+  let m: RegExpExecArray | null, anterior: { ini: number; fim: number; texto: string } | null = null;
+  while ((m = reP.exec(xml)) !== null) {
+    const texto = textoDe(m[0]);
+    if (texto.includes(marcador)) {
+      const fim = m.index + m[0].length;
+      if (conteudo) return xml.slice(0, m.index) + conteudo + xml.slice(fim);
+      const ini = anterior && tituloAcima?.test(anterior.texto) ? anterior.ini : m.index;
+      return xml.slice(0, ini) + xml.slice(fim);
+    }
+    if (texto) anterior = { ini: m.index, fim: m.index + m[0].length, texto };
   }
   return xml;
 }
@@ -1344,6 +1445,11 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
 
   xml = preencherLaudo(xml, "Antes da Limpeza", dados.laudoAntes);
   xml = preencherLaudo(xml, "Após a Limpeza", dados.laudoDepois);
+  xml = preencherLaudoCombinado(xml, dados.laudoAntes, dados.laudoDepois);
+  xml = preencherAmostras(xml, dados.amostraAntes, dados.amostraDepois);
+  xml = substituirParagrafoMarcador(xml, "[conclusão das análises]",
+    dados.conclusaoAnalises?.trim() ? htmlParaParagrafos(dados.conclusaoAnalises) : "",
+    /^conclus[ãa]o das an[áa]lises/i);
   xml = limparDadoColetado(xml);
 
   // A unidade/cliente aparece no texto padrão; aceita marcador e também o nome
@@ -1411,6 +1517,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     xml = trocarTexto(xml, "entre1,43 e 1,58 m³", `entre ${faixa}`);
     if (xml === antes) xml = trocarTexto(xml, "1,43 e 1,58 m³", faixa);
   }
+
+  // Estilo das legendas que o modelo já traz (sob as vagas), lido antes de
+  // qualquer foto entrar — as figuras acrescentadas seguem o mesmo visual.
+  const estiloLegenda = estiloLegendaDoModelo(xml);
 
   // 4) Imagens: registra no ZIP + relationships + content types
   // Fotos das fichas de equipamento entram na mesma fila de registro das
@@ -1604,10 +1714,14 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       altura = ALTURA_MAX_FIGURA_CM;
     }
     // Legenda ABAIXO da figura (padrão adotado pela ASP), seguida da fonte.
+    // Modelo com legendas próprias (sob as vagas): a figura acrescentada usa
+    // o MESMO estilo delas e só leva "Fonte:" quando foi informada — como nos
+    // relatórios de referência, que não têm essa linha.
     const bloco =
       figuraXml(rId, i + 1, largura, altura) +
-      legendaFigura(img.legenda) +
-      legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`);
+      (estiloLegenda
+        ? legendaNoEstilo(estiloLegenda, img.legenda) + (img.fonte?.trim() ? legendaAbnt(`Fonte: ${img.fonte.trim()}`) : "")
+        : legendaFigura(img.legenda) + legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`));
     if (img.vaga) {
       // Vai para uma vaga do modelo: só a figura, sem legenda nem fonte —
       // o modelo já traz a legenda escrita logo abaixo da vaga.

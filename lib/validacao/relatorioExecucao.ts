@@ -144,12 +144,16 @@ export function infoParametro(i: number): { nome: string; unidade: string; pa: b
   return { nome, unidade: pa ? "" : unidade, pa };
 }
 
-export const TOKENS_LAUDO = ["<LQ", "ND", "Ausente", "Presente"] as const;
+/** "-" = parâmetro não analisado (como o laboratório escreve no laudo). */
+export const TOKENS_LAUDO = ["<LQ", "ND", "Ausente", "Presente", "-"] as const;
 export type TokenLaudo = (typeof TOKENS_LAUDO)[number];
 
 export type CelulaLaudo =
   | { tipo: "vazio" }
   | { tipo: "numero"; n: number }
+  /** "<2,50" — abaixo do limite de quantificação do laboratório, escrito
+   *  como no laudo. `texto` guarda os dígitos como vieram ("2,50"). */
+  | { tipo: "menor"; n: number; texto: string }
   | { tipo: "token"; token: TokenLaudo }
   | { tipo: "invalido" };
 
@@ -159,26 +163,35 @@ function tokenDe(s: string): TokenLaudo | null {
   if (k === "nd") return "ND";
   if (k === "ausente" || k === "ausencia") return "Ausente";
   if (k === "presente" || k === "presenca") return "Presente";
+  if (k === "-" || k === "—" || k === "na" || k === "naoanalisado") return "-";
   return null;
 }
 
-/** Uma célula do laudo: número (pt-BR) ou <LQ, ND, Ausente, Presente
- *  (sem diferença de caixa e acento). */
+/** Uma célula do laudo: número (pt-BR), "<número" (abaixo do LQ, como o
+ *  laboratório escreve), <LQ, ND, Ausente, Presente ou "-" (não analisado),
+ *  sem diferença de caixa e acento. */
 export function lerCelulaLaudo(s: string | null | undefined): CelulaLaudo {
   const t = (s || "").trim();
   if (!t) return { tipo: "vazio" };
   const tok = tokenDe(t);
   if (tok) return { tipo: "token", token: tok };
+  const menor = /^<\s*(.+)$/.exec(t);
+  if (menor) {
+    const n = lerNumeroBr(menor[1]);
+    return n === null ? { tipo: "invalido" } : { tipo: "menor", n, texto: menor[1].trim().replace(".", ",") };
+  }
   const n = lerNumeroBr(t);
   return n === null ? { tipo: "invalido" } : { tipo: "numero", n };
 }
 
 /** Texto da célula como fica no documento: "ausente" → "Ausente", "<lq" →
- *  "<LQ", "7.2" → "7,2". Inválido fica como foi digitado. */
+ *  "<LQ", "7.2" → "7,2", "< 2.50" → "<2,50" (casas como no laudo), "na" →
+ *  "-". Inválido fica como foi digitado. */
 export function normalizarCelulaLaudo(s: string | null | undefined): string {
   const c = lerCelulaLaudo(s);
   if (c.tipo === "token") return c.token;
   if (c.tipo === "numero") return textoNumeroBr(c.n);
+  if (c.tipo === "menor") return `<${c.texto}`;
   return (s || "").trim();
 }
 
@@ -268,6 +281,58 @@ export function sugestaoConclusao(itens: ForaDoLimite[], conclusao: string | nul
     .map((f) => `<p>${f.replace(/</g, "&lt;")}</p>`).join("");
 }
 
+/**
+ * Texto sugerido para a "Conclusão das Análises Laboratoriais" (HTML do
+ * editor), a partir dos valores medidos — o técnico revisa antes de gerar:
+ *   • cloro livre antes/depois × o mínimo de 0,2 da CVS 6;
+ *   • laudo: parâmetros fora do limite da Portaria 888 (antes e depois), ou
+ *     tudo dentro; microbiologia ausente; o que não foi analisado ("-").
+ * Sem nenhum valor preenchido, devolve "".
+ */
+export function sugestaoConclusaoAnalises(d: {
+  cloroAntes?: string | null; cloroDepois?: string | null;
+  laudoAntes?: string[][] | null; laudoDepois?: string[][] | null;
+}, unidade: UnidadeCloro): string {
+  const frases: string[] = [];
+  const ca = lerValorMedido(d.cloroAntes), cd = lerValorMedido(d.cloroDepois);
+  const n = (v: number) => `${textoNumeroBr(v)} ${unidade}`;
+  if (ca !== null && cd !== null) {
+    const abA = ca < CLORO_MINIMO, abD = cd < CLORO_MINIMO;
+    if (abA && abD) frases.push(`Tanto antes quanto após a operação de limpeza, a água apresentou nível de cloro livre abaixo do mínimo de 0,2 ${unidade} estabelecido pela legislação vigente para consumo humano (${n(ca)} antes e ${n(cd)} após a limpeza).`);
+    else if (!abA && !abD) frases.push(`Tanto antes quanto após a operação de limpeza, o nível de cloro livre esteve dentro do mínimo de 0,2 ${unidade} estabelecido pela legislação vigente (${n(ca)} antes e ${n(cd)} após a limpeza).`);
+    else if (abA) frases.push(`O cloro livre estava abaixo do mínimo de 0,2 ${unidade} antes da limpeza (${n(ca)}) e passou a atendê-lo após a operação (${n(cd)}).`);
+    else frases.push(`O cloro livre atendia ao mínimo de 0,2 ${unidade} antes da limpeza (${n(ca)}), mas ficou abaixo dele após a operação (${n(cd)}).`);
+  } else if (cd !== null) {
+    frases.push(`Após a limpeza, o cloro livre medido foi de ${n(cd)}, ${cd < CLORO_MINIMO ? "abaixo do" : "dentro do"} mínimo de 0,2 ${unidade} estabelecido pela legislação vigente.`);
+  }
+
+  const temLaudo = (g?: string[][] | null) => !!g && gradeLaudo(g).some((l) => l[COL_VALOR].trim());
+  if (temLaudo(d.laudoAntes) || temLaudo(d.laudoDepois)) {
+    const fora = [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)];
+    if (fora.length === 0) {
+      frases.push("Os parâmetros analisados em laboratório permaneceram dentro dos limites da Portaria GM/MS nº 888/2021 antes e após a limpeza.");
+    } else {
+      fora.forEach((f) => frases.push(fraseForaDoLimite(f)));
+    }
+    // Microbiologia (P/A): ausente nos dois → frase; não analisada → registra.
+    const pa = (g: string[][] | null | undefined, i: number) => lerCelulaLaudo(gradeLaudo(g)[i][COL_VALOR]);
+    const linhasPA = LAUDO_PARAMETROS.map((_, i) => i).filter((i) => infoParametro(i).pa);
+    const ausenteTudo = linhasPA.every((i) => [d.laudoAntes, d.laudoDepois].every((g) => {
+      const c = pa(g, i); return c.tipo === "token" && c.token === "Ausente";
+    }));
+    const naoAnalisados = linhasPA.filter((i) => [d.laudoAntes, d.laudoDepois].some((g) => {
+      const c = pa(g, i); return c.tipo === "token" && c.token === "-";
+    })).map((i) => infoParametro(i).nome);
+    if (ausenteTudo) frases.push("Não houve presença de contaminação microbiológica (coliformes totais e Escherichia coli ausentes) antes e após a limpeza.");
+    if (naoAnalisados.length) frases.push(`Não foram analisados: ${naoAnalisados.join(" e ")}.`);
+    const depoisConforme = !foraDoLimite("laudoDepois", d.laudoDepois).length;
+    if (depoisConforme && temLaudo(d.laudoDepois)) {
+      frases.push("A limpeza contribuiu para a remoção de sedimentos, mantendo a água dentro dos padrões analisados.");
+    }
+  }
+  return frases.map((f) => `<p>${f.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`).join("");
+}
+
 /** ANTES idêntico ao DEPOIS: todas as células preenchidas (fora a coluna
  *  Limite, que já vem preenchida) iguais, e ao menos uma preenchida. */
 export function laudosIdenticos(a: string[][] | null | undefined, b: string[][] | null | undefined): boolean {
@@ -296,13 +361,15 @@ export function validarLaudo(chave: ChaveLaudo, g: string[][] | null | undefined
       const campo = `${chave}.${i}.${j}`;
       const onde = `${TITULO_LAUDO[chave]} — ${info.nome} (${LAUDO_COLUNAS[j]})`;
       if (c.tipo === "invalido") {
-        addErro(r, campo, `${onde}: “${linha[j].trim()}” não é um número nem <LQ, ND, Ausente ou Presente.`);
+        addErro(r, campo, `${onde}: “${linha[j].trim()}” não é um número, “<número” (ex.: <2,50), <LQ, ND, Ausente, Presente nem “-” (não analisado).`);
         return;
       }
-      if (c.tipo === "numero" && c.n < 0) { addErro(r, campo, `${onde}: não pode ser negativo.`); return; }
+      if ((c.tipo === "numero" || c.tipo === "menor") && c.n < 0) { addErro(r, campo, `${onde}: não pode ser negativo.`); return; }
+      // "-" (não analisado) vale em qualquer parâmetro e coluna.
+      if (c.tipo === "token" && c.token === "-") return;
       const pa = c.tipo === "token" && (c.token === "Ausente" || c.token === "Presente");
       if (info.pa && (j === COL_VALOR || j === COL_LIMITE) && c.tipo !== "vazio" && !pa) {
-        addErro(r, campo, `${onde}: parâmetro de presença/ausência — use Ausente ou Presente.`);
+        addErro(r, campo, `${onde}: parâmetro de presença/ausência — use Ausente, Presente ou “-” (não analisado).`);
       } else if (pa && !info.pa) {
         addErro(r, campo, `${onde}: Ausente/Presente só vale para os parâmetros P/A (coliformes totais, E. coli).`);
       } else if (pa && info.pa && j !== COL_VALOR && j !== COL_LIMITE) {
