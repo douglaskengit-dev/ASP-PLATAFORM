@@ -190,9 +190,27 @@ export function lerCelulaLaudo(s: string | null | undefined): CelulaLaudo {
 export function normalizarCelulaLaudo(s: string | null | undefined): string {
   const c = lerCelulaLaudo(s);
   if (c.tipo === "token") return c.token;
-  if (c.tipo === "numero") return textoNumeroBr(c.n);
+  if (c.tipo === "numero") return numeroComoVeio((s || "").trim().replace(/\s+/g, ""), c.n);
   if (c.tipo === "menor") return `<${c.texto}`;
   return (s || "").trim();
+}
+
+/** Número do laudo com as casas como o laboratório escreveu: "2,60" não
+ *  vira "2,6" (o relatório não pode divergir do laudo assinado). Ponto
+ *  decimal vira vírgula; ponto de milhar ("1.200") fica. */
+function numeroComoVeio(t: string, n: number): string {
+  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(t)) return t;          // 1.200 / 1.200,5
+  if (/^\d+\.\d+$/.test(t)) return t.replace(".", ",");              // 2.60 → 2,60
+  if (/^\d+(,\d+)?$/.test(t)) return t;                              // 2,60 / 15
+  return textoNumeroBr(n);
+}
+
+/** Duas células iguais no valor: número compara como número ("15" = "15,0",
+ *  "2,6" = "2,60"); o resto, pelo texto normalizado. */
+export function celulasIguais(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = lerCelulaLaudo(a), y = lerCelulaLaudo(b);
+  if ((x.tipo === "numero" || x.tipo === "menor") && x.tipo === y.tipo) return x.n === (y as { n: number }).n;
+  return normalizarCelulaLaudo(a) === normalizarCelulaLaudo(b);
 }
 
 /** Grade completa (parâmetros × colunas), sem buraco. */
@@ -266,10 +284,32 @@ function textoDoHtml(html: string | null | undefined): string {
   return (html || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
 }
 
-/** Parâmetros fora do limite que a Conclusão não cita pelo nome. */
-export function foraNaoCitados(itens: ForaDoLimite[], conclusao: string | null | undefined): ForaDoLimite[] {
-  const texto = normalizarTexto(textoDoHtml(conclusao));
-  return itens.filter((f) => !texto.includes(normalizarTexto(f.nome)));
+/** Parâmetros fora do limite que nenhuma das conclusões (a geral e a das
+ *  Análises Laboratoriais) cita COMO fora: a frase precisa ter o nome e uma
+ *  palavra de desacordo — "Coliformes Totais ausentes" não conta. */
+export function foraNaoCitados(itens: ForaDoLimite[], ...conclusoes: (string | null | undefined)[]): ForaDoLimite[] {
+  const frases = conclusoes.map(textoDoHtml).join("\n")
+    .split(/(?<=[.!?;])\s+|\n+/).map((f) => normalizarTexto(f));
+  const desacordo = /(acima|fora d|exced|ultrapass|superior|nao atende|desacordo|presen)/;
+  // "Não houve presença de contaminação (… ausentes)", "sem presença", "não
+  // apresentaram resultado acima" — negam o desacordo: é justamente a frase
+  // falsa que o aviso precisa pegar.
+  const negado = /(\bnao\b|\bsem\b)[^.;:]{0,60}(presen|acima|fora d|exced|ultrapass|superior|desacordo)|\bausente/;
+  return itens.filter((f) => {
+    const nome = normalizarTexto(f.nome);
+    return !frases.some((fr) => fr.includes(nome) && desacordo.test(fr) && !negado.test(fr));
+  });
+}
+
+/** "<20" com limite 15: o resultado não permite afirmar que atende. */
+export function semConclusaoNoLimite(g: string[][] | null | undefined): { linha: number; nome: string; valor: string; limite: string }[] {
+  if (!g) return [];
+  return gradeLaudo(g).flatMap((l, i) => {
+    const v = lerCelulaLaudo(l[COL_VALOR]), lim = lerCelulaLaudo(l[COL_LIMITE]);
+    return v.tipo === "menor" && lim.tipo === "numero" && v.n > lim.n
+      ? [{ linha: i, nome: infoParametro(i).nome, valor: normalizarCelulaLaudo(l[COL_VALOR]), limite: normalizarCelulaLaudo(l[COL_LIMITE]) }]
+      : [];
+  });
 }
 
 /** Parágrafos a acrescentar na Conclusão (HTML do editor), sem repetir
@@ -281,53 +321,116 @@ export function sugestaoConclusao(itens: ForaDoLimite[], conclusao: string | nul
     .map((f) => `<p>${f.replace(/</g, "&lt;")}</p>`).join("");
 }
 
+/** Cloro livre: máximo permitido (Portaria GM/MS nº 888/2021, Anexo 9). */
+export const CLORO_MAXIMO = 5;
+/** pH recomendado no sistema de distribuição (Portaria GM/MS nº 888/2021). */
+export const PH_FAIXA = { min: 6, max: 9 } as const;
+
 /**
  * Texto sugerido para a "Conclusão das Análises Laboratoriais" (HTML do
- * editor), a partir dos valores medidos — o técnico revisa antes de gerar:
- *   • cloro livre antes/depois × o mínimo de 0,2 da CVS 6;
- *   • laudo: parâmetros fora do limite da Portaria 888 (antes e depois), ou
- *     tudo dentro; microbiologia ausente; o que não foi analisado ("-").
+ * editor), a partir dos valores medidos — o técnico revisa antes de gerar.
+ * Regra: só afirma o que os dados sustentam, sempre dizendo de QUAL amostra
+ * (antes/após) fala.
+ *   • cloro livre × mínimo 0,2 e máximo 5; pH × faixa 6,0–9,0;
+ *   • laudo, por amostra: fora do limite; "<x" acima do limite (sem como
+ *     afirmar); não analisados ("-"); sem resultado; o que ficou dentro;
+ *   • "dentro dos padrões" no fim só com o laudo de após completo e conforme.
  * Sem nenhum valor preenchido, devolve "".
  */
 export function sugestaoConclusaoAnalises(d: {
   cloroAntes?: string | null; cloroDepois?: string | null;
+  phAntes?: string | null; phDepois?: string | null;
   laudoAntes?: string[][] | null; laudoDepois?: string[][] | null;
 }, unidade: UnidadeCloro): string {
   const frases: string[] = [];
-  const ca = lerValorMedido(d.cloroAntes), cd = lerValorMedido(d.cloroDepois);
   const n = (v: number) => `${textoNumeroBr(v)} ${unidade}`;
+  const ref = "referência: Portaria GM/MS nº 888/2021";
+
+  // Cloro livre
+  const ca = lerValorMedido(d.cloroAntes), cd = lerValorMedido(d.cloroDepois);
+  const sit = (v: number) => (v < CLORO_MINIMO ? "abaixo" : v > CLORO_MAXIMO ? "acima" : "ok");
+  const desc = (x: string) => x === "abaixo" ? `abaixo do mínimo de 0,2 ${unidade}`
+    : x === "acima" ? `acima do máximo de ${CLORO_MAXIMO} ${unidade}` : `dentro da faixa de 0,2 a ${CLORO_MAXIMO} ${unidade}`;
   if (ca !== null && cd !== null) {
-    const abA = ca < CLORO_MINIMO, abD = cd < CLORO_MINIMO;
-    if (abA && abD) frases.push(`Tanto antes quanto após a operação de limpeza, a água apresentou nível de cloro livre abaixo do mínimo de 0,2 ${unidade} estabelecido pela legislação vigente para consumo humano (${n(ca)} antes e ${n(cd)} após a limpeza).`);
-    else if (!abA && !abD) frases.push(`Tanto antes quanto após a operação de limpeza, o nível de cloro livre esteve dentro do mínimo de 0,2 ${unidade} estabelecido pela legislação vigente (${n(ca)} antes e ${n(cd)} após a limpeza).`);
-    else if (abA) frases.push(`O cloro livre estava abaixo do mínimo de 0,2 ${unidade} antes da limpeza (${n(ca)}) e passou a atendê-lo após a operação (${n(cd)}).`);
-    else frases.push(`O cloro livre atendia ao mínimo de 0,2 ${unidade} antes da limpeza (${n(ca)}), mas ficou abaixo dele após a operação (${n(cd)}).`);
+    const a = sit(ca), b = sit(cd);
+    if (a === b) frases.push(`Tanto antes quanto após a operação de limpeza, o cloro livre esteve ${desc(a)} (${n(ca)} antes e ${n(cd)} após a limpeza; ${ref}).`);
+    else frases.push(`O cloro livre estava ${desc(a)} antes da limpeza (${n(ca)}) e ${b === "ok" ? `passou a ficar ${desc(b)}` : `ficou ${desc(b)}`} após a operação (${n(cd)}; ${ref}).`);
+  } else if (ca !== null) {
+    frases.push(`Antes da limpeza, o cloro livre medido foi de ${n(ca)}, ${desc(sit(ca))} (${ref}).`);
   } else if (cd !== null) {
-    frases.push(`Após a limpeza, o cloro livre medido foi de ${n(cd)}, ${cd < CLORO_MINIMO ? "abaixo do" : "dentro do"} mínimo de 0,2 ${unidade} estabelecido pela legislação vigente.`);
+    frases.push(`Após a limpeza, o cloro livre medido foi de ${n(cd)}, ${desc(sit(cd))} (${ref}).`);
   }
 
-  const temLaudo = (g?: string[][] | null) => !!g && gradeLaudo(g).some((l) => l[COL_VALOR].trim());
-  if (temLaudo(d.laudoAntes) || temLaudo(d.laudoDepois)) {
-    const fora = [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)];
-    if (fora.length === 0) {
-      frases.push("Os parâmetros analisados em laboratório permaneceram dentro dos limites da Portaria GM/MS nº 888/2021 antes e após a limpeza.");
-    } else {
-      fora.forEach((f) => frases.push(fraseForaDoLimite(f)));
+  // pH fora da faixa recomendada
+  const pa_ = lerValorMedido(d.phAntes), pd = lerValorMedido(d.phDepois);
+  const foraPh = (v: number | null) => v !== null && (v < PH_FAIXA.min || v > PH_FAIXA.max);
+  const faixa = "da faixa de 6,0 a 9,0 recomendada pela Portaria GM/MS nº 888/2021";
+  if (foraPh(pa_) && foraPh(pd)) frases.push(`O pH ficou fora ${faixa} antes (${textoNumeroBr(pa_!)}) e após (${textoNumeroBr(pd!)}) a limpeza.`);
+  else if (foraPh(pa_)) frases.push(`O pH medido antes da limpeza (${textoNumeroBr(pa_!)}) ficou fora ${faixa}.`);
+  else if (foraPh(pd)) frases.push(`O pH medido após a limpeza (${textoNumeroBr(pd!)}) ficou fora ${faixa}.`);
+
+  // Laudo, amostra por amostra
+  type Estado = {
+    chave: ChaveLaudo; fora: ForaDoLimite[]; inconclusivos: ReturnType<typeof semConclusaoNoLimite>;
+    naoAnalisados: string[]; semResultado: string[]; semLimite: string[]; dentro: number; paAusente: boolean;
+  };
+  const estado = (chave: ChaveLaudo): Estado | null => {
+    const g = d[chave];
+    if (!g || !gradeLaudo(g).some((l) => l[COL_VALOR].trim())) return null;
+    const grade = gradeLaudo(g);
+    const fora = foraDoLimite(chave, g), inconclusivos = semConclusaoNoLimite(g);
+    const e: Estado = { chave, fora, inconclusivos, naoAnalisados: [], semResultado: [], semLimite: [], dentro: 0, paAusente: true };
+    grade.forEach((l, i) => {
+      const info = infoParametro(i);
+      const v = lerCelulaLaudo(l[COL_VALOR]), lim = lerCelulaLaudo(l[COL_LIMITE]);
+      if (info.pa && !(v.tipo === "token" && v.token === "Ausente")) e.paAusente = false;
+      if (v.tipo === "vazio") { e.semResultado.push(info.nome); return; }
+      if (v.tipo === "token" && v.token === "-") { e.naoAnalisados.push(info.nome); return; }
+      if (fora.some((f) => f.linha === i) || inconclusivos.some((x) => x.linha === i)) return;
+      if (!info.pa && lim.tipo !== "numero") { e.semLimite.push(info.nome); return; }
+      e.dentro++;
+    });
+    return e;
+  };
+  const momento = (c: ChaveLaudo) => (c === "laudoAntes" ? "antes da limpeza" : "após a limpeza");
+  const lista = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} e ${xs[xs.length - 1]}` : xs[0]);
+  const ant = estado("laudoAntes"), dep = estado("laudoDepois");
+  const presentes = [ant, dep].filter((x): x is Estado => !!x);
+  if (presentes.length) {
+    // Por amostra, na ordem antes → após: o que ficou fora, o inconclusivo e
+    // o que ficou dentro. "Os demais" sempre que alguma linha da amostra não
+    // entra na afirmação (fora, inconclusiva ou sem limite).
+    const portaria = "dos limites da Portaria GM/MS nº 888/2021";
+    const ressalva = (e: Estado) => e.fora.length > 0 || e.inconclusivos.length > 0 || e.semLimite.length > 0;
+    const juntas = presentes.length === 2 && presentes.every((e) => !ressalva(e) && e.dentro > 0);
+    if (juntas) frases.push(`Os parâmetros analisados em laboratório ficaram dentro ${portaria} nas amostras coletadas antes e após a limpeza.`);
+    for (const e of presentes) {
+      e.fora.forEach((f) => frases.push(fraseForaDoLimite(f)));
+      e.inconclusivos.forEach((x) =>
+        frases.push(`Na amostra coletada ${momento(e.chave)}, o resultado de ${x.nome} (${x.valor}) não permite confirmar o atendimento ao limite de ${x.limite}.`));
+      if (!juntas && e.dentro > 0) {
+        frases.push(`${ressalva(e) ? "Os demais parâmetros" : "Os parâmetros"} analisados na amostra coletada ${momento(e.chave)} ficaram dentro ${portaria}.`);
+      }
     }
-    // Microbiologia (P/A): ausente nos dois → frase; não analisada → registra.
-    const pa = (g: string[][] | null | undefined, i: number) => lerCelulaLaudo(gradeLaudo(g)[i][COL_VALOR]);
-    const linhasPA = LAUDO_PARAMETROS.map((_, i) => i).filter((i) => infoParametro(i).pa);
-    const ausenteTudo = linhasPA.every((i) => [d.laudoAntes, d.laudoDepois].every((g) => {
-      const c = pa(g, i); return c.tipo === "token" && c.token === "Ausente";
-    }));
-    const naoAnalisados = linhasPA.filter((i) => [d.laudoAntes, d.laudoDepois].some((g) => {
-      const c = pa(g, i); return c.tipo === "token" && c.token === "-";
-    })).map((i) => infoParametro(i).nome);
-    if (ausenteTudo) frases.push("Não houve presença de contaminação microbiológica (coliformes totais e Escherichia coli ausentes) antes e após a limpeza.");
-    if (naoAnalisados.length) frases.push(`Não foram analisados: ${naoAnalisados.join(" e ")}.`);
-    const depoisConforme = !foraDoLimite("laudoDepois", d.laudoDepois).length;
-    if (depoisConforme && temLaudo(d.laudoDepois)) {
-      frases.push("A limpeza contribuiu para a remoção de sedimentos, mantendo a água dentro dos padrões analisados.");
+    for (const e of presentes) {
+      if (e.naoAnalisados.length) frases.push(`Não foram analisados na amostra coletada ${momento(e.chave)}: ${lista(e.naoAnalisados)}.`);
+      if (e.semResultado.length) frases.push(`Sem resultado informado na amostra coletada ${momento(e.chave)}: ${lista(e.semResultado)}.`);
+      if (e.semLimite.length) frases.push(`Sem limite de referência para ${lista(e.semLimite)} na amostra coletada ${momento(e.chave)} — o resultado não foi comparado.`);
+    }
+    // microbiologia: só afirma ausência onde as duas P/A estão Ausente
+    const semMicro = presentes.filter((e) => e.paAusente);
+    if (semMicro.length === 2) frases.push("Não houve presença de contaminação microbiológica (coliformes totais e Escherichia coli ausentes) antes e após a limpeza.");
+    else if (semMicro.length === 1) frases.push(`Não houve presença de contaminação microbiológica (coliformes totais e Escherichia coli ausentes) na amostra coletada ${momento(semMicro[0].chave)}.`);
+    // fecho: só com o laudo de APÓS
+    if (dep) {
+      const completo = !dep.naoAnalisados.length && !dep.semResultado.length && !dep.semLimite.length && !dep.inconclusivos.length;
+      if (dep.fora.length) {
+        frases.push(`Após a limpeza, a amostra não atende à Portaria GM/MS nº 888/2021 em: ${lista(Array.from(new Set(dep.fora.map((f) => f.nome))))}. Recomenda-se investigar a causa e repetir a análise.`);
+      } else if (completo) {
+        if (ant && (ant.fora.length || ant.inconclusivos.length)) frases.push("Após a limpeza, todos os parâmetros analisados passaram a atender aos padrões da Portaria GM/MS nº 888/2021.");
+        else if (ant) frases.push("A limpeza contribuiu para a remoção de sedimentos, mantendo a água dentro dos padrões analisados.");
+        else frases.push("Após a limpeza, a água atendeu aos padrões analisados.");
+      }
     }
   }
   return frases.map((f) => `<p>${f.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`).join("");
@@ -341,9 +444,8 @@ export function laudosIdenticos(a: string[][] | null | undefined, b: string[][] 
   let preenchidas = 0;
   for (let i = 0; i < ga.length; i++) {
     for (let j = 0; j < COL_LIMITE; j++) {
-      const x = normalizarCelulaLaudo(ga[i][j]), y = normalizarCelulaLaudo(gb[i][j]);
-      if (x !== y) return false;
-      if (x) preenchidas++;
+      if (!celulasIguais(ga[i][j], gb[i][j])) return false;
+      if (normalizarCelulaLaudo(ga[i][j])) preenchidas++;
     }
   }
   return preenchidas > 0;
@@ -384,6 +486,9 @@ export function validarLaudo(chave: ChaveLaudo, g: string[][] | null | undefined
       addAviso(r, `${chave}.${i}`, `${TITULO_LAUDO[chave]} — ${info.nome}: a incerteza (${textoNumeroBr(inc.n)}) é maior que o valor (${textoNumeroBr(v.n)}) — confira.`);
     }
   });
+  for (const x of semConclusaoNoLimite(grade)) {
+    addAviso(r, `${chave}.${x.linha}`, `${TITULO_LAUDO[chave]} — ${x.nome}: ${x.valor} com limite ${x.limite} — o resultado não permite afirmar que atende; confira com o laboratório.`);
+  }
   for (const f of foraDoLimite(chave, grade)) {
     const u = f.unidade ? ` ${f.unidade}` : "";
     addAviso(r, `${chave}.${f.linha}`, f.pa
@@ -518,8 +623,12 @@ export function validarRelatorioExecucao(s: SnapshotExecucao, ctx: ContextoRelat
     if (doRdo.length && !doRdo.some((x) => Math.abs(x.valor - n) < 1e-9)) {
       addAviso(r, k, `Diferente do RDO — aqui ${textoNumeroBr(n)}${un}; ${doRdo.map((x) => `RDO de ${dataBr(x.data)}: ${textoNumeroBr(x.valor)}${un}`).join("; ")}.`);
     }
+    if (!ehCloro(k) && (n < PH_FAIXA.min || n > PH_FAIXA.max)) {
+      addAviso(r, k, "Fora da faixa de 6,0 a 9,0 recomendada pela Portaria GM/MS nº 888/2021.");
+    }
     if (ehCloro(k)) {
-      if (n < CLORO_MINIMO) addAviso(r, k, `Abaixo do mínimo de 0,2 ${u} de cloro livre (comunicado CVS 6).`);
+      if (n < CLORO_MINIMO) addAviso(r, k, `Abaixo do mínimo de 0,2 ${u} de cloro livre (Portaria GM/MS nº 888/2021).`);
+      else if (n > CLORO_MAXIMO) addAviso(r, k, `Acima do máximo de ${CLORO_MAXIMO} ${u} de cloro livre (Portaria GM/MS nº 888/2021).`);
       else if (n > ctx.limiteCloro) addAviso(r, k, `Acima do limite de aviso do procedimento (${textoNumeroBr(ctx.limiteCloro)} ${u}) — confira o valor.`);
     }
   }
@@ -554,10 +663,23 @@ export function validarRelatorioExecucao(s: SnapshotExecucao, ctx: ContextoRelat
     addAviso(r, "laudoDepois", "O laudo DEPOIS da limpeza é idêntico ao de ANTES — confira se não foi copiado.");
   }
   const fora = [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)];
-  const naoCitados = foraNaoCitados(fora, d.conclusao);
+  const naoCitados = foraNaoCitados(fora, d.conclusao, d.conclusaoAnalises);
   if (naoCitados.length) {
     const nomes = Array.from(new Set(naoCitados.map((f) => f.nome)));
-    addAviso(r, "conclusao", `Parâmetro(s) fora do limite não citado(s) na Conclusão: ${nomes.join(", ")}. Use “Sugerir texto na conclusão”.`);
+    addAviso(r, "conclusao", `Parâmetro(s) fora do limite não citado(s) como fora na Conclusão nem na Conclusão das Análises: ${nomes.join(", ")}. Use “Sugerir texto”.`);
+  }
+  // Limite: o documento usa o do laudo de DEPOIS (ou o de ANTES, se vazio)
+  if (d.laudoAntes && d.laudoDepois) {
+    const ga = gradeLaudo(d.laudoAntes), gd = gradeLaudo(d.laudoDepois);
+    ga.forEach((l, i) => {
+      const a = normalizarCelulaLaudo(l[COL_LIMITE]), b = normalizarCelulaLaudo(gd[i][COL_LIMITE]);
+      if (a && b && !celulasIguais(a, b)) addAviso(r, `laudoDepois.${i}`, `${infoParametro(i).nome}: limite diferente nos dois laudos (antes ${a}, depois ${b}) — o documento usa o de depois.`);
+    });
+  }
+  // A seção Análise sai sempre (texto fixo): sem resultado nenhum, a tabela
+  // sai toda "—" — avisa antes de gerar.
+  if (ctx.usaLaudo && !temLaudo(d.laudoAntes) && !temLaudo(d.laudoDepois)) {
+    addAviso(r, "laudoAntes", "Nenhum resultado de laudo preenchido — a tabela da Análise Físico Química sairá toda com “—”. Use “Laudo ANTES/APÓS (PDF)” ou digite os valores.");
   }
   if (ctx.usaLaudo && !s.laudoPdf?.caminho) {
     if (ctx.exigirLaudoPdf) addErro(r, "laudoPdf", MSG_LAUDO_OBRIGATORIO);

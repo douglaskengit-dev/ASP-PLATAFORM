@@ -42,7 +42,7 @@ import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
   atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
-  CAMPOS_PH_CLORO, COL_LIMITE, converterPhCloroLegado, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
+  CAMPOS_PH_CLORO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
@@ -989,7 +989,14 @@ export default function GerarRelatorio({
         });
       }
       // Laudo: células como saem no documento ("ausente" → "Ausente").
-      const laudoDoc = (g?: string[][]) => (g ? gradeLaudo(g).map((l) => l.map(normalizarCelulaLaudo)) : undefined);
+      // A tabela do documento mostra só Valor (antes/após) e Limite: "<LQ"
+      // sozinho não diria quanto é o LQ — sai como "<2,50" quando o LQ existe.
+      const laudoDoc = (g?: string[][]) => (g ? gradeLaudo(g).map((l) => {
+        const linha = l.map(normalizarCelulaLaudo);
+        const lq = lerCelulaLaudo(linha[COL_LQ]);
+        if (linha[COL_VALOR] === "<LQ" && lq.tipo === "numero") linha[COL_VALOR] = `<${linha[COL_LQ]}`;
+        return linha;
+      }) : undefined);
       // O PDF do laudo é um arquivo à parte; o tópico Anexos (se o modelo
       // tiver) só o cita.
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -1380,13 +1387,18 @@ export default function GerarRelatorio({
       const x = j.laudo as LaudoLido;
       const antes = chave === "laudoAntes";
       setD((v) => {
+        // Valor, Incerteza, LQ e LD vêm do laudo lido (em branco se ele não
+        // trouxer) — não sobra célula de um PDF lido antes. O Limite só muda
+        // quando o laudo informa um.
         const atual = gradeLaudo(v[chave] as string[][] | undefined);
-        const nova = atual.map((linha, i) => linha.map((c, k) => x.grade[i]?.[k] || c));
+        const nova = atual.map((linha, i) => linha.map((c, k) =>
+          k === COL_LIMITE ? (x.grade[i]?.[k] || c) : (x.grade[i]?.[k] ?? "")));
         return { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
       });
       setDoPdf((p) => ({ ...p, [chave]: { nome: f.name, laudo: x } }));
       const avisos: string[] = [];
-      if (x.lidos < LAUDO_PARAMETROS.length) avisos.push(`Só ${x.lidos} de ${LAUDO_PARAMETROS.length} parâmetros foram encontrados no laudo — confira os demais.`);
+      if (x.incompletos.length) avisos.push(`Não foi possível ler com segurança: ${x.incompletos.join(", ")} — a linha ficou em branco; digite como está no laudo.`);
+      else if (x.lidos < LAUDO_PARAMETROS.length) avisos.push(`Só ${x.lidos} de ${LAUDO_PARAMETROS.length} parâmetros foram encontrados no laudo — confira os demais.`);
       if (x.naoAtende.length) avisos.push(`O laboratório declarou que a amostra NÃO ATENDE à Portaria 888 em: ${x.naoAtende.join(", ")}.`);
       const kPh = antes ? "phAntes" : "phDepois", kCl = antes ? "cloroAntes" : "cloroDepois";
       const phInf = lerValorMedido(d[kPh]), clInf = lerValorMedido(d[kCl]);
@@ -1553,10 +1565,10 @@ export default function GerarRelatorio({
             })}
           </div>
           <div style={{ ...grade, marginTop: 12 }}>
-            <div><label style={rotulo} htmlFor="campo-amostraAntes">Nº da amostra — antes da limpeza</label>
+            <div><label style={rotulo} htmlFor="campo-amostraAntes">Nº do relatório de ensaio — antes da limpeza</label>
               <input id="campo-amostraAntes" style={campo} value={d.amostraAntes || ""} onChange={set("amostraAntes")}
                 placeholder="ex.: 26846/2026.0.A" /></div>
-            <div><label style={rotulo} htmlFor="campo-amostraDepois">Nº da amostra — após a limpeza</label>
+            <div><label style={rotulo} htmlFor="campo-amostraDepois">Nº do relatório de ensaio — após a limpeza</label>
               <input id="campo-amostraDepois" style={campo} value={d.amostraDepois || ""} onChange={set("amostraDepois")}
                 placeholder="ex.: 27066/2026.0.A" /></div>
           </div>
@@ -1585,9 +1597,11 @@ export default function GerarRelatorio({
           <p className="detalhe" style={{ margin: "12px 0 0" }}>
             Laudo: escreva como o laboratório — número (vírgula decimal), <strong>&lt;2,50</strong> (abaixo do
             limite de quantificação), <strong>&lt;LQ</strong>, <strong>ND</strong>, <strong>Ausente</strong>,{" "}
-            <strong>Presente</strong> ou <strong>-</strong> (não analisado). Coliformes e E. coli (P/A): Ausente,
-            Presente ou -. A coluna Limite vem preenchida com a {FONTE_PORTARIA_888} e pode ser corrigida; sai no
-            documento como estiver.
+            <strong>Presente</strong> ou <strong>-</strong>. Na coluna Valor, “-” é <em>não analisado</em>; em
+            Incerteza, LQ e LD, é <em>não informado</em> pelo laboratório. Coliformes e E. coli (P/A): Ausente,
+            Presente ou -. A coluna Limite vem preenchida com a {FONTE_PORTARIA_888} (heterotróficas: 500 UFC/mL,
+            valor de referência) e pode ser corrigida. O documento mostra o Valor de antes e de após e o Limite;
+            Incerteza, LQ e LD servem à conferência (um “&lt;LQ” sai com o valor do LQ).
           </p>
           {(["laudoAntes", "laudoDepois"] as const).map((chave) => {
             const g = gradeLaudo(d[chave] as string[][] | undefined);
