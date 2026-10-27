@@ -506,6 +506,10 @@ export default function GerarRelatorio({
       // Só existem em modelo próprio (POP 001): sem modelo, ficam de fora.
       anexos: base ? numeroDaSecao(base, "anexos") : undefined,
       coletas: base ? numeroDaSecao(base, "coletas") : undefined,
+      // Modelo em linha do tempo: as coletas de água ficam em "Antes da
+      // limpeza" e "Após a limpeza".
+      etapaAntes: base ? numeroDaSecao(base, "etapa-antes") : undefined,
+      etapaApos: base ? numeroDaSecao(base, "etapa-apos") : undefined,
       analise: base ? numeroDaSecao(base, "analise") : undefined,
     };
   }, [topicosModelo]);
@@ -551,7 +555,10 @@ export default function GerarRelatorio({
    *  modelo (Recomendações, Método…) e as com dados do cadastro sempre saem. */
   const temTexto = (html?: string) => !!(html || "").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
   const temFoto = (n: number) => fotos.some((f) => f.topico === n);
-  const nLimpeza = topicosModelo.length ? numeroDaSecao(topicosModelo, "limpeza") : undefined;
+  // seção do texto "A limpeza ocorreu em… volume": Limpeza robotizada ou,
+  // no modelo em linha do tempo, Durante a limpeza
+  const nLimpeza = topicosModelo.length
+    ? numeroDaSecao(topicosModelo, "limpeza") ?? numeroDaSecao(topicosModelo, "etapa-durante") : undefined;
   const secoesVazias = new Set<number>();
   for (const t of topicosGenericos) {
     // Análise Físico Química e Laboratorial tem texto fixo padrão do modelo
@@ -2069,7 +2076,7 @@ export default function GerarRelatorio({
         ...topicosGenericos.map((t) => {
           const temVagas = vagasModelo.some((v) => v.topico === t.numero);
           const ehAnalise = limpeza && t.numero === N.analise;
-          const ehColeta = limpeza && t.numero === N.coletas;
+          const ehColeta = limpeza && [N.coletas, N.etapaAntes, N.etapaApos].includes(t.numero);
           return Topico({
             numero: t.numero, titulo: t.titulo, maxFotos: 20, legendaFoto: t.titulo,
             semFotos: temVagas,
