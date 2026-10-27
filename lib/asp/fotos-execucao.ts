@@ -116,7 +116,9 @@ export const SECOES_FOTOS: SecaoFotos[] = [
   },
   {
     id: "robo", titulo: "Robô no local da inspeção",
-    slots: [{ id: "robo", rotulo: "Robô no local", legenda: "Robô no local da inspeção", palavras: ["robo"] }],
+    // "robo" sozinho casava com "Procedimento de higienização do robô" e
+    // tomava essa vaga quando faltava a foto da higienização.
+    slots: [{ id: "robo", rotulo: "Robô no local", legenda: "Robô no local da inspeção", palavras: ["robo de limpeza", "robo no local"] }],
   },
   {
     id: "robo_higienizacao", titulo: "Higienização do robô", flag: "robo_higienizacao",
@@ -142,12 +144,16 @@ export const SECOES_FOTOS: SecaoFotos[] = [
     id: "limpeza", titulo: "Limpeza",
     descricao: `No mínimo ${MINIMO_FOTOS_LIMPEZA} fotos em cada momento.`,
     slots: [
+      // Palavras do FUNDO do tanque, não do momento: no modelo em linha do
+      // tempo a seção "Antes da limpeza" também tem as vagas das coletas
+      // ("Ponto de coleta antes da limpeza") — "antes" sozinho as tomaria.
+      // O momento já filtra: legenda de durante/depois recusa foto de antes.
       { id: "limpeza_antes", rotulo: "Antes — visão geral e pontos de interesse", minimo: MINIMO_FOTOS_LIMPEZA,
-        fase: "antes", legenda: "Antes da limpeza", palavras: ["antes"] },
+        fase: "antes", legenda: "Antes da limpeza", palavras: ["fundo", "sediment"] },
       { id: "limpeza_durante", rotulo: "Durante", minimo: MINIMO_FOTOS_LIMPEZA,
-        fase: "durante", legenda: "Durante a limpeza", palavras: ["durante", "andamento", "execu"] },
+        fase: "durante", legenda: "Durante a limpeza", palavras: ["durante", "andamento", "execu", "removendo"] },
       { id: "limpeza_depois", rotulo: "Depois", minimo: MINIMO_FOTOS_LIMPEZA,
-        fase: "depois", legenda: "Após a limpeza", palavras: ["depois", "apos", "final"] },
+        fase: "depois", legenda: "Após a limpeza", palavras: ["fundo", "final", "limpo"] },
     ],
   },
 ];
@@ -346,16 +352,21 @@ export function pendenciasColeta(reg: RegistroFotosExecucao | null | undefined):
  * entra como figura livre no fim da seção. O formulário mostra o destino de
  * cada uma e deixa trocar a vaga ou remover.
  */
-const DESTINOS: Record<SecaoFotosId | "limpeza_depois", { chave: string; ancora?: string; soNumero?: number }[]> = {
+// A primeira chave de cada lista é a do modelo em LINHA DO TEMPO (POP 001
+// 2026: Preparação › Antes › Durante › Após); as seguintes mantêm os modelos
+// por assunto (Sanitização, Coletas, Limpeza robotizada) funcionando.
+// Chave por vaga (limpeza_antes…) vale antes da chave da seção.
+const DESTINOS: Record<string, { chave: string; ancora?: string; soNumero?: number }[]> = {
   // 6.3 "Fotos do tanque" do modelo padrão; noutro modelo, a seção "Dados do
   // reservatório" com o número que tiver (vagas ou fim da seção).
   tanque: [{ chave: "reservatorio", ancora: "6.3", soNumero: 6 }, { chave: "reservatorio" }, { chave: "tanque" }],
-  robo: [{ chave: "limpeza" }, { chave: "sanitizacao" }, { chave: "fotos-internas" }],
-  robo_higienizacao: [{ chave: "sanitizacao" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
-  agua_antes: [{ chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
-  agua_depois: [{ chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
-  limpeza: [{ chave: "limpeza" }, { chave: "fotos-internas" }],
-  limpeza_depois: [{ chave: "apos-limpeza" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
+  robo: [{ chave: "preparacao" }, { chave: "limpeza" }, { chave: "sanitizacao" }, { chave: "fotos-internas" }],
+  robo_higienizacao: [{ chave: "preparacao" }, { chave: "sanitizacao" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
+  agua_antes: [{ chave: "etapa-antes" }, { chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
+  agua_depois: [{ chave: "etapa-apos" }, { chave: "coletas" }, { chave: "analise" }, { chave: "fotos-internas" }],
+  limpeza_antes: [{ chave: "etapa-antes" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
+  limpeza_durante: [{ chave: "etapa-durante" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
+  limpeza_depois: [{ chave: "etapa-apos" }, { chave: "apos-limpeza" }, { chave: "limpeza" }, { chave: "fotos-internas" }],
 };
 
 export interface FotoPlanejada {
@@ -377,6 +388,10 @@ function faseDaLegenda(legenda: string): Fase | null {
   const t = normalizar(legenda);
   const antes = /\bantes\b/.test(t);
   const depois = /\b(depois|apos)\b/.test(t);
+  // "…durante a limpeza": momento próprio — a foto de antes/depois do fundo
+  // não pode cair na vaga de durante (as legendas citam "fundo" nas três).
+  const durante = /\bdurante\b/.test(t);
+  if (durante && !antes && !depois) return "durante";
   return antes === depois ? null : antes ? "antes" : "depois";
 }
 
@@ -424,7 +439,7 @@ export function planejarFotosNoRelatorio(
     for (const slot of secao.slots) {
       const fotos = fotosDoSlot(reg, slot.id);
       if (fotos.length === 0) continue;
-      const opcoes = DESTINOS[slot.id === "limpeza_depois" ? "limpeza_depois" : secao.id];
+      const opcoes = DESTINOS[slot.id] || DESTINOS[secao.id];
       let topico = modelo.primeiraSecao;
       let ancora: string | undefined;
       for (const d of opcoes) {
@@ -434,7 +449,13 @@ export function planejarFotosNoRelatorio(
         topico = n; ancora = d.ancora;
         break;
       }
-      if (!ancora && slot.subtopico) ancora = `sub:${slot.subtopico}`;
+      // Envio para análise: subtópico gerado só quando o modelo não traz
+      // vaga própria para ele na seção de destino (o POP 001 em linha do
+      // tempo já tem "Coleta para envio de análise" com as vagas).
+      if (!ancora && slot.subtopico &&
+          !modelo.vagas.some((v) => v.topico === topico && afinidade(slot, v.legenda) > 0)) {
+        ancora = `sub:${slot.subtopico}`;
+      }
       const valor = textoDoValor(slot, valorDoSlot(reg, slot.id), modelo.unidadeCloro);
       fotos.forEach((f, k) => {
         const foto: FotoPlanejada = {
@@ -457,19 +478,23 @@ export function planejarFotosNoRelatorio(
     const vagas = modelo.vagas.filter((v) => v.topico === topico);
     const ocupada = new Array<boolean>(vagas.length).fill(false);
     const pendentes = new Set(fotos);
-    // 1) vaga cuja legenda cita o que a foto mostra
-    vagas.forEach((v, i) => {
-      let melhor: { foto: FotoPlanejada; slot: SlotFoto } | null = null;
-      let pontos = 0;
-      for (const c of pendentes) {
-        const p = afinidade(c.slot, v.legenda);
-        if (p > pontos) { pontos = p; melhor = c; }
-      }
-      if (melhor) {
-        melhor.foto.vaga = true; melhor.foto.vagaIndice = i;
-        ocupada[i] = true; pendentes.delete(melhor);
-      }
-    });
+    // 1) vaga cuja legenda cita o que a foto mostra — escolha GLOBAL: os
+    //    pares foto↔vaga de maior afinidade primeiro. Vaga por vaga, em
+    //    ordem, a vaga "Procedimento de coleta para envio de análise" (que
+    //    vem antes) tomava a foto da coleta para análise só por citar
+    //    "análise", e a vaga certa ficava vazia. Empate: ordem do documento
+    //    e da coleta (a 1ª foto de "antes" vai na 1ª vaga de "antes").
+    const pares: { c: { foto: FotoPlanejada; slot: SlotFoto }; i: number; p: number; k: number }[] = [];
+    fotos.forEach((c, k) => vagas.forEach((v, i) => {
+      const p = afinidade(c.slot, v.legenda);
+      if (p > 0) pares.push({ c, i, p, k });
+    }));
+    pares.sort((a, b) => b.p - a.p || a.i - b.i || a.k - b.k);
+    for (const { c, i } of pares) {
+      if (ocupada[i] || !pendentes.has(c)) continue;
+      c.foto.vaga = true; c.foto.vagaIndice = i;
+      ocupada[i] = true; pendentes.delete(c);
+    }
     // 2) as demais ocupam vagas livres — primeiro uma cuja legenda combine
     //    com a foto (a 9ª foto de "antes" vai para a 9ª vaga de "antes"), depois
     //    uma vaga NEUTRA (legenda que não cita nenhuma foto da coleta). Nunca

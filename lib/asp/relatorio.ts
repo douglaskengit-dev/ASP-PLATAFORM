@@ -1275,6 +1275,12 @@ const CHAVES_TOPICO: { chave: string; re: RegExp }[] = [
   { chave: "coletas", re: /coletas?\s+das?\s+amostras/i },
   { chave: "limpeza", re: /limpeza\s+robotizada/i },
   { chave: "apos-limpeza", re: /imagens?\s+ap[óo]s\s+a\s+limpeza/i },
+  // Modelo em linha do tempo (POP 001 2026): as fotos contam a história —
+  // Preparação › Antes › Durante › Após. Só o título da seção (com número).
+  { chave: "preparacao", re: /^\s*\d+\.?\s*prepara[çc][ãa]o\b/i },
+  { chave: "etapa-antes", re: /^\s*\d+\.?\s*antes\s+da\s+limpeza/i },
+  { chave: "etapa-durante", re: /^\s*\d+\.?\s*durante\s+a\s+limpeza/i },
+  { chave: "etapa-apos", re: /^\s*\d+\.?\s*ap[óo]s\s+a\s+limpeza/i },
   // Título oficial: "Análise Físico Química e Laboratorial". A alternativa
   // `laboratorial` cobre quem escrever só "Análise Laboratorial"; hífen em
   // "Físico-Química" e falta de acento já passam pelo resto do padrão.
