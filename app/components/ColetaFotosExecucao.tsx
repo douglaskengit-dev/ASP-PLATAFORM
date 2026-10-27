@@ -40,6 +40,9 @@ import {
   FOTO_MAX_BYTES, addErro, erroValorColeta, formatoImagem, mesclar, novoResultado, validarColetaFotos,
   type Periodo,
 } from "@/lib/validacao";
+import {
+  lerPreferenciaCopia, gravarPreferenciaCopia, ehIos, ehAparelhoDeToque, nomeCopia, baixarCopia, compartilharCopias,
+} from "@/lib/pwa/copia-aparelho";
 import { MensagensCampo } from "./MensagensCampo";
 
 /** Foto que ficou na fila offline — só existe neste aparelho até sincronizar. */
@@ -88,10 +91,12 @@ function Miniatura({ src, tamanho, onRemover, naFila }: {
 }
 
 export default function ColetaFotosExecucao({
-  inspecaoId, onMudar, embutido, onLocais, onErro, aguaPotavel,
+  inspecaoId, identificacao, onMudar, embutido, onLocais, onErro, aguaPotavel,
   cloroUnidade = UNIDADE_CLORO_PADRAO, cloroLimiteAviso, periodoExecucao,
 }: {
   inspecaoId: string;
+  /** Identificação da OS (ex.: TQ-01) — entra no nome da cópia salva no aparelho. */
+  identificacao?: string;
   /** Unidade do cloro do procedimento (Catálogo). */
   cloroUnidade?: UnidadeCloro;
   /** Acima disso, o cloro medido gera aviso (Catálogo; padrão 5). */
@@ -122,6 +127,17 @@ export default function ColetaFotosExecucao({
   locaisRef.current = locais;
   const registroRef = useRef<RegistroFotosExecucao | null>(null);
   registroRef.current = registro;
+  /** Cópia no aparelho das fotos da câmera (ligada por padrão, por aparelho). */
+  const [salvarCopia, setSalvarCopia] = useState(true);
+  const [toque, setToque] = useState(false);
+  const [ios, setIos] = useState(false);
+  /** iPhone: originais esperando o toque em "Salvar no aparelho", por vaga. */
+  const [copiasIos, setCopiasIos] = useState<Record<string, { arquivo: File; nome: string }[]>>({});
+  useEffect(() => {
+    setSalvarCopia(lerPreferenciaCopia());
+    setToque(ehAparelhoDeToque());
+    setIos(ehIos());
+  }, []);
 
   const url = `/api/inspecoes/${inspecaoId}/fotos`;
   const urlFoto = (caminho: string) => `${url}?caminho=${encodeURIComponent(caminho)}`;
@@ -191,9 +207,27 @@ export default function ColetaFotosExecucao({
   /** "Limpeza — Durante" de uma vaga. */
   const rotuloVaga = (id: string) => { const d = slotPorId(id); return d ? `${d.secao.titulo} — ${d.slot.rotulo}` : id; };
 
-  async function enviarFotos(slot: SlotFoto, lista: FileList | null) {
+  /** Foto da câmera do app: guarda o ORIGINAL no aparelho (Android baixa na
+   *  hora; iPhone espera o toque em "Salvar no aparelho"). */
+  function guardarCopia(slot: SlotFoto, arquivos: File[]) {
+    if (!salvarCopia || !toque) return;
+    const quando = new Date();
+    const itens = arquivos.map((a, k) => ({ arquivo: a, nome: nomeCopia(identificacao, slot.id, a, arquivos.length > 1 ? k : 0, quando) }));
+    if (ios) setCopiasIos((p) => ({ ...p, [slot.id]: [...(p[slot.id] || []), ...itens] }));
+    else itens.forEach((i) => baixarCopia(i.arquivo, i.nome));
+  }
+
+  async function salvarCopiasIos(slotId: string) {
+    const itens = copiasIos[slotId] || [];
+    if (itens.length === 0) return;
+    const r = await compartilharCopias(itens);
+    if (r !== "cancelado") setCopiasIos((p) => { const n = { ...p }; delete n[slotId]; return n; });
+  }
+
+  async function enviarFotos(slot: SlotFoto, lista: FileList | null, daCamera = false) {
     const arquivos = Array.from(lista || []).slice(0, slot.minimo ? 20 : 1);
     if (arquivos.length === 0) return;
+    if (daCamera) guardarCopia(slot, arquivos);
     setErro(null);
     erroVaga(slot.id, null);
     // Hash -> vaga das fotos ainda fora do registro: fila offline e esta leva.
@@ -280,7 +314,7 @@ export default function ColetaFotosExecucao({
         <label className="btn-dl btn-sm" style={{ ...btn, opacity: ocupado ? 0.6 : 1 }}>
           📷 {slot.minimo ? "Foto" : temFoto ? "Trocar" : "Foto"}
           <input type="file" accept="image/*" capture="environment" disabled={ocupado} style={{ display: "none" }}
-            onChange={(e) => { enviarFotos(slot, e.target.files); e.target.value = ""; }} />
+            onChange={(e) => { enviarFotos(slot, e.target.files, true); e.target.value = ""; }} />
         </label>
         <label className="btn-dl btn-sec btn-sm" style={{ ...btn, opacity: ocupado ? 0.6 : 1 }}>
           🖼 Galeria
@@ -288,6 +322,12 @@ export default function ColetaFotosExecucao({
             onChange={(e) => { enviarFotos(slot, e.target.files); e.target.value = ""; }} />
         </label>
         {ocupado && <span className="detalhe" style={{ margin: 0, alignSelf: "center" }}>Enviando…</span>}
+        {(copiasIos[slot.id]?.length || 0) > 0 && (
+          <button type="button" className="btn-dl btn-sec btn-sm" style={btn} onClick={() => salvarCopiasIos(slot.id)}
+            title="Abre o menu de compartilhar — escolha “Salvar Imagem”">
+            💾 Salvar no aparelho{copiasIos[slot.id].length > 1 ? ` (${copiasIos[slot.id].length})` : ""}
+          </button>
+        )}
       </div>
     );
   }
@@ -450,6 +490,20 @@ export default function ColetaFotosExecucao({
         Fotos de campo que entram sozinhas no Relatório de Execução. Item faltando não impede de
         avançar — o sistema só avisa.
       </p>
+      {podeEditar && toque && (
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, fontSize: 13, cursor: "pointer" }}>
+          <input type="checkbox" style={{ width: 18, height: 18, marginTop: 1 }} checked={salvarCopia}
+            onChange={(e) => { setSalvarCopia(e.target.checked); gravarPreferenciaCopia(e.target.checked); }} />
+          <span>
+            Salvar cópia das fotos da câmera neste aparelho
+            <span className="detalhe" style={{ display: "block", margin: 0, fontSize: 12 }}>
+              {ios
+                ? "No iPhone, toque em “💾 Salvar no aparelho” depois da foto e escolha “Salvar Imagem”."
+                : "A foto original vai para a pasta Downloads (aparece na galeria)."}
+            </span>
+          </span>
+        </label>
+      )}
       {erro && <p className="erro-texto" style={{ margin: "6px 0 0" }}>{erro}</p>}
       {locais.length > 0 && (
         <p className="detalhe" style={{ margin: "6px 0 0", color: "var(--pendente)" }}>
