@@ -44,6 +44,7 @@ import {
   lerPreferenciaCopia, gravarPreferenciaCopia, ehIos, ehAparelhoDeToque, nomeCopia, baixarCopia, compartilharCopias,
 } from "@/lib/pwa/copia-aparelho";
 import { MensagensCampo } from "./MensagensCampo";
+import VisualizadorFoto from "./VisualizadorFoto";
 
 /** Foto que ficou na fila offline — só existe neste aparelho até sincronizar. */
 interface FotoLocal { chave: string; slot: string; url: string; hash?: string }
@@ -65,18 +66,27 @@ function Selo({ ok, texto }: { ok: boolean; texto: string }) {
   );
 }
 
-/** Miniatura clicável (abre a foto inteira); ✕ remove. Fora do componente
- *  para não ser recriada a cada render (a imagem piscaria). */
-function Miniatura({ src, tamanho, onRemover, naFila }: {
+/** Miniatura clicável (abre a foto inteira numa caixa por cima da tela —
+ *  ver VisualizadorFoto); ✕ remove. `grupo` são as fotos do mesmo item, para
+ *  passar de uma a outra na caixa. Fora do componente para não ser recriada a
+ *  cada render (a imagem piscaria). */
+function Miniatura({ src, tamanho, onRemover, naFila, grupo, legenda }: {
   src: string; tamanho: number | string; onRemover?: () => void; naFila?: boolean;
+  grupo?: string[]; legenda?: string;
 }) {
+  const [aberta, setAberta] = useState(false);
+  const fotos = grupo && grupo.includes(src) ? grupo : [src];
   return (
     <div style={{ position: "relative", width: tamanho, aspectRatio: "4 / 3", borderRadius: 8, overflow: "hidden",
       background: "var(--bg-suave)", border: "1px solid var(--borda)", flexShrink: 0 }}>
-      <a href={src} target="_blank" rel="noopener noreferrer">
+      <button type="button" aria-label="Ampliar foto" onClick={() => setAberta(true)}
+        style={{ display: "block", width: "100%", height: "100%", padding: 0, border: "none", background: "none", cursor: "zoom-in" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-      </a>
+      </button>
+      {aberta && (
+        <VisualizadorFoto fotos={fotos} inicio={fotos.indexOf(src)} legenda={legenda} onFechar={() => setAberta(false)} />
+      )}
       {naFila && (
         <span style={{ position: "absolute", left: 4, bottom: 4, fontSize: 10.5, fontWeight: 700, padding: "1px 6px",
           borderRadius: 999, background: "#fef3c7", color: "#92400e" }}>na fila</span>
@@ -346,8 +356,8 @@ export default function ColetaFotosExecucao({
           <strong style={{ fontSize: 13, minWidth: 0, overflowWrap: "anywhere" }}>{slot.rotulo}</strong>
           <Selo ok={completo} texto={completo ? "✓" : "pendente"} />
         </div>
-        {local ? <Miniatura src={local.url} tamanho="100%" naFila />
-          : foto ? <Miniatura src={urlFoto(foto.caminho)} tamanho="100%" onRemover={podeEditar ? () => remover(foto.caminho) : undefined} />
+        {local ? <Miniatura src={local.url} tamanho="100%" naFila legenda={slot.rotulo} />
+          : foto ? <Miniatura src={urlFoto(foto.caminho)} tamanho="100%" legenda={slot.rotulo} onRemover={podeEditar ? () => remover(foto.caminho) : undefined} />
           : (
             <div style={{ width: "100%", aspectRatio: "4 / 3", borderRadius: 8, border: "1px dashed var(--borda)",
               display: "flex", alignItems: "center", justifyContent: "center", color: "var(--cinza)", fontSize: 12.5 }}>
@@ -382,6 +392,8 @@ export default function ColetaFotosExecucao({
     const fotos = fotosDoSlot(registro, slot.id);
     const meus = locais.filter((l) => l.slot === slot.id);
     const n = fotos.length + meus.length;
+    // na caixa ampliada, passa de uma foto a outra do mesmo item
+    const grupo = [...fotos.map((f) => urlFoto(f.caminho)), ...meus.map((l) => l.url)];
     return (
       <div key={slot.id} style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 6, minWidth: 0,
         paddingTop: 8, borderTop: "1px dashed var(--borda)" }}>
@@ -394,10 +406,10 @@ export default function ColetaFotosExecucao({
         ) : (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {fotos.map((f) => (
-              <Miniatura key={f.caminho} src={urlFoto(f.caminho)} tamanho={104}
+              <Miniatura key={f.caminho} src={urlFoto(f.caminho)} tamanho={104} grupo={grupo} legenda={slot.rotulo}
                 onRemover={podeEditar ? () => remover(f.caminho) : undefined} />
             ))}
-            {meus.map((l) => <Miniatura key={l.chave} src={l.url} tamanho={104} naFila />)}
+            {meus.map((l) => <Miniatura key={l.chave} src={l.url} tamanho={104} naFila grupo={grupo} legenda={slot.rotulo} />)}
           </div>
         )}
         <MensagensCampo r={validacao} campo={slot.id} />

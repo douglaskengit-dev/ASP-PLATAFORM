@@ -22,6 +22,7 @@
 import { Fragment, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
+import VisualizadorFoto from "./VisualizadorFoto";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
   TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada, numeroDaSecao,
@@ -243,6 +244,8 @@ export default function GerarRelatorio({
   /** Modelo cujos tópicos e vagas já foram lidos ("" = modelo padrão). */
   const [modeloLido, setModeloLido] = useState<string | null>(null);
   const [fotos, setFotos] = useState<FotoTopico[]>([]);
+  /** Foto da coleta ampliada (caixa por cima do modal). */
+  const [ampliada, setAmpliada] = useState<{ src: string; legenda?: string } | null>(null);
   const fotosRef = useRef(fotos);
   fotosRef.current = fotos;
   // miniaturas das fotos da coleta: libera a memória ao fechar o formulário
@@ -793,7 +796,8 @@ export default function GerarRelatorio({
             <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 8, paddingTop: 8,
               borderTop: "1px solid var(--borda)", flexWrap: "wrap" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              {f.previa && <img src={f.previa} alt="" style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />}
+              {f.previa && <img src={f.previa} alt="" title="Ampliar" onClick={() => setAmpliada({ src: f.previa!, legenda: f.coleta })}
+                style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 6, flexShrink: 0, cursor: "zoom-in" }} />}
               <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{f.coleta}</span>
                 <span className="detalhe" style={{ margin: 0 }}>→ {destinoDaFoto(f)}</span>
@@ -1439,6 +1443,7 @@ export default function GerarRelatorio({
 
   return (
     <Modal titulo="📄 Gerar Relatório Técnico" largo onFechar={onFechar}>
+      {ampliada && <VisualizadorFoto fotos={[ampliada.src]} legenda={ampliada.legenda} onFechar={() => setAmpliada(null)} />}
       {/* Sugestões de crédito das figuras: a nossa e a do cliente do projeto.
           O campo é livre — dá para creditar um terceiro. */}
       <datalist id="sug-fonte-figura">
