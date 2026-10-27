@@ -57,6 +57,9 @@ export interface SlotFoto {
   /** A foto sai num subtópico próprio com este título, criado no fim da seção
    *  de destino do relatório (nunca ocupa as vagas do modelo). */
   subtopico?: string;
+  /** Grupo dentro da seção no card da coleta ("pH e cloro", "Envio para
+   *  análise"). Vagas seguidas com o mesmo grupo ficam sob o mesmo título. */
+  grupo?: string;
 }
 
 export interface SecaoFotos {
@@ -69,28 +72,36 @@ export interface SecaoFotos {
 }
 
 export const MINIMO_FOTOS_LIMPEZA = 3;
-/** Subtópico do relatório que recebe as fotos da coleta para análise. */
-export const SUBTOPICO_ANALISE = "Coleta de água para envio de análise";
+/** Subtópicos do relatório que recebem as fotos da coleta para envio de
+ *  análise — um para antes e outro para depois da limpeza. */
+export const SUBTOPICO_ANALISE = {
+  antes: "Coleta de água para envio de análise — antes da limpeza",
+  depois: "Coleta de água para envio de análise — após a limpeza",
+} as const;
 
 function slotsAgua(pref: "agua_antes" | "agua_depois"): SlotFoto[] {
   const fase: Fase = pref === "agua_antes" ? "antes" : "depois";
   const quando = fase === "antes" ? "antes da limpeza" : "após a limpeza";
+  const local = "Local e ponto de coleta", phCloro = "pH e cloro", envio = "Envio para análise";
   return [
-    { id: `${pref}_local`, rotulo: "Limpeza do local de extração", fase,
+    { id: `${pref}_local`, rotulo: "Limpeza do local de extração", fase, grupo: local,
       legenda: `Limpeza do local de extração (${quando})`,
       palavras: ["higieniz", "local de extra", "limpeza do local"] },
-    { id: `${pref}_ponto`, rotulo: "Ponto de coleta", fase,
+    { id: `${pref}_ponto`, rotulo: "Ponto de coleta", fase, grupo: local,
       legenda: `Ponto de coleta (${quando})`, palavras: ["ponto de coleta"] },
-    { id: `${pref}_ph`, rotulo: "pH", fase, valor: { nome: "pH" },
+    { id: `${pref}_ph`, rotulo: "pH", fase, valor: { nome: "pH" }, grupo: phCloro,
       legenda: `Medição de pH ${quando}`, palavras: ["ph"] },
-    { id: `${pref}_cloro`, rotulo: "Cloro", fase, valor: { nome: "Cloro", unidade: "mg/L" },
+    { id: `${pref}_cloro`, rotulo: "Cloro", fase, valor: { nome: "Cloro", unidade: "mg/L" }, grupo: phCloro,
       legenda: `Medição de cloro ${quando}`, palavras: ["cloro"] },
     // id mantido (`_procedimento`): as fotos já coletadas continuam na vaga.
-    { id: `${pref}_procedimento`, rotulo: "Procedimento de pH e cloro", fase,
+    { id: `${pref}_procedimento`, rotulo: "Procedimento de pH e cloro", fase, grupo: phCloro,
       legenda: `Procedimento de medição de pH e cloro (${quando})`, palavras: ["procedimento"] },
-    { id: `${pref}_analise`, rotulo: "Coleta de água para envio de análise", fase,
+    { id: `${pref}_envio_procedimento`, rotulo: "Procedimento de coleta para envio", fase, grupo: envio,
+      legenda: `Procedimento de coleta para envio de análise (${quando})`,
+      palavras: ["envio", "procedimento de coleta"], subtopico: SUBTOPICO_ANALISE[fase === "antes" ? "antes" : "depois"] },
+    { id: `${pref}_analise`, rotulo: "Coleta de água para envio de análise", fase, grupo: envio,
       legenda: `Coleta de água para envio de análise (${quando})`,
-      palavras: ["analise", "laborat", "frasco"], subtopico: SUBTOPICO_ANALISE },
+      palavras: ["analise", "laborat", "frasco"], subtopico: SUBTOPICO_ANALISE[fase === "antes" ? "antes" : "depois"] },
   ];
 }
 
@@ -232,6 +243,19 @@ export function textoDoValor(slot: SlotFoto, valor: number | null, unidadeCloro:
   return `${slot.valor.nome}: ${numeroBr(valor)}${u ? ` ${u}` : ""}`;
 }
 
+/** Vagas da seção agrupadas para o card: vagas seguidas com o mesmo `grupo`
+ *  ficam juntas sob aquele título; sem grupo, título vazio. */
+export function gruposDaSecao(secao: SecaoFotos): { titulo: string; slots: SlotFoto[] }[] {
+  const grupos: { titulo: string; slots: SlotFoto[] }[] = [];
+  for (const slot of secao.slots) {
+    const titulo = slot.grupo || "";
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.titulo === titulo) ultimo.slots.push(slot);
+    else grupos.push({ titulo, slots: [slot] });
+  }
+  return grupos;
+}
+
 export function secaoExigida(reg: RegistroFotosExecucao | null | undefined, secao: SecaoFotos): boolean {
   return !secao.flag || !!reg?.[secao.flag];
 }
@@ -304,9 +328,10 @@ export function pendenciasColeta(reg: RegistroFotosExecucao | null | undefined):
  *   Água antes/depois (local, ponto, pH, cloro, procedimento) → "Coletas das
  *       amostras"; senão "Análise Físico Química e Laboratorial"; senão
  *       "Inspeção visual interna". pH/cloro: valor na legenda e nos
- *       marcadores [dado coletado] do modelo. A coleta para envio de análise
- *       sai num subtópico próprio, "Coleta de água para envio de análise",
- *       no fim dessa seção (âncora "sub:<título>").
+ *       marcadores [dado coletado] do modelo. O envio para análise
+ *       (procedimento de coleta para envio + coleta) sai em subtópicos
+ *       próprios no fim dessa seção — um antes e outro após a limpeza
+ *       (âncora "sub:<título>").
  *   Limpeza antes e durante → "Limpeza robotizada"; senão "Inspeção visual
  *       interna".
  *   Limpeza depois → "Imagens após a limpeza"; senão "Limpeza robotizada";

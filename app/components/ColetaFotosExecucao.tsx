@@ -32,7 +32,7 @@ import { sha256Hex } from "@/lib/sha256";
 import { dataCapturaExif } from "@/lib/asp/exif";
 import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
 import {
-  SECOES_FOTOS, fotosDoSlot, valorDoSlot, numeroBr, lerNumero, secaoExigida,
+  SECOES_FOTOS, fotosDoSlot, valorDoSlot, numeroBr, lerNumero, secaoExigida, gruposDaSecao,
   situacaoDosItens, progressoColeta, fotoRepetida, slotPorId, unidadeDoSlot, UNIDADE_CLORO_PADRAO,
   type RegistroFotosExecucao, type SlotFoto, type SecaoFotos, type ItemColetado, type UnidadeCloro,
 } from "@/lib/asp/fotos-execucao";
@@ -406,9 +406,24 @@ export default function ColetaFotosExecucao({
             )}
             {secao.id === "limpeza" && <MensagensCampo r={validacao} campo="limpeza_confirmada" />}
             {secao.id === "agua_depois" && <MensagensCampo r={validacao} campo="agua_depois" />}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "14px 16px", marginTop: 10 }}>
-              {secao.slots.map((slot) => slot.minimo ? VagaMultipla(slot, ok(slot.id)) : VagaSimples(slot, ok(slot.id)))}
-            </div>
+            {gruposDaSecao(secao).map((g) => {
+              const feitosGrupo = g.slots.filter((s) => ok(s.id)).length;
+              return (
+                <div key={g.titulo || "geral"} style={{ marginTop: g.titulo ? 14 : 10 }}>
+                  {g.titulo && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--texto-suave)" }}>
+                        {g.titulo}
+                      </span>
+                      <span className="detalhe" style={{ fontSize: 12 }}>{feitosGrupo} de {g.slots.length}</span>
+                    </div>
+                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "14px 16px" }}>
+                    {g.slots.map((slot) => slot.minimo ? VagaMultipla(slot, ok(slot.id)) : VagaSimples(slot, ok(slot.id)))}
+                  </div>
+                </div>
+              );
+            })}
           </>
         )}
       </div>
