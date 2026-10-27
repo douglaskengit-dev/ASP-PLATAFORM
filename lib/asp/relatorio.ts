@@ -241,6 +241,33 @@ function fimDoElemento(body: string, ini: number, tag: "p" | "tbl"): number {
   return -1;
 }
 
+/**
+ * Troca o número das legendas "Figura N –" escritas no MODELO pela marca de
+ * numeração (MARCA_FIG), para que sejam numeradas junto com as geradas, na
+ * ordem do documento. Só mexe no parágrafo cujo texto visível começa com
+ * "Figura <número> -/–" e cujo número está inteiro num <w:t>; menção a figura
+ * no meio do texto ("conforme a Figura 3") não é legenda e fica como está.
+ */
+function marcarLegendasDoModelo(xml: string): string {
+  const reIni = /<w:p(?=[\s>])/g;
+  let saida = "", ultimo = 0;
+  let m: RegExpExecArray | null;
+  while ((m = reIni.exec(xml))) {
+    const fim = fimDoElemento(xml, m.index, "p");
+    if (fim < 0) break;
+    const p = xml.slice(m.index, fim);
+    // parágrafo com outro parágrafo dentro (caixa de texto): só o de dentro conta
+    if (/<w:p(?=[\s>])/.test(p.slice(4)) || !/^figura\s*\d+\s*[-–]/i.test(textoDe(p))) continue;
+    const novo = p.replace(/(<w:t(?:\s[^>]*)?>)([^<]*?)(\d+)/, (_t, abre, antes, _n) =>
+      /figura\s*$/i.test(antes) || antes.trim() === "" ? `${abre}${antes}${MARCA_FIG}` : _t);
+    if (novo === p) continue;
+    saida += xml.slice(ultimo, m.index) + novo;
+    ultimo = fim;
+    reIni.lastIndex = fim;
+  }
+  return saida + xml.slice(ultimo);
+}
+
 /** Quebra o corpo do documento nos blocos de nível superior (<w:p> e <w:tbl>). */
 function separarBlocos(body: string): { ini: number; fim: number; xml: string; texto: string }[] {
   const blocos: { ini: number; fim: number; xml: string; texto: string }[] = [];
@@ -571,6 +598,9 @@ function dimensoesImagem(dados: ArrayBuffer, ext: "png" | "jpeg"): { w: number; 
 }
 
 /** Altura que mantém a proporção da imagem dentro de uma largura em cm. */
+/** Altura máxima de uma figura no documento (cm). */
+const ALTURA_MAX_FIGURA_CM = 11;
+
 function alturaProporcional(img: { dados: ArrayBuffer; extensao: "png" | "jpeg" }, larguraCm: number): number {
   const d = dimensoesImagem(img.dados, img.extensao);
   const razao = d && d.w > 0 ? d.h / d.w : 0.72;      // 0,72 = padrão antigo
@@ -581,7 +611,8 @@ function alturaProporcional(img: { dados: ArrayBuffer; extensao: "png" | "jpeg" 
 function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: number): string {
   const cx = Math.round(larguraCm * 360000);
   const cy = Math.round(alturaCm * 360000);
-  return '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr><w:r><w:drawing>' +
+  // keepNext: a foto não fica numa página e a legenda (logo abaixo) na outra.
+  return '<w:p><w:pPr><w:keepNext/><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr><w:r><w:drawing>' +
     `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>` +
     '<wp:effectExtent l="0" t="0" r="0" b="0"/>' +
     `<wp:docPr id="${900 + idImg}" name="Figura ${idImg}"/><wp:cNvGraphicFramePr/>` +
@@ -872,7 +903,7 @@ function tituloTopico(numero: number, titulo: string): string {
 
 /** Título de subtópico (8.1, 8.2 …): Arial 12 em negrito, como no modelo. */
 function tituloSubtopico(numero: string, titulo: string): string {
-  return '<w:p><w:pPr><w:spacing w:before="180" w:after="60" w:line="240" w:lineRule="auto"/>' +
+  return '<w:p><w:pPr><w:keepNext/><w:spacing w:before="180" w:after="60" w:line="240" w:lineRule="auto"/>' +
     '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr></w:pPr>' +
     '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr>' +
     `<w:t xml:space="preserve">${esc(numero)} ${esc(titulo)}</w:t></w:r></w:p>`;
@@ -941,6 +972,21 @@ function preencherLaudo(xml: string, cabecalho: string, valores?: string[][]): s
     return xml.slice(0, m.index) + nova + xml.slice(m.index + tbl.length);
   }
   return xml;
+}
+
+/** "[dado coletado]" que ficou sem valor (incerteza/LQ/LD não informados,
+ *  medição que não houve) não pode sair impresso: nas tabelas do laudo vira
+ *  "—"; nas legendas, o trecho "([dado coletado])" some. */
+function limparDadoColetado(xml: string): string {
+  if (!xml.includes("dado coletado")) return xml;
+  xml = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tbl) => {
+    const t = textoDe(tbl).toLowerCase();
+    if (!t.includes("[dado coletado]") || !(t.includes("antes da limpeza") || t.includes("após a limpeza"))) return tbl;
+    return tbl.replace(/<w:tc\b[\s\S]*?<\/w:tc>/g, (cel) => textoDe(cel).includes("[dado coletado]") ? trocarMarcador(cel, "[dado coletado]", "—") : cel);
+  });
+  xml = trocarMarcador(xml, " ([dado coletado])", "");
+  xml = trocarMarcador(xml, "([dado coletado])", "");
+  return trocarMarcador(xml, "[dado coletado]", "—");
 }
 
 export const TOPICO_CAPA = { numero: 0, titulo: "Capa e controle de revisão" };
@@ -1298,6 +1344,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
 
   xml = preencherLaudo(xml, "Antes da Limpeza", dados.laudoAntes);
   xml = preencherLaudo(xml, "Após a Limpeza", dados.laudoDepois);
+  xml = limparDadoColetado(xml);
 
   // A unidade/cliente aparece no texto padrão; aceita marcador e também o nome
   // que veio escrito no modelo original.
@@ -1546,9 +1593,16 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     if (!img.vaga && ocultos.has(img.topico)) return;
     const rId = rels[i]?.rId;
     if (!rId) return;
-    const largura = img.larguraCm || 15;
     // Proporção real do arquivo — o fator fixo de antes achatava as fotos.
-    const altura = alturaProporcional(img, largura);
+    // Foto em pé (celular) a 15 cm de largura passava de 20 cm de altura e
+    // ocupava a página inteira: a altura fica em no máximo 11 cm e a largura
+    // acompanha.
+    let largura = img.larguraCm || 15;
+    let altura = alturaProporcional(img, largura);
+    if (altura > ALTURA_MAX_FIGURA_CM) {
+      largura = Math.round(largura * (ALTURA_MAX_FIGURA_CM / altura) * 100) / 100;
+      altura = ALTURA_MAX_FIGURA_CM;
+    }
     // Legenda ABAIXO da figura (padrão adotado pela ASP), seguida da fonte.
     const bloco =
       figuraXml(rId, i + 1, largura, altura) +
@@ -1755,6 +1809,15 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       }
       // figuras de tópicos sem marcador próprio entram ao final da seção
       if (figuras && !figurasUsadas) saida += figuras;
+      // Fotos do formulário ancoradas em "6.1/6.2/6.3" (vista superior,
+      // lateral, fotos do tanque) cujo subtítulo este modelo não tem — ou tem
+      // com outro número, quando "Dados do reservatório" não é a seção 6:
+      // entram no fim da seção do reservatório em vez de sumirem caladas.
+      if (nTop === numeroDaChave.get("reservatorio")) {
+        for (const [ancora, fig] of figurasDaAncora) {
+          if (/^6\.\d$/.test(ancora)) { saida += fig; figurasDaAncora.delete(ancora); }
+        }
+      }
       // subtópicos novos: continuam a numeração dos subtítulos do modelo
       // (9.1, 9.2 → 9.3), já com o número final do tópico.
       const novosSub = subtopicosNovos.get(nTop);
@@ -1787,7 +1850,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   saida += body.slice(fimUltimoBloco);
 
   // Numera as figuras na ORDEM DO DOCUMENTO (e não na ordem em que foram
-  // anexadas), como manda a ABNT.
+  // anexadas), como manda a ABNT — inclusive as legendas que já vêm escritas
+  // no modelo ("Figura 3 – Visão geral do tanque", sob uma vaga). Sem isso o
+  // número do modelo ficava fixo e colidia com o das figuras geradas.
+  saida = marcarLegendasDoModelo(saida);
   let nFig = 0;
   saida = saida.split(MARCA_FIG).reduce((acc, parte, i) =>
     i === 0 ? parte : acc + String(++nFig) + parte, "");
