@@ -2194,7 +2194,7 @@ export default function InspecaoDetalhePage() {
         <SecaoRecolhivel id="fotos" titulo="Coleta de fotos da execução"
           aberta={secoes.aberta("fotos")} onAlternar={() => secoes.alternar("fotos")}
           resumo={resumoFotos}>
-          <ColetaFotosExecucao key={encerrada ? "ro" : "rw"} inspecaoId={id} onMudar={setFotosExec} embutido
+          <ColetaFotosExecucao key={encerrada ? "ro" : "rw"} inspecaoId={id} identificacao={insp?.identificacao} onMudar={setFotosExec} embutido
             onLocais={setFotosLocais} onErro={setErroFotos} aguaPotavel={!!procOS?.agua_potavel}
             cloroUnidade={cloroOS.unidade} cloroLimiteAviso={cloroOS.limite} periodoExecucao={periodoExec} />
         </SecaoRecolhivel>
