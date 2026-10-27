@@ -23,6 +23,7 @@ import { Fragment, isValidElement, useEffect, useMemo, useRef, useState } from "
 import Modal from "./Modal";
 import EditorTexto from "./EditorTexto";
 import VisualizadorFoto from "./VisualizadorFoto";
+import type { LaudoLido } from "@/lib/asp/laudo-leitura";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
   TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada, numeroDaSecao,
@@ -199,6 +200,11 @@ export default function GerarRelatorio({
   const [d, setD] = useState<Partial<DadosRelatorio>>(legado ? legado.d : inicial);
   /** PDF do laudo do laboratório (Fase 8): sobe ao escolher; vai no snapshot. */
   const [laudoPdf, setLaudoPdf] = useState<LaudoPdf | null>(salvo?.laudoPdf || null);
+  /** Laudos lidos do PDF (Relatório de Ensaio): o que veio de cada um, para
+   *  destacar as células preenchidas por ele, e os avisos da leitura. */
+  const [doPdf, setDoPdf] = useState<Partial<Record<ChaveLaudo, { nome: string; laudo: LaudoLido }>>>({});
+  const [msgPdf, setMsgPdf] = useState<Partial<Record<ChaveLaudo, { ok?: string; erro?: string; avisos: string[] }>>>({});
+  const [lendoPdf, setLendoPdf] = useState<ChaveLaudo | null>(null);
   const [enviandoLaudo, setEnviandoLaudo] = useState(false);
   const [msgLaudo, setMsgLaudo] = useState<string | null>(null);
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
@@ -1358,6 +1364,52 @@ export default function GerarRelatorio({
     );
   }
 
+  /** Lê o laudo do laboratório (PDF com texto, formato padrão) e preenche a
+   *  grade e o nº da amostra daquele momento. Célula que o laudo não traz
+   *  fica como estava (a coluna Limite mantém a Portaria 888). */
+  async function lerLaudoPdf(chave: ChaveLaudo, f: File | undefined | null) {
+    if (!f) return;
+    setLendoPdf(chave);
+    setMsgPdf((m) => ({ ...m, [chave]: { avisos: [] } }));
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", f);
+      const resp = await fetch("/api/laudo/ler", { method: "POST", body: fd });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok || !j.laudo) throw new Error(j.erro || "Não foi possível ler o laudo.");
+      const x = j.laudo as LaudoLido;
+      const antes = chave === "laudoAntes";
+      setD((v) => {
+        const atual = gradeLaudo(v[chave] as string[][] | undefined);
+        const nova = atual.map((linha, i) => linha.map((c, k) => x.grade[i]?.[k] || c));
+        return { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
+      });
+      setDoPdf((p) => ({ ...p, [chave]: { nome: f.name, laudo: x } }));
+      const avisos: string[] = [];
+      if (x.lidos < LAUDO_PARAMETROS.length) avisos.push(`Só ${x.lidos} de ${LAUDO_PARAMETROS.length} parâmetros foram encontrados no laudo — confira os demais.`);
+      if (x.naoAtende.length) avisos.push(`O laboratório declarou que a amostra NÃO ATENDE à Portaria 888 em: ${x.naoAtende.join(", ")}.`);
+      const kPh = antes ? "phAntes" : "phDepois", kCl = antes ? "cloroAntes" : "cloroDepois";
+      const phInf = lerValorMedido(d[kPh]), clInf = lerValorMedido(d[kCl]);
+      if (x.ph != null && phInf != null && Math.abs(x.ph - phInf) > 1e-9) {
+        avisos.push(`pH no laudo: ${textoNumeroBr(x.ph)}; no formulário: ${textoNumeroBr(phInf)}. Confira qual vale.`);
+      }
+      if (x.cloro != null && clInf != null && Math.abs(x.cloro - clInf) > 1e-9) {
+        avisos.push(`Cloro no laudo: ${textoNumeroBr(x.cloro)}; no formulário: ${textoNumeroBr(clInf)} ${unidadeCloro}. Confira qual vale.`);
+      }
+      const outro = doPdf[antes ? "laudoDepois" : "laudoAntes"]?.laudo;
+      const [dA, dD] = antes ? [x.dataColeta, outro?.dataColeta] : [outro?.dataColeta, x.dataColeta];
+      if (dA && dD && dA > dD) avisos.push("A coleta do laudo de ANTES é posterior à do laudo de APÓS — os PDFs podem estar trocados.");
+      setMsgPdf((m) => ({ ...m, [chave]: {
+        ok: `Preenchido pelo laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. As células em azul vieram do PDF — revise antes de gerar.`,
+        avisos,
+      } }));
+    } catch (e) {
+      setMsgPdf((m) => ({ ...m, [chave]: { erro: e instanceof Error ? e.message : "Falha ao ler o laudo.", avisos: [] } }));
+    } finally {
+      setLendoPdf(null);
+    }
+  }
+
   /** Botão do modal de valores medidos (pH, cloro, amostras e laudo). */
   function BotaoValores(texto: string) {
     return (
@@ -1508,6 +1560,28 @@ export default function GerarRelatorio({
               <input id="campo-amostraDepois" style={campo} value={d.amostraDepois || ""} onChange={set("amostraDepois")}
                 placeholder="ex.: 27066/2026.0.A" /></div>
           </div>
+          <div className="rel-sub" style={{ marginTop: 12 }}>
+            <strong style={{ fontSize: 13 }}>Preencher pelos PDFs dos laudos</strong>
+            <span className="detalhe" style={{ display: "block" }}>
+              Relatório de Ensaio do laboratório, no PDF original (com texto). Preenche o nº da amostra e os
+              resultados, incerteza, LQ, LD e limite.
+            </span>
+            <div style={{ ...grade, marginTop: 6 }}>
+              {(["laudoAntes", "laudoDepois"] as const).map((chave) => (
+                <div key={chave}>
+                  <label className="btn-dl btn-sec" style={{ cursor: lendoPdf ? "wait" : "pointer", display: "inline-block" }}>
+                    {lendoPdf === chave ? "Lendo…" : `📄 Laudo ${chave === "laudoAntes" ? "ANTES" : "APÓS"} (PDF)`}
+                    <input type="file" accept="application/pdf,.pdf" hidden disabled={!!lendoPdf}
+                      onChange={(e) => { lerLaudoPdf(chave, e.target.files?.[0]); e.target.value = ""; }} />
+                  </label>
+                  {doPdf[chave] && <span className="detalhe" style={{ display: "block", overflowWrap: "anywhere" }}>📎 {doPdf[chave]!.nome}</span>}
+                  {msgPdf[chave]?.erro && <p className="val-msg val-erro" style={{ margin: "4px 0 0" }} aria-live="polite">⛔ {msgPdf[chave]!.erro}</p>}
+                  {msgPdf[chave]?.ok && <p className="detalhe" style={{ margin: "4px 0 0" }} aria-live="polite">✓ {msgPdf[chave]!.ok}</p>}
+                  {msgPdf[chave]?.avisos.map((a) => <p key={a} className="val-msg val-aviso" style={{ margin: "4px 0 0" }}>⚠️ {a}</p>)}
+                </div>
+              ))}
+            </div>
+          </div>
           <p className="detalhe" style={{ margin: "12px 0 0" }}>
             Laudo: escreva como o laboratório — número (vírgula decimal), <strong>&lt;2,50</strong> (abaixo do
             limite de quantificação), <strong>&lt;LQ</strong>, <strong>ND</strong>, <strong>Ausente</strong>,{" "}
@@ -1550,10 +1624,15 @@ export default function GerarRelatorio({
                               </td>
                               {LAUDO_COLUNAS.map((col, j) => {
                                 const errCel = !!r.erros[`${chave}.${i}.${j}`]?.length;
+                                const lido = doPdf[chave]?.laudo.grade[i]?.[j];
+                                const doLaudo = !!lido && lido === g[i][j];
                                 return (
                                   <td key={j} style={{ ...celLaudo, ...fundo }}>
                                     <input aria-label={`${par} — ${col}`} aria-invalid={errCel}
-                                      style={{ ...campo, padding: "5px 7px", fontSize: 12.5, minWidth: 84, ...(errCel ? { borderColor: "#b3261e", borderWidth: 2 } : {}) }}
+                                      title={doLaudo ? "Lido do PDF do laudo" : undefined}
+                                      style={{ ...campo, padding: "5px 7px", fontSize: 12.5, minWidth: 84,
+                                        ...(doLaudo ? { background: "#e7f1fb", borderColor: "#0061C4" } : {}),
+                                        ...(errCel ? { borderColor: "#b3261e", borderWidth: 2 } : {}) }}
                                       value={g[i][j]}
                                       onChange={(e) => mudarCelula(chave, i, j, e.target.value)}
                                       onBlur={(e) => {
