@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
   }
 
   const laudo = lerLaudoTexto(texto);
+  if (!laudo.ehRelatorioDeEnsaio) {
+    return NextResponse.json({ erro: "Este PDF não é um Relatório de Ensaio do laboratório (não tem o cabeçalho nem os Resultados Analíticos)." }, { status: 422 });
+  }
   if (laudo.lidos === 0) {
     return NextResponse.json({ erro: "Nenhum parâmetro do laudo foi reconhecido — o formato não é o do Relatório de Ensaio padrão." }, { status: 422 });
   }

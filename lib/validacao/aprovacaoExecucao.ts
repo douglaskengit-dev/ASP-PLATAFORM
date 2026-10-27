@@ -103,10 +103,10 @@ export function avisosAprovacaoExecucao(c: ContextoAprovacaoExecucao): Resultado
   // 2) Fora do limite e não citado na Conclusão
   if (d) {
     const fora = [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)];
-    const naoCitados = foraNaoCitados(fora, d.conclusao);
+    const naoCitados = foraNaoCitados(fora, d.conclusao, d.conclusaoAnalises);
     if (naoCitados.length) {
       const nomes = naoCitados.map((f) => `${f.nome} (${f.chave === "laudoAntes" ? "antes" : "depois"})`);
-      addAviso(r, "conclusao", `Parâmetro(s) do laudo fora do limite não citado(s) na Conclusão: ${Array.from(new Set(nomes)).join(", ")}.`);
+      addAviso(r, "conclusao", `Parâmetro(s) do laudo fora do limite não citado(s) como fora na Conclusão nem na Conclusão das Análises: ${Array.from(new Set(nomes)).join(", ")}.`);
     }
   }
 
