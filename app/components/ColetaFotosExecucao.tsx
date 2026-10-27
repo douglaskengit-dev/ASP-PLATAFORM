@@ -91,7 +91,7 @@ function Miniatura({ src, tamanho, onRemover, naFila }: {
 }
 
 export default function ColetaFotosExecucao({
-  inspecaoId, identificacao, onMudar, embutido, onLocais, onErro, aguaPotavel,
+  inspecaoId, identificacao, onMudar, embutido, somentePendentes, onLocais, onErro, aguaPotavel,
   cloroUnidade = UNIDADE_CLORO_PADRAO, cloroLimiteAviso, periodoExecucao,
 }: {
   inspecaoId: string;
@@ -110,6 +110,9 @@ export default function ColetaFotosExecucao({
   onMudar?: (r: RegistroFotosExecucao) => void;
   /** Sem card nem título próprios (a SecaoRecolhivel já os dá). */
   embutido?: boolean;
+  /** Widget "Pendências de campo": mostra só as vagas que faltam (sem as
+   *  caixinhas de seção nem o texto de ajuda). */
+  somentePendentes?: boolean;
   /** Fotos na fila offline deste aparelho e envios em andamento. */
   onLocais?: (n: { fila: number; enviando: number }) => void;
   /** Avisa a página do erro, para ela abrir a seção recolhida. */
@@ -409,6 +412,7 @@ export default function ColetaFotosExecucao({
     const feitos = daSecao.filter((i) => i.completo).length;
     const guardadas = secao.slots.reduce((s, sl) => s + fotosDoSlot(registro, sl.id).length, 0);
     const ok = (id: string) => !!daSecao.find((i) => i.id === id)?.completo;
+    if (somentePendentes && (!exigida || feitos === daSecao.length)) return null;
     return (
       <div key={secao.id} style={{ borderTop: "1px solid var(--borda)", paddingTop: 12, marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -416,7 +420,7 @@ export default function ColetaFotosExecucao({
           {exigida && <Selo ok={feitos === daSecao.length} texto={`${feitos} de ${daSecao.length}`} />}
         </div>
         {secao.descricao && <p className="detalhe" style={{ margin: "2px 0 0" }}>{secao.descricao}</p>}
-        {secao.flag && (
+        {secao.flag && !somentePendentes && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13,
             cursor: podeEditar ? "pointer" : "default" }}>
             <input type="checkbox" style={{ width: 18, height: 18 }} checked={exigida} disabled={!podeEditar}
@@ -424,7 +428,7 @@ export default function ColetaFotosExecucao({
             <span>Necessário (água potável)</span>
           </label>
         )}
-        {secao.flag && aguaPotavel && !exigida && (
+        {secao.flag && aguaPotavel && !exigida && !somentePendentes && (
           <p className="val-msg val-aviso aviso-plano" style={{ margin: "6px 0 0" }}>
             ⚠️ O procedimento desta OS é de água potável, mas {secao.id === "robo_higienizacao" ? "a higienização do robô está desmarcada — as fotos" : "esta coleta está desmarcada — as fotos e análises"} não serão cobradas nem entram no relatório.
           </p>
@@ -436,7 +440,7 @@ export default function ColetaFotosExecucao({
           </p>
         ) : (
           <>
-            {secao.id === "limpeza" && (
+            {secao.id === "limpeza" && !(somentePendentes && registro?.limpeza_confirmada) && (
               <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, fontSize: 13,
                 cursor: podeEditar ? "pointer" : "default" }}>
                 <input type="checkbox" style={{ width: 18, height: 18, marginTop: 1 }} checked={!!registro?.limpeza_confirmada}
@@ -446,7 +450,10 @@ export default function ColetaFotosExecucao({
             )}
             {secao.id === "limpeza" && <MensagensCampo r={validacao} campo="limpeza_confirmada" />}
             {secao.id === "agua_depois" && <MensagensCampo r={validacao} campo="agua_depois" />}
-            {gruposDaSecao(secao).map((g) => {
+            {gruposDaSecao(secao)
+              .map((g) => somentePendentes ? { ...g, slots: g.slots.filter((s) => !ok(s.id)) } : g)
+              .filter((g) => g.slots.length > 0)
+              .map((g) => {
               const feitosGrupo = g.slots.filter((s) => ok(s.id)).length;
               return (
                 <div key={g.titulo || "geral"} style={{ marginTop: g.titulo ? 14 : 10 }}>
@@ -486,10 +493,12 @@ export default function ColetaFotosExecucao({
         {!embutido && <h3 style={{ margin: 0 }}>Coleta de fotos da execução</h3>}
         {registro && <Selo ok={total > 0 && feitos === total} texto={`${feitos} de ${total} itens`} />}
       </div>
-      <p className="detalhe" style={{ marginTop: 6 }}>
-        Fotos de campo que entram sozinhas no Relatório de Execução. Item faltando não impede de
-        avançar — o sistema só avisa.
-      </p>
+      {!somentePendentes && (
+        <p className="detalhe" style={{ marginTop: 6 }}>
+          Fotos de campo que entram sozinhas no Relatório de Execução. Item faltando não impede de
+          avançar — o sistema só avisa.
+        </p>
+      )}
       {podeEditar && toque && (
         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" style={{ width: 18, height: 18, marginTop: 1 }} checked={salvarCopia}
@@ -511,7 +520,9 @@ export default function ColetaFotosExecucao({
         </p>
       )}
       {!registro ? <p className="vazio" style={{ margin: "8px 0 0" }}>Carregando…</p>
-        : SECOES_FOTOS.map((s) => Secao(s, situacao))}
+        : somentePendentes && total > 0 && feitos === total
+          ? <p className="detalhe" style={{ margin: "8px 0 0", color: "var(--sucesso)" }}>✓ Fotos completas.</p>
+          : SECOES_FOTOS.map((s) => Secao(s, situacao))}
     </div>
   );
 }

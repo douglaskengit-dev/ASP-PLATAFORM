@@ -3,7 +3,7 @@
  * - GET /api/*: network-first com fallback de cache (leitura offline do que
  *   já foi carregado). NUNCA intercepta POST/PATCH/DELETE (as escritas offline
  *   são tratadas pela fila em IndexedDB — lib/pwa). */
-const CACHE = "asp-v4";
+const CACHE = "asp-v5";
 const API_CACHE = "asp-api-v3"; // mantido: trocar apagaria os dados offline já baixados
 
 /* Arquivos com nome FIXO (o conteúdo muda, o endereço não): o modelo do
@@ -107,12 +107,19 @@ self.addEventListener("push", (event) => {
     badge: SELO_NOTIFICACAO,
     data: { link: data.link || "/dashboard" },
     tag: data.tag || undefined,
+    // botões (Android/desktop): pendências de campo → "Não avisar mais hoje"
+    actions: Array.isArray(data.acoes) ? data.acoes.map((a) => ({ action: a.acao, title: a.titulo })) : undefined,
   };
   event.waitUntil(self.registration.showNotification(titulo, opcoes));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  // "Não avisar mais hoje": grava sem abrir o app (cookie da sessão vai junto).
+  if (event.action === "silenciar-pendencias") {
+    event.waitUntil(fetch("/api/pendencias-campo/silenciar", { method: "POST", credentials: "include" }).catch(() => {}));
+    return;
+  }
   const link = (event.notification.data && event.notification.data.link) || "/dashboard";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cli) => {
