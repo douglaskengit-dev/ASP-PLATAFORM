@@ -340,6 +340,72 @@ function comEntrelinhaAbnt(p: string): string {
 }
 
 /**
+ * Subtópico sem conteúdo não sai no documento. Ex.: "11.2 Imagens antes da
+ * limpeza:" cujas vagas ficaram todas sem foto — as vagas somem, mas o
+ * subtítulo ficava sozinho. Sai o subtítulo (e os parágrafos vazios dele) e
+ * os seguintes da mesma seção são renumerados (11.3 → 11.2).
+ *
+ * Só reconhece como subtítulo o "N.M …" curto cujo N é a seção corrente e M
+ * o próximo da sequência — um parágrafo de texto que comece com "10.5 m³"
+ * não confunde. Parágrafo com quebra de seção (<w:sectPr>) nunca é removido.
+ */
+function removerSubtopicosVazios(body: string): string {
+  const blocos = separarBlocos(body);
+  const ehConteudo = (b: { xml: string; texto: string }) =>
+    !!b.texto.trim() || /<w:drawing\b|<w:pict\b|<w:object\b/.test(b.xml);
+  type Sub = { k: number; maior: number; menor: number };
+  const subs: Sub[] = [];
+  let secao = 0, proximoMenor = 1;
+  blocos.forEach((b, k) => {
+    if (!b.xml.startsWith("<w:p")) return;
+    const t = b.texto.trim();
+    if (t.length > 100) return;
+    const n = numeroTopico(t);
+    if (n !== null && /:$/.test(t) && n === secao + 1) { secao = n; proximoMenor = 1; return; }
+    const m = /^(\d{1,2})\.(\d{1,2})\.?\s+\S/.exec(t);
+    if (m && Number(m[1]) === secao && Number(m[2]) === proximoMenor) {
+      subs.push({ k, maior: secao, menor: proximoMenor });
+      proximoMenor++;
+    }
+  });
+  if (subs.length === 0) return body;
+
+  const remover = new Set<number>();
+  const renumerar = new Map<number, { de: string; para: string }>();
+  const novoMenor = new Map<number, number>();   // por seção
+  subs.forEach((s) => {
+    // vai até o próximo título (subtópico ou seção)
+    let fim = s.k + 1;
+    while (fim < blocos.length) {
+      const t = blocos[fim].texto.trim();
+      if (subs.some((o) => o.k === fim)) break;
+      if (t.length <= 100 && numeroTopico(t) !== null && /:$/.test(t)) break;
+      fim++;
+    }
+    const corpo = blocos.slice(s.k + 1, fim);
+    if (!corpo.some(ehConteudo)) {
+      remover.add(s.k);
+      corpo.forEach((_, i) => { if (!/<w:sectPr\b/.test(blocos[s.k + 1 + i].xml)) remover.add(s.k + 1 + i); });
+      return;
+    }
+    const para = (novoMenor.get(s.maior) ?? 0) + 1;
+    novoMenor.set(s.maior, para);
+    if (para !== s.menor) renumerar.set(s.k, { de: `${s.maior}.${s.menor}`, para: `${s.maior}.${para}` });
+  });
+  if (remover.size === 0) return body;
+
+  let saida = "", ultimo = 0;
+  blocos.forEach((b, k) => {
+    saida += body.slice(ultimo, b.ini);
+    ultimo = b.fim;
+    if (remover.has(k)) return;
+    const r = renumerar.get(k);
+    saida += r ? trocarTexto(b.xml, r.de, r.para) : b.xml;
+  });
+  return saida + body.slice(ultimo);
+}
+
+/**
  * Acabamento do corpo, para qualquer modelo:
  *  - título de seção/subtítulo não fica sozinho no pé da página: ganha
  *    keepNext, e os parágrafos VAZIOS logo abaixo dele também — senão a
@@ -1016,7 +1082,8 @@ function tituloSubtopico(numero: string, titulo: string): string {
   return '<w:p><w:pPr><w:keepNext/><w:spacing w:before="180" w:after="60" w:line="240" w:lineRule="auto"/>' +
     '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr></w:pPr>' +
     '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/></w:rPr>' +
-    `<w:t xml:space="preserve">${esc(numero)} ${esc(titulo)}</w:t></w:r></w:p>`;
+    // "9.1 Imagens das coletas:" — com dois-pontos, como os do modelo.
+    `<w:t xml:space="preserve">${esc(numero)} ${esc(titulo.replace(/[:.]\s*$/, ""))}:</w:t></w:r></w:p>`;
 }
 
 /** Parágrafo vazio de respiro entre fichas. */
@@ -2051,7 +2118,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   let nFig = 0;
   saida = saida.split(MARCA_FIG).reduce((acc, parte, i) =>
     i === 0 ? parte : acc + String(++nFig) + parte, "");
-  saida = acabamentoDoCorpo(saida);
+  saida = acabamentoDoCorpo(removerSubtopicosVazios(saida));
 
   xml = xml.slice(0, iniBody) + saida + xml.slice(fimBody);
   zip.file("word/document.xml", xml);
