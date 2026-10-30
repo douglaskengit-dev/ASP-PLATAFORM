@@ -75,6 +75,18 @@ function celula(tok: string): string {
   return menor + n.replace(".", ",");
 }
 
+/** Uma célula já separada (vinda da leitura por IA) no formato do sistema:
+ *  "2.60" → "2,60", "< 1 UFC/mL" → "<1", "Presença P-A/100ml" → "Presente",
+ *  "Ausência em 100 mL" → "Ausente". Vazio fica vazio; mais de um valor na
+ *  mesma célula (ou nada reconhecível) → null, para a linha ficar em branco. */
+export function celulaLida(texto: string | null | undefined): string | null {
+  let t = (texto || "").trim();
+  if (!t) return "";
+  for (const r of RUIDO) t = t.replace(r, " ");
+  const toks = t.match(TOKEN) || [];
+  return toks.length === 1 ? celula(toks[0]) : null;
+}
+
 const num = (s?: string) => {
   const n = s ? Number(s.replace(",", ".")) : NaN;
   return isFinite(n) ? n : undefined;
