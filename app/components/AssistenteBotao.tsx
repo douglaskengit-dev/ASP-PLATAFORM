@@ -1,12 +1,13 @@
 "use client";
 
-/** Botão 🤖 no header — abre o Assistente da plataforma: tira dúvidas de uso
+/** Botão do Robô ASP no header — abre o Assistente da plataforma: tira dúvidas de uso
  * (manual) e responde sobre clientes, projetos e OS consultando o banco com
  * o acesso de quem pergunta (só leitura; ver app/api/assistente). A conversa
  * fica só nesta aba (sessionStorage). */
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Modal from "./Modal";
+import RoboAssistente from "./RoboAssistente";
 
 interface Mensagem { papel: "usuario" | "assistente"; texto: string }
 
@@ -24,6 +25,7 @@ export default function AssistenteBotao() {
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [acenando, setAcenando] = useState(false);
   const fimRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,6 +62,12 @@ export default function AssistenteBotao() {
     }
   }
 
+  function abrir() {
+    setAberto(true);
+    setAcenando(true);
+    setTimeout(() => setAcenando(false), 1100);
+  }
+
   function abrirLink(href: string) {
     setAberto(false);
     router.push(href);
@@ -67,17 +75,22 @@ export default function AssistenteBotao() {
 
   return (
     <>
-      <button onClick={() => setAberto(true)} title="Assistente: dúvidas sobre o sistema e os projetos"
-        aria-label="Abrir o assistente" type="button" className="barra-icone">
-        🤖
+      <button onClick={abrir} title="Assistente: dúvidas sobre o sistema e os projetos"
+        aria-label="Abrir o assistente" type="button" className="barra-icone" style={{ padding: "0 4px" }}>
+        <RoboAssistente largura={28} modo="cabeca" />
       </button>
 
       {aberto && (
-        <Modal titulo="🤖 Assistente ASP" onFechar={() => setAberto(false)}>
+        <Modal titulo="Assistente ASP" onFechar={() => setAberto(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 300 }}>
-            <p className="detalhe" style={{ margin: 0 }}>
-              Pergunte como usar a plataforma ou sobre clientes, projetos e OS. Ele só consulta — não altera nada — e vê apenas o que você pode ver.
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <RoboAssistente largura={mensagens.length ? 52 : 78} estado={enviando ? "pensando" : acenando ? "acenando" : "parado"}
+                rotulo="Robô ASP, o assistente" />
+              <p className="detalhe" style={{ margin: 0 }}>
+                {mensagens.length ? "" : <><strong>Olá! Sou o Robô ASP.</strong><br /></>}
+                Pergunte como usar a plataforma ou sobre clientes, projetos e OS. Eu só consulto — não altero nada — e vejo apenas o que você pode ver.
+              </p>
+            </div>
 
             <div style={{ maxHeight: "55vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
               {!mensagens.length && (
@@ -96,7 +109,11 @@ export default function AssistenteBotao() {
                   {m.papel === "usuario" ? m.texto : <TextoFormatado texto={m.texto} onLink={abrirLink} />}
                 </div>
               ))}
-              {enviando && <span className="detalhe">Consultando…</span>}
+              {enviando && (
+                <span className="detalhe" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span className="assistente-digitando" aria-hidden="true"><i /><i /><i /></span> Consultando…
+                </span>
+              )}
               <div ref={fimRef} />
             </div>
 

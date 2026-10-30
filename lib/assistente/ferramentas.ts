@@ -78,7 +78,7 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
 ];
 
 const tituloFase = (n: number) => (n === 1 ? "Abertura do projeto" : FASES.find((f) => f.numero === n)?.titulo || `Fase ${n}`);
-const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const contem = (alvo: unknown[], texto?: string) =>
   !texto || alvo.some((v) => typeof v === "string" && semAcento(v).includes(semAcento(texto)));
 const semHtml = (s: unknown) =>
