@@ -212,6 +212,11 @@ export default function GerarRelatorio({
   const [doPdf, setDoPdf] = useState<Partial<Record<ChaveLaudo, { nome: string; laudo: LaudoLido }>>>({});
   const [msgPdf, setMsgPdf] = useState<Partial<Record<ChaveLaudo, { ok?: string; erro?: string; avisos: string[] }>>>({});
   const [lendoPdf, setLendoPdf] = useState<ChaveLaudo | null>(null);
+  /** Último texto da Conclusão das Análises escrito pelo sistema: enquanto o
+   *  campo tiver exatamente ele, uma nova leitura de laudo pode atualizá-lo;
+   *  texto mexido pelo usuário nunca é sobrescrito. */
+  const conclusaoAuto = useRef<string | null>(null);
+  const [sugestaoNova, setSugestaoNova] = useState(false);
   const [enviandoLaudo, setEnviandoLaudo] = useState(false);
   const [msgLaudo, setMsgLaudo] = useState<Partial<Record<QualLaudo, string>>>({});
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
@@ -1422,6 +1427,7 @@ export default function GerarRelatorio({
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok || !j.laudo) throw new Error(j.erro || "Não foi possível ler o laudo.");
       const x = j.laudo as LaudoLido;
+      const porIA = j.origem === "ia";
       const antes = chave === "laudoAntes";
       setD((v) => {
         // Valor, Incerteza, LQ e LD vêm do laudo lido (em branco se ele não
@@ -1430,7 +1436,17 @@ export default function GerarRelatorio({
         const atual = gradeLaudo(v[chave] as string[][] | undefined);
         const nova = atual.map((linha, i) => linha.map((c, k) =>
           k === COL_LIMITE ? (x.grade[i]?.[k] || c) : (x.grade[i]?.[k] ?? "")));
-        return { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
+        const nv = { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
+        // Conclusão das Análises pré-preenchida (frases prontas, por regras):
+        // campo vazio, ou ainda com o texto que o próprio sistema escreveu.
+        const sug = sugestaoConclusaoAnalises(nv, unidadeCloro);
+        const atualTxt = v.conclusaoAnalises || "";
+        if (sug && (!temTexto(atualTxt) || atualTxt === conclusaoAuto.current)) {
+          conclusaoAuto.current = sug;
+          return { ...nv, conclusaoAnalises: sug };
+        }
+        if (sug && sug !== atualTxt) setSugestaoNova(true);
+        return nv;
       });
       setDoPdf((p) => ({ ...p, [chave]: { nome: f.name, laudo: x } }));
       const avisos: string[] = [];
@@ -1449,7 +1465,9 @@ export default function GerarRelatorio({
       const [dA, dD] = antes ? [x.dataColeta, outro?.dataColeta] : [outro?.dataColeta, x.dataColeta];
       if (dA && dD && dA > dD) avisos.push("A coleta do laudo de ANTES é posterior à do laudo de APÓS — os PDFs podem estar trocados.");
       setMsgPdf((m) => ({ ...m, [chave]: {
-        ok: `Preenchido pelo laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. As células em azul vieram do PDF — revise antes de gerar.`,
+        ok: porIA
+          ? `PDF em imagem lido pela IA — laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. Confira cada célula em azul com o laudo antes de gerar.`
+          : `Preenchido pelo laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. As células em azul vieram do PDF — revise antes de gerar.`,
         avisos,
       } }));
     } catch (e) {
@@ -1503,12 +1521,24 @@ export default function GerarRelatorio({
             onClick={() => {
               const s = sugestaoConclusaoAnalises(d, unidadeCloro);
               if (!s) { alert("Preencha cloro e/ou o laudo em “Valores das coletas e do laudo” para sugerir o texto."); return; }
-              if (d.conclusaoAnalises?.trim() && !confirm("Substituir o texto atual pela sugestão?")) return;
+              if (d.conclusaoAnalises?.trim() && d.conclusaoAnalises !== conclusaoAuto.current && !confirm("Substituir o texto atual pela sugestão?")) return;
+              conclusaoAuto.current = s;
+              setSugestaoNova(false);
               setD((v) => ({ ...v, conclusaoAnalises: s }));
             }}>
             Sugerir texto
           </button>
         </div>
+        {d.conclusaoAnalises && d.conclusaoAnalises === conclusaoAuto.current && (
+          <span className="detalhe" style={{ display: "block", margin: "0 0 4px" }}>
+            ✍ Preenchida automaticamente pelos valores dos laudos, do pH e do cloro — revise e ajuste antes de gerar.
+          </span>
+        )}
+        {sugestaoNova && (
+          <span className="val-msg val-aviso" style={{ display: "block", margin: "0 0 4px" }}>
+            ⚠️ Os laudos mudaram e há uma sugestão nova — o seu texto foi mantido. Use “Sugerir texto” para ver.
+          </span>
+        )}
         <EditorTexto valor={d.conclusaoAnalises || ""} altura={90}
           onChange={(v) => setD((x) => ({ ...x, conclusaoAnalises: v }))} />
       </div>
