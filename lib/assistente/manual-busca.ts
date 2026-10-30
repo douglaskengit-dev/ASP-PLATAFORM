@@ -10,7 +10,7 @@ const VAZIAS = new Set(("a o e é de da do das dos em no na nos nas um uma uns u
   "quando onde ao aos à às ou mais menos ser foi são está estão tem ter meu minha sua seu isso esse essa este esta " +
   "não sim já pelo pela posso faço fazer como").split(" "));
 
-const normalizar = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+export const normalizar = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const palavrasDe = (s: string) =>
   normalizar(s).split(/[^a-z0-9]+/).filter((p) => p.length > 2 && !VAZIAS.has(p)).map((p) => p.slice(0, 6));  // radical curto: "agendar" ~ "agendamento"
 

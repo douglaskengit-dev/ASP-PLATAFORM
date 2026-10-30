@@ -13,7 +13,8 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import RoboAssistente from "./RoboAssistente";
 
-interface Mensagem { papel: "usuario" | "assistente"; texto: string }
+/** foraDoEscopo: recusa padrão do servidor (mostra as sugestões de novo). */
+interface Mensagem { papel: "usuario" | "assistente"; texto: string; foraDoEscopo?: boolean }
 
 const CHAVE = "assistente-conversa";
 const CHAVE_OCULTO = "assistente-robo-oculto";
@@ -22,6 +23,16 @@ const SUGESTOES = [
   "Quais OS estão aguardando aprovação de relatório?",
   "O que está agendado para esta semana?",
 ];
+
+function Sugestoes({ onEscolher }: { onEscolher: (s: string) => void }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {SUGESTOES.map((s) => (
+        <button key={s} type="button" className="btn-doc" onClick={() => onEscolher(s)}>{s}</button>
+      ))}
+    </div>
+  );
+}
 
 export default function AssistenteBotao() {
   const router = useRouter();
@@ -90,11 +101,11 @@ export default function AssistenteBotao() {
     try {
       const resp = await fetch("/api/assistente", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mensagens: nova }),
+        body: JSON.stringify({ mensagens: nova.map(({ papel, texto }) => ({ papel, texto })) }),
       });
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok || typeof j.resposta !== "string") throw new Error(j.erro || "O assistente não respondeu.");
-      setMensagens((m) => [...m, { papel: "assistente", texto: j.resposta }]);
+      setMensagens((m) => [...m, { papel: "assistente", texto: j.resposta, ...(j.fora_do_escopo ? { foraDoEscopo: true } : {}) }]);
     } catch (e: any) {
       setErro(e.message || "Falha ao consultar o assistente.");
     } finally {
@@ -124,11 +135,7 @@ export default function AssistenteBotao() {
             <p className="detalhe" style={{ margin: 0 }}>
               <strong>Olá! Sou o Robô ASP.</strong> Pergunte como usar a plataforma ou sobre clientes, projetos e OS. Eu só consulto — não altero nada — e vejo apenas o que você pode ver.
             </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {SUGESTOES.map((s) => (
-                <button key={s} type="button" className="btn-doc" onClick={() => perguntar(s)}>{s}</button>
-              ))}
-            </div>
+            <Sugestoes onEscolher={perguntar} />
           </>
         )}
         {mensagens.map((m, i) => (
@@ -140,6 +147,7 @@ export default function AssistenteBotao() {
             {m.papel === "usuario" ? m.texto : <TextoFormatado texto={m.texto} onLink={abrirLink} />}
           </div>
         ))}
+        {!enviando && mensagens[mensagens.length - 1]?.foraDoEscopo && <Sugestoes onEscolher={perguntar} />}
         {enviando && (
           <span className="detalhe" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
             <span className="assistente-digitando" aria-hidden="true"><i /><i /><i /></span> Consultando…

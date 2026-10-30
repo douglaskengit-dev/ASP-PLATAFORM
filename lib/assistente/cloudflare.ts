@@ -28,14 +28,55 @@ function entradaDe(c: ChamadaCf): Record<string, unknown> {
   return (a && typeof a === "object" ? a : {}) as Record<string, unknown>;
 }
 
-/** Alguns modelos escrevem a chamada como JSON no texto em vez de tool_calls. */
-function chamadaNoTexto(texto: string): ChamadaCf | null {
+/** Distância de edição: o modelo às vezes erra o nome ("bustar_projetos"). */
+function distancia(a: string, b: string): number {
+  let ant = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const atual = [i];
+    for (let j = 1; j <= b.length; j++) atual[j] = Math.min(ant[j] + 1, atual[j - 1] + 1, ant[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    ant = atual;
+  }
+  return ant[b.length];
+}
+
+/** Nome de ferramenta válido mais próximo (até 2 letras de diferença). */
+function nomeValido(nome: string): string | null {
+  if (NOMES.has(nome)) return nome;
+  let melhor: string | null = null, menor = 3;
+  for (const n of NOMES) { const d = distancia(nome, n); if (d < menor) { menor = d; melhor = n; } }
+  return melhor;
+}
+
+function valorDe(v: string): unknown {
+  if (/^["']/.test(v)) return v.slice(1, -1);
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  if (/^(true|false)$/i.test(v)) return v.toLowerCase() === "true";
+  return v === "null" || v === "None" ? null : v;
+}
+
+/** Chamadas escritas no texto em vez de tool_calls: JSON {"name", "arguments"}
+ *  ou o formato do Llama [buscar_projetos(texto="Rhodia"), agenda(de="…")].
+ *  Esse texto nunca vai para o usuário: a consulta roda e o modelo responde. */
+function chamadasNoTexto(texto: string): ChamadaCf[] {
   const t = texto.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
-  if (!t.startsWith("{")) return null;
-  try {
-    const j = JSON.parse(t);
-    return j && typeof j.name === "string" && NOMES.has(j.name) ? j : null;
-  } catch { return null; }
+  if (t.startsWith("{")) {
+    try {
+      const j = JSON.parse(t);
+      const nome = j && typeof j.name === "string" ? nomeValido(j.name) : null;
+      if (nome) return [{ ...j, name: nome }];
+    } catch {}
+  }
+  const chamadas: ChamadaCf[] = [];
+  for (const m of t.matchAll(/\b([a-z_]{4,})\(([^()]*)\)/g)) {
+    const nome = nomeValido(m[1]);
+    if (!nome) continue;
+    const args: Record<string, unknown> = {};
+    for (const a of m[2].matchAll(/(\w+)\s*[=:]\s*("[^"]*"|'[^']*'|[^,\s)]+)/g)) args[a[1]] = valorDe(a[2]);
+    chamadas.push({ name: nome, arguments: args });
+  }
+  // "[bustar_x(...)] ... usarei: [buscar_x(...)]" vira uma consulta só
+  const vistas = new Set<string>();
+  return chamadas.filter((c) => { const k = JSON.stringify(c); return !vistas.has(k) && !!vistas.add(k); });
 }
 
 async function rodar(modelo: string, mensagens: MensagemCf[]): Promise<{ texto: string; chamadas: ChamadaCf[] }> {
@@ -67,17 +108,22 @@ export async function responderCloudflare({ historico, contexto, executar }: Ped
   const pergunta = historico[historico.length - 1].texto;
   const mensagens: MensagemCf[] = [
     { role: "system", content: `${INSTRUCOES_ASSISTENTE}\n\n${contexto}\n\n=== TRECHOS DO MANUAL DO USUÁRIO ===\n${trechosDoManual(pergunta)}` },
-    ...historico.map((m): MensagemCf => ({ role: m.papel === "usuario" ? "user" : "assistant", content: m.texto })),
+    // resposta antiga com chamada vazada no texto não serve de exemplo ao modelo
+    ...historico.map((m): MensagemCf => ({
+      role: m.papel === "usuario" ? "user" : "assistant",
+      content: m.papel === "assistente" && chamadasNoTexto(m.texto).length ? "(consulta feita)" : m.texto,
+    })),
   ];
   for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
     const { texto, chamadas } = await rodar(modelo, mensagens);
-    const pedidas = chamadas.length ? chamadas : [chamadaNoTexto(texto)].filter((c): c is ChamadaCf => !!c);
+    const pedidas = chamadas.length ? chamadas : chamadasNoTexto(texto);
     if (!pedidas.length) return texto.trim() || "Não consegui montar uma resposta. Tente reformular a pergunta.";
     for (const c of pedidas) {
       const entrada = entradaDe(c);
-      const r = NOMES.has(c.name) ? await executar(c.name, entrada) : { conteudo: `Ferramenta desconhecida: ${c.name}`, erro: true };
-      mensagens.push({ role: "assistant", content: JSON.stringify({ name: c.name, arguments: entrada }) });
-      mensagens.push({ role: "tool", name: c.name, content: r.conteudo.slice(0, MAX_RESULTADO) });
+      const nome = nomeValido(c.name) || c.name;
+      const r = NOMES.has(nome) ? await executar(nome, entrada) : { conteudo: `Ferramenta desconhecida: ${c.name}`, erro: true };
+      mensagens.push({ role: "assistant", content: JSON.stringify({ name: nome, arguments: entrada }) });
+      mensagens.push({ role: "tool", name: nome, content: r.conteudo.slice(0, MAX_RESULTADO) });
     }
   }
   return MSG_RODADAS;

@@ -4,6 +4,7 @@ import { executarFerramenta } from "@/lib/assistente/ferramentas";
 import { contextoDaSessao } from "@/lib/assistente/prompt";
 import { responderCloudflare } from "@/lib/assistente/cloudflare";
 import { responderClaude } from "@/lib/assistente/claude";
+import { finalizarResposta, foraDoEscopoObvio, MSG_FORA_DO_ESCOPO } from "@/lib/assistente/escopo";
 import { ErroAssistente, type ExecutarFerramenta, type MensagemChat } from "@/lib/assistente/tipos";
 
 export const runtime = "nodejs";
@@ -30,6 +31,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: "Envie uma pergunta." }, { status: 400 });
   }
 
+  // assunto claramente alheio à ASP: recusa sem gastar a cota da IA
+  if (foraDoEscopoObvio(historico[historico.length - 1].texto)) {
+    return NextResponse.json({ resposta: MSG_FORA_DO_ESCOPO, fora_do_escopo: true });
+  }
+
   const sb = getSupabaseRouteClient();
   const executar: ExecutarFerramenta = async (nome, entrada) => {
     try {
@@ -44,7 +50,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const resposta = process.env.ASSISTENTE_PROVEDOR === "anthropic" ? await responderClaude(pedido) : await responderCloudflare(pedido);
-    return NextResponse.json({ resposta });
+    return NextResponse.json(finalizarResposta(resposta));
   } catch (e) {
     if (e instanceof ErroAssistente) return NextResponse.json({ erro: e.message }, { status: e.status });
     console.error("assistente:", e);
