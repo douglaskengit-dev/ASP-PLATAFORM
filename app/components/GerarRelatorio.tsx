@@ -27,7 +27,7 @@ import type { LaudoLido } from "@/lib/asp/laudo-leitura";
 import {
   gerarRelatorioDocx, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
   TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada, numeroDaSecao,
-  type DadosRelatorio, type ImagemRelatorio, type VagaImagem,
+  type DadosRelatorio, type ImagemRelatorio, type TabelaAnalise, type VagaImagem,
 } from "@/lib/asp/relatorio";
 import {
   pendenciasColeta, planejarFotosNoRelatorio, valorDoSlot, cloroDoProcedimento, fotosDoSlot, SECOES_FOTOS,
@@ -42,7 +42,7 @@ import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
   atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
-  CAMPOS_PH_CLORO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
+  CAMPOS_PH_CLORO, CLORO_MAXIMO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
@@ -171,6 +171,33 @@ function mesmoTexto(a: string | null | undefined, b: string | null | undefined):
     .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
     .replace(/\s+/g, " ").trim();
   return plano(a) === plano(b);
+}
+
+/** Tabelas da seção de análise no documento: valores medidos em campo (pH e
+ *  cloro, antes/após, com a referência) e amostras enviadas ao laboratório.
+ *  Tabela sem nenhum valor não entra. */
+function tabelasDaAnalise(d: Partial<DadosRelatorio>, unidade: string): TabelaAnalise[] {
+  const out: TabelaAnalise[] = [];
+  const num = (s?: string) => { const n = lerValorMedido(s); return n === null ? "" : textoNumeroBr(n); };
+  const campo = [
+    ["pH", num(d.phAntes), num(d.phDepois), "6,0 a 9,0"],
+    [`Cloro residual livre (${unidade})`, num(d.cloroAntes), num(d.cloroDepois), `0,2 a ${textoNumeroBr(CLORO_MAXIMO)}`],
+  ].filter((l) => l[1] || l[2]);
+  if (campo.length) out.push({
+    titulo: "Valores medidos em campo:",
+    cabecalho: ["Parâmetro", "Antes da limpeza", "Após a limpeza", "Referência (Portaria GM/MS nº 888/2021)"],
+    linhas: campo, larguras: [2470, 1900, 1900, 2800],
+  });
+  const amostras = [
+    ["Antes da limpeza", d.amostraAntes || "", isoParaBr(d.dataColetaAntes || "") || "", d.pontoColetaAntes || ""],
+    ["Após a limpeza", d.amostraDepois || "", isoParaBr(d.dataColetaDepois || "") || "", d.pontoColetaDepois || ""],
+  ].filter((l) => l[1] || l[2] || l[3]);
+  if (amostras.length) out.push({
+    titulo: "Amostras enviadas ao laboratório:",
+    cabecalho: ["Amostra", "Nº do relatório de ensaio", "Data da coleta", "Ponto de coleta"],
+    linhas: amostras, larguras: [2070, 2500, 1700, 2800],
+  });
+  return out;
 }
 
 /** Os dois laudos do laboratório e a grade de valores de cada um. */
@@ -1048,6 +1075,29 @@ export default function GerarRelatorio({
         if (linha[COL_VALOR] === "<LQ" && lq.tipo === "numero") linha[COL_VALOR] = `<${linha[COL_LQ]}`;
         return linha;
       }) : undefined);
+      // Prints dos laudos: cada página do PDF anexado vira figura num
+      // subtópico "Laudos do laboratório", no fim da seção de análise.
+      if (execucao && limpeza && !d.semPrintsLaudo && N.analise !== undefined && ativo(N.analise)) {
+        for (const [l, quando, amostra] of [[laudoPdf, "antes da limpeza", d.amostraAntes], [laudoPdfDepois, "após a limpeza", d.amostraDepois]] as const) {
+          if (!l?.caminho) continue;
+          const resp = await fetch("/api/laudo/paginas", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ inspecaoId, caminho: l.caminho }),
+          });
+          const j = await resp.json().catch(() => ({}));
+          if (!resp.ok || !Array.isArray(j.paginas)) throw new Error(j.erro || "Não foi possível incluir as páginas do laudo.");
+          (j.paginas as string[]).forEach((b64, k, todas) => {
+            const bin = atob(b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            imgs.push({
+              dados: bytes.buffer, extensao: "png", larguraCm: 16, alturaMaxCm: 21,
+              legenda: `Laudo do laboratório — amostra ${quando}${amostra ? ` (Relatório de Ensaio ${amostra})` : ""}${todas.length > 1 ? `, página ${k + 1} de ${todas.length}` : ""}.`,
+              topico: N.analise!, ancora: "sub:Laudos do laboratório",
+            });
+          });
+        }
+      }
       // O PDF do laudo é um arquivo à parte; o tópico Anexos (se o modelo
       // tiver) só o cita.
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -1084,6 +1134,7 @@ export default function GerarRelatorio({
         alturaSedimento: d.alturaSedimento,
         laudoAntes: laudoDoc(d.laudoAntes), laudoDepois: laudoDoc(d.laudoDepois),
         amostraAntes: d.amostraAntes, amostraDepois: d.amostraDepois, conclusaoAnalises: d.conclusaoAnalises,
+        tabelasAnalise: limpeza ? tabelasDaAnalise(d, unidadeCloro) : undefined,
         equipamentoTanque: d.equipamentoTanque, capacidadeTanque: d.capacidadeTanque,
         volumeMin: d.volumeMin, volumeMax: d.volumeMax,
         metodos: d.metodos, equipamentos: d.equipamentos,
@@ -1449,7 +1500,12 @@ export default function GerarRelatorio({
         const atual = gradeLaudo(v[chave] as string[][] | undefined);
         const nova = atual.map((linha, i) => linha.map((c, k) =>
           k === COL_LIMITE ? (x.grade[i]?.[k] || c) : (x.grade[i]?.[k] ?? "")));
-        return { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
+        return {
+          ...v, [chave]: nova,
+          ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}),
+          ...(x.dataColeta ? { [antes ? "dataColetaAntes" : "dataColetaDepois"]: x.dataColeta } : {}),
+          ...(x.pontoColeta ? { [antes ? "pontoColetaAntes" : "pontoColetaDepois"]: x.pontoColeta } : {}),
+        };
       });
       setDoPdf((p) => ({ ...p, [chave]: { nome: f.name, laudo: x } }));
       setLaudosLidos((n) => n + 1);   // → efeito da Conclusão das Análises
@@ -1613,6 +1669,11 @@ export default function GerarRelatorio({
             );
           })}
           {enviandoLaudo && <span className="detalhe" style={{ display: "block" }}>Conferindo e enviando o laudo…</span>}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={!d.semPrintsLaudo}
+              onChange={(e) => setD((v) => ({ ...v, semPrintsLaudo: !e.target.checked }))} />
+            Incluir as páginas dos laudos (prints) no relatório <span className="detalhe">— subtópico “Laudos do laboratório”, no fim da Análise</span>
+          </label>
         </div>
       )}
       </>
@@ -1673,10 +1734,18 @@ export default function GerarRelatorio({
           <div style={{ ...grade, marginTop: 12 }}>
             <div><label style={rotulo} htmlFor="campo-amostraAntes">Nº do relatório de ensaio — antes da limpeza</label>
               <input id="campo-amostraAntes" style={campo} value={d.amostraAntes || ""} onChange={set("amostraAntes")}
-                placeholder="ex.: 26846/2026.0.A" /></div>
+                placeholder="ex.: 26846/2026.0.A" />
+              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                <input aria-label="Data da coleta — antes" style={{ ...campo, flex: "0 0 150px" }} type="date" value={d.dataColetaAntes || ""} onChange={set("dataColetaAntes")} />
+                <input aria-label="Ponto de coleta — antes" style={campo} placeholder="Ponto de coleta" value={d.pontoColetaAntes || ""} onChange={set("pontoColetaAntes")} />
+              </div></div>
             <div><label style={rotulo} htmlFor="campo-amostraDepois">Nº do relatório de ensaio — após a limpeza</label>
               <input id="campo-amostraDepois" style={campo} value={d.amostraDepois || ""} onChange={set("amostraDepois")}
-                placeholder="ex.: 27066/2026.0.A" /></div>
+                placeholder="ex.: 27066/2026.0.A" />
+              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                <input aria-label="Data da coleta — após" style={{ ...campo, flex: "0 0 150px" }} type="date" value={d.dataColetaDepois || ""} onChange={set("dataColetaDepois")} />
+                <input aria-label="Ponto de coleta — após" style={campo} placeholder="Ponto de coleta" value={d.pontoColetaDepois || ""} onChange={set("pontoColetaDepois")} />
+              </div></div>
           </div>
           <div className="rel-sub" style={{ marginTop: 12 }}>
             <strong style={{ fontSize: 13 }}>Preencher pelos PDFs dos laudos</strong>
