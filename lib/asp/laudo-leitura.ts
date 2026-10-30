@@ -35,6 +35,8 @@ export interface LaudoLido {
   incompletos: string[];
   /** Tem cara de Relatório de Ensaio (cabeçalho + resultados analíticos). */
   ehRelatorioDeEnsaio: boolean;
+  /** Leitura por OCR: parâmetros lidos com reconhecimento duvidoso — conferir. */
+  conferir?: string[];
 }
 
 /** Nome do parâmetro como o laboratório escreve (ordem de LAUDO_PARAMETROS). */

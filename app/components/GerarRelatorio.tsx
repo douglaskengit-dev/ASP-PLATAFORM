@@ -162,6 +162,17 @@ const campoLeitura: React.CSSProperties = { ...campo, background: "var(--bg-suav
  *  também precisa dele: os números do modelo do POP 001 não significam o
  *  mesmo que os de TOPICOS_PADRAO. */
 
+/** Mesmo texto visível em dois HTML do editor (o editor reescreve a
+ *  marcação ao carregar: comparar o HTML cru dava "texto do usuário" para o
+ *  próprio texto automático). */
+function mesmoTexto(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const plano = (h: string) => h.replace(/<\/p>\s*<p[^>]*>/gi, " ").replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ").trim();
+  return plano(a) === plano(b);
+}
+
 /** Os dois laudos do laboratório e a grade de valores de cada um. */
 type QualLaudo = "antes" | "depois";
 const CHAVE_DO_LAUDO: Record<QualLaudo, ChaveLaudo> = { antes: "laudoAntes", depois: "laudoDepois" };
@@ -217,6 +228,8 @@ export default function GerarRelatorio({
    *  texto mexido pelo usuário nunca é sobrescrito. */
   const conclusaoAuto = useRef<string | null>(null);
   const [sugestaoNova, setSugestaoNova] = useState(false);
+  /** Conta as leituras de laudo: cada uma dispara o efeito da conclusão. */
+  const [laudosLidos, setLaudosLidos] = useState(0);
   const [enviandoLaudo, setEnviandoLaudo] = useState(false);
   const [msgLaudo, setMsgLaudo] = useState<Partial<Record<QualLaudo, string>>>({});
   const [visiveis, setVisiveis] = useState<Record<number, boolean>>(
@@ -1427,7 +1440,7 @@ export default function GerarRelatorio({
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok || !j.laudo) throw new Error(j.erro || "Não foi possível ler o laudo.");
       const x = j.laudo as LaudoLido;
-      const porIA = j.origem === "ia";
+      const porOcr = j.origem === "ocr";
       const antes = chave === "laudoAntes";
       setD((v) => {
         // Valor, Incerteza, LQ e LD vêm do laudo lido (em branco se ele não
@@ -1436,22 +1449,14 @@ export default function GerarRelatorio({
         const atual = gradeLaudo(v[chave] as string[][] | undefined);
         const nova = atual.map((linha, i) => linha.map((c, k) =>
           k === COL_LIMITE ? (x.grade[i]?.[k] || c) : (x.grade[i]?.[k] ?? "")));
-        const nv = { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
-        // Conclusão das Análises pré-preenchida (frases prontas, por regras):
-        // campo vazio, ou ainda com o texto que o próprio sistema escreveu.
-        const sug = sugestaoConclusaoAnalises(nv, unidadeCloro);
-        const atualTxt = v.conclusaoAnalises || "";
-        if (sug && (!temTexto(atualTxt) || atualTxt === conclusaoAuto.current)) {
-          conclusaoAuto.current = sug;
-          return { ...nv, conclusaoAnalises: sug };
-        }
-        if (sug && sug !== atualTxt) setSugestaoNova(true);
-        return nv;
+        return { ...v, [chave]: nova, ...(x.amostra ? { [antes ? "amostraAntes" : "amostraDepois"]: x.amostra } : {}) };
       });
       setDoPdf((p) => ({ ...p, [chave]: { nome: f.name, laudo: x } }));
+      setLaudosLidos((n) => n + 1);   // → efeito da Conclusão das Análises
       const avisos: string[] = [];
       if (x.incompletos.length) avisos.push(`Não foi possível ler com segurança: ${x.incompletos.join(", ")} — a linha ficou em branco; digite como está no laudo.`);
       else if (x.lidos < LAUDO_PARAMETROS.length) avisos.push(`Só ${x.lidos} de ${LAUDO_PARAMETROS.length} parâmetros foram encontrados no laudo — confira os demais.`);
+      if (x.conferir?.length) avisos.push(`OCR com leitura duvidosa em: ${x.conferir.join(", ")} — compare com o PDF.`);
       if (x.naoAtende.length) avisos.push(`O laboratório declarou que a amostra NÃO ATENDE à Portaria 888 em: ${x.naoAtende.join(", ")}.`);
       const kPh = antes ? "phAntes" : "phDepois", kCl = antes ? "cloroAntes" : "cloroDepois";
       const phInf = lerValorMedido(d[kPh]), clInf = lerValorMedido(d[kCl]);
@@ -1465,8 +1470,8 @@ export default function GerarRelatorio({
       const [dA, dD] = antes ? [x.dataColeta, outro?.dataColeta] : [outro?.dataColeta, x.dataColeta];
       if (dA && dD && dA > dD) avisos.push("A coleta do laudo de ANTES é posterior à do laudo de APÓS — os PDFs podem estar trocados.");
       setMsgPdf((m) => ({ ...m, [chave]: {
-        ok: porIA
-          ? `PDF em imagem lido pela IA — laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. Confira cada célula em azul com o laudo antes de gerar.`
+        ok: porOcr
+          ? `PDF em imagem lido por reconhecimento de texto (OCR) — laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. Confira cada célula em azul com o laudo antes de gerar.`
           : `Preenchido pelo laudo ${x.amostra || f.name}${x.dataColeta ? ` (coleta ${isoParaBr(x.dataColeta)})` : ""}. As células em azul vieram do PDF — revise antes de gerar.`,
         avisos,
       } }));
@@ -1476,6 +1481,24 @@ export default function GerarRelatorio({
       setLendoPdf(null);
     }
   }
+
+  // Conclusão das Análises pré-preenchida (frases prontas, por regras) a cada
+  // laudo lido — com o estado JÁ atualizado. Preenche se o campo está vazio
+  // ou ainda tem o texto que o próprio sistema escreveu; texto do usuário é
+  // mantido e só aparece o aviso de sugestão nova.
+  useEffect(() => {
+    if (!laudosLidos) return;
+    const sug = sugestaoConclusaoAnalises(d, unidadeCloro);
+    if (!sug) return;
+    const atual = d.conclusaoAnalises || "";
+    if (!temTexto(atual) || mesmoTexto(atual, conclusaoAuto.current)) {
+      conclusaoAuto.current = sug;
+      setSugestaoNova(false);
+      if (!mesmoTexto(atual, sug)) setD((v) => ({ ...v, conclusaoAnalises: sug }));
+    } else if (!mesmoTexto(atual, sug)) {
+      setSugestaoNova(true);
+    }
+  }, [laudosLidos]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Botão do modal de valores medidos (pH, cloro, amostras e laudo). */
   function BotaoValores(texto: string) {
@@ -1521,7 +1544,7 @@ export default function GerarRelatorio({
             onClick={() => {
               const s = sugestaoConclusaoAnalises(d, unidadeCloro);
               if (!s) { alert("Preencha cloro e/ou o laudo em “Valores das coletas e do laudo” para sugerir o texto."); return; }
-              if (d.conclusaoAnalises?.trim() && d.conclusaoAnalises !== conclusaoAuto.current && !confirm("Substituir o texto atual pela sugestão?")) return;
+              if (d.conclusaoAnalises?.trim() && !mesmoTexto(d.conclusaoAnalises, conclusaoAuto.current) && !confirm("Substituir o texto atual pela sugestão?")) return;
               conclusaoAuto.current = s;
               setSugestaoNova(false);
               setD((v) => ({ ...v, conclusaoAnalises: s }));
@@ -1529,7 +1552,7 @@ export default function GerarRelatorio({
             Sugerir texto
           </button>
         </div>
-        {d.conclusaoAnalises && d.conclusaoAnalises === conclusaoAuto.current && (
+        {d.conclusaoAnalises && mesmoTexto(d.conclusaoAnalises, conclusaoAuto.current) && (
           <span className="detalhe" style={{ display: "block", margin: "0 0 4px" }}>
             ✍ Preenchida automaticamente pelos valores dos laudos, do pH e do cloro — revise e ajuste antes de gerar.
           </span>

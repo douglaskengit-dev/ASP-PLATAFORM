@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extrairTextoPdf } from "@/lib/pdfExtract";
 import { lerLaudoTexto, MINIMO_TEXTO_LAUDO, type LaudoLido } from "@/lib/asp/laudo-leitura";
-import { iaDisponivel, lerLaudoViaIA } from "@/lib/asp/laudo-ia";
+import { lerLaudoPorOcr } from "@/lib/asp/laudo-ocr-servidor";
 import { getProfileAtual } from "@/lib/supabase/route";
 import { assinaturaArquivo } from "@/lib/validacao";
 
 // pdf-parse precisa de Node (Buffer), não Edge.
 export const runtime = "nodejs";
-// PDF em imagem é lido pela IA — pode passar dos 10 s padrão.
+// PDF em imagem passa pelo OCR (alguns segundos) — pode passar dos 10 s padrão.
 export const maxDuration = 60;
 
 /** O laudo é texto e tabela — bem abaixo disso. */
@@ -36,26 +36,20 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ erro: "Não foi possível ler o PDF. Confira se é o laudo original do laboratório." }, { status: 422 });
   }
-  // PDF sem texto (impresso como imagem ou escaneado): a IA lê a imagem.
+  // PDF sem texto (impresso como imagem ou escaneado): OCR no servidor e a
+  // mesma lógica do layout padrão — sem IA, nada sai do sistema.
   let laudo: LaudoLido;
-  let origem: "texto" | "ia" = "texto";
+  let origem: "texto" | "ocr" = "texto";
   if (texto.replace(/--\s*\d+\s+of\s+\d+\s*--/g, "").trim().length < MINIMO_TEXTO_LAUDO) {
-    if (!iaDisponivel()) {
+    try {
+      laudo = await lerLaudoPorOcr(bytes);
+      origem = "ocr";
+    } catch (e) {
+      console.error("laudo/ler — OCR:", e);
       return NextResponse.json({
-        erro: "Este PDF não tem texto — foi impresso como imagem (“Imprimir em PDF”) ou escaneado — e a leitura por IA " +
-          "não está configurada. Use o PDF original enviado pelo laboratório, ou digite os valores.",
+        erro: "Este PDF é imagem e o reconhecimento do texto (OCR) falhou. Use o PDF original enviado pelo laboratório, ou digite os valores.",
         semTexto: true,
       }, { status: 422 });
-    }
-    try {
-      laudo = await lerLaudoViaIA(bytes);
-      origem = "ia";
-    } catch (e) {
-      console.error("laudo/ler — IA:", e);
-      return NextResponse.json({
-        erro: "Este PDF é imagem e a leitura por IA falhou agora. Tente de novo em instantes, ou digite os valores.",
-        semTexto: true,
-      }, { status: 502 });
     }
   } else {
     laudo = lerLaudoTexto(texto);
