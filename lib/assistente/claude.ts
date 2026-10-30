@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { MSG_FORA_DO_ESCOPO } from "./escopo";
 import { FERRAMENTAS } from "./ferramentas";
 import { SISTEMA_ASSISTENTE } from "./prompt";
+import { nadaEncontrado, problemaNaResposta, respostaDosDados, type Consulta } from "./verificacao";
 import { ErroAssistente, MAX_RODADAS, MSG_RODADAS, type PedidoAssistente } from "./tipos";
 
 let client: Anthropic | null = null;
@@ -19,6 +20,9 @@ export async function responderClaude({ historico, contexto, executar }: PedidoA
   const mensagens: Anthropic.Beta.BetaMessageParam[] = historico.map((m) => ({
     role: m.papel === "usuario" ? "user" : "assistant", content: m.texto,
   }));
+  const pergunta = historico[historico.length - 1].texto;
+  const consultas: Consulta[] = [];
+  let corrigiu = false;
   try {
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
       const resp = await getClient().beta.messages.create({
@@ -40,18 +44,25 @@ export async function responderClaude({ historico, contexto, executar }: PedidoA
       if (resp.stop_reason === "refusal") return MSG_FORA_DO_ESCOPO;
       if (resp.stop_reason !== "tool_use") {
         const texto = resp.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
-        return texto || "Não consegui montar uma resposta. Tente reformular a pergunta.";
+        const problema = problemaNaResposta(texto, consultas, pergunta);
+        if (!problema) return texto || "Não consegui montar uma resposta. Tente reformular a pergunta.";
+        if (corrigiu || nadaEncontrado(consultas)) return respostaDosDados(consultas);
+        corrigiu = true;
+        mensagens.push({ role: "assistant", content: resp.content as Anthropic.Beta.BetaContentBlockParam[] });
+        mensagens.push({ role: "user", content: `[Conferência automática, não é o usuário] ${problema} Refaça a resposta.` });
+        continue;
       }
       // conteúdo inteiro (com blocos de raciocínio) volta para a próxima rodada
       mensagens.push({ role: "assistant", content: resp.content as Anthropic.Beta.BetaContentBlockParam[] });
       const usos = resp.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
       const resultados = await Promise.all(usos.map(async (u): Promise<Anthropic.Beta.BetaToolResultBlockParam> => {
         const r = await executar(u.name, (u.input || {}) as Record<string, unknown>);
+        consultas.push({ nome: u.name, conteudo: r.conteudo, erro: r.erro });
         return { type: "tool_result", tool_use_id: u.id, content: r.conteudo, ...(r.erro ? { is_error: true } : {}) };
       }));
       mensagens.push({ role: "user", content: resultados });
     }
-    return MSG_RODADAS;
+    return consultas.length ? respostaDosDados(consultas) : MSG_RODADAS;
   } catch (e) {
     if (e instanceof ErroAssistente) throw e;
     console.error("assistente/claude:", e);

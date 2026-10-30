@@ -82,8 +82,14 @@ const tituloFase = (n: number) => (n === 1 ? "Abertura do projeto" : FASES.find(
 /** Status do banco ("em_aprovacao") no rótulo das telas ("Em aprovação"). */
 const rotuloStatus = (s: unknown) => (typeof s === "string" ? ROTULO_STATUS_RELATORIO[s] || (s === "pendente" ? "Pendente" : s) : s);
 const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-const contem = (alvo: unknown[], texto?: string) =>
-  !texto || alvo.some((v) => typeof v === "string" && semAcento(v).includes(semAcento(texto)));
+/** Palavras que o modelo põe no filtro mas não estão nos dados ("projetos Rhodia"). */
+const GENERICAS = new Set(["projeto", "projetos", "cliente", "clientes", "os", "ordem", "servico", "inspecao", "inspecoes", "tanque", "do", "da", "de", "dos", "das", "e"]);
+/** Toda palavra do filtro tem de aparecer em algum campo. */
+const contem = (alvo: unknown[], texto?: string) => {
+  const palavras = semAcento(texto || "").split(/\s+/).filter((p) => p && !GENERICAS.has(p));
+  const campos = alvo.filter((v): v is string => typeof v === "string").map(semAcento);
+  return palavras.every((p) => campos.some((c) => c.includes(p)));
+};
 const semHtml = (s: unknown) =>
   typeof s === "string" ? s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim() : s;
 
@@ -187,7 +193,8 @@ export async function executarFerramenta(sb: SupabaseClient, nome: string, e: En
         .select("id, razao_social, tipo_ente, cnpj, cidade, uf, endereco, recorrente, periodicidade_meses, avisos, contatos:gp_orgaos_contatos(nome_completo, cargo, email, telefone, ativo)")
         .is("excluido_em", null).order("razao_social").limit(300);
       if (error) throw error;
-      return (data || []).filter((c: any) => contem([c.razao_social, c.cidade, c.cnpj], e.texto as string)).slice(0, LIMITE);
+      return (data || []).filter((c: any) => contem([c.razao_social, c.cidade, c.cnpj], e.texto as string)).slice(0, LIMITE)
+        .map((c: any) => ({ ...c, link: `/orgaos/${c.id}` }));
     }
     case "agenda": {
       const { data, error } = await sb.from("gp_agendamentos")

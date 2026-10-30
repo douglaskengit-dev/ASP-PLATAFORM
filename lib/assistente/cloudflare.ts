@@ -8,11 +8,19 @@
 import { FERRAMENTAS } from "./ferramentas";
 import { trechosDoManual } from "./manual-busca";
 import { INSTRUCOES_ASSISTENTE } from "./prompt";
+import { nadaEncontrado, problemaNaResposta, respostaDosDados, type Consulta } from "./verificacao";
 import { ErroAssistente, MAX_RODADAS, MSG_RODADAS, type PedidoAssistente } from "./tipos";
 
 /** 131 mil tokens de contexto, function calling e o menor custo por token
  *  entre os modelos com ferramentas do Workers AI. */
 export const MODELO_CLOUDFLARE_PADRAO = "@cf/meta/llama-4-scout-17b-16e-instruct";
+/** Temperatura da IA (0 a 1; menor = respostas mais fiéis e repetíveis).
+ *  Troca pela variável ASSISTENTE_TEMPERATURA na Vercel. */
+const TEMPERATURA_PADRAO = 0.2;
+function temperatura(): number {
+  const t = Number(process.env.ASSISTENTE_TEMPERATURA);
+  return process.env.ASSISTENTE_TEMPERATURA && Number.isFinite(t) && t >= 0 && t <= 1 ? t : TEMPERATURA_PADRAO;
+}
 /** Resultado de ferramenta maior que isto é cortado (economiza cota). */
 const MAX_RESULTADO = 12000;
 
@@ -85,7 +93,7 @@ async function rodar(modelo: string, mensagens: MensagemCf[]): Promise<{ texto: 
   const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${conta}/ai/run/${modelo}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: mensagens, tools: TOOLS_CF, max_tokens: 1500, temperature: 0.2 }),
+    body: JSON.stringify({ messages: mensagens, tools: TOOLS_CF, max_tokens: 1500, temperature: temperatura() }),
   });
   const j = await resp.json().catch(() => null) as any;
   if (!resp.ok || !j?.success) {
@@ -114,17 +122,30 @@ export async function responderCloudflare({ historico, contexto, executar }: Ped
       content: m.papel === "assistente" && chamadasNoTexto(m.texto).length ? "(consulta feita)" : m.texto,
     })),
   ];
+  const consultas: Consulta[] = [];
+  let corrigiu = false;
   for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
     const { texto, chamadas } = await rodar(modelo, mensagens);
     const pedidas = chamadas.length ? chamadas : chamadasNoTexto(texto);
-    if (!pedidas.length) return texto.trim() || "Não consegui montar uma resposta. Tente reformular a pergunta.";
+    if (!pedidas.length) {
+      const final = texto.trim();
+      const problema = problemaNaResposta(final, consultas, pergunta);
+      if (!problema) return final || "Não consegui montar uma resposta. Tente reformular a pergunta.";
+      // citou algo que o banco não devolveu: uma correção; se insistir, só os dados
+      if (corrigiu || nadaEncontrado(consultas)) return respostaDosDados(consultas);
+      corrigiu = true;
+      mensagens.push({ role: "assistant", content: final });
+      mensagens.push({ role: "user", content: `[Conferência automática, não é o usuário] ${problema} Refaça a resposta.` });
+      continue;
+    }
     for (const c of pedidas) {
       const entrada = entradaDe(c);
       const nome = nomeValido(c.name) || c.name;
       const r = NOMES.has(nome) ? await executar(nome, entrada) : { conteudo: `Ferramenta desconhecida: ${c.name}`, erro: true };
       mensagens.push({ role: "assistant", content: JSON.stringify({ name: nome, arguments: entrada }) });
       mensagens.push({ role: "tool", name: nome, content: r.conteudo.slice(0, MAX_RESULTADO) });
+      consultas.push({ nome, conteudo: r.conteudo, erro: r.erro });
     }
   }
-  return MSG_RODADAS;
+  return consultas.length ? respostaDosDados(consultas) : MSG_RODADAS;
 }
