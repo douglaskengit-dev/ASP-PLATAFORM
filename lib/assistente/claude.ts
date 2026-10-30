@@ -1,6 +1,7 @@
 /** Assistente pela API da Anthropic (opcional: ASSISTENTE_PROVEDOR=anthropic).
  *  Manda o manual inteiro no prompt, em cache. */
 import Anthropic from "@anthropic-ai/sdk";
+import { MSG_FORA_DO_ESCOPO } from "./escopo";
 import { FERRAMENTAS } from "./ferramentas";
 import { SISTEMA_ASSISTENTE } from "./prompt";
 import { ErroAssistente, MAX_RODADAS, MSG_RODADAS, type PedidoAssistente } from "./tipos";
@@ -36,7 +37,7 @@ export async function responderClaude({ historico, contexto, executar }: PedidoA
         messages: mensagens,
       } as unknown as Anthropic.Beta.MessageCreateParamsNonStreaming);
 
-      if (resp.stop_reason === "refusal") return "Não posso ajudar com isso. Pergunte sobre o uso da plataforma ou sobre os projetos e OS.";
+      if (resp.stop_reason === "refusal") return MSG_FORA_DO_ESCOPO;
       if (resp.stop_reason !== "tool_use") {
         const texto = resp.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
         return texto || "Não consegui montar uma resposta. Tente reformular a pergunta.";

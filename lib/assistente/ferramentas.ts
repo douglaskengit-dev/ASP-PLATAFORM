@@ -7,6 +7,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FASES } from "@/lib/asp/fases";
+import { ROTULO_STATUS_RELATORIO } from "@/lib/validacao/relatorio";
 
 const LIMITE = 40;
 
@@ -78,6 +79,8 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
 ];
 
 const tituloFase = (n: number) => (n === 1 ? "Abertura do projeto" : FASES.find((f) => f.numero === n)?.titulo || `Fase ${n}`);
+/** Status do banco ("em_aprovacao") no rótulo das telas ("Em aprovação"). */
+const rotuloStatus = (s: unknown) => (typeof s === "string" ? ROTULO_STATUS_RELATORIO[s] || (s === "pendente" ? "Pendente" : s) : s);
 const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const contem = (alvo: unknown[], texto?: string) =>
   !texto || alvo.some((v) => typeof v === "string" && semAcento(v).includes(semAcento(texto)));
@@ -126,7 +129,7 @@ export async function executarFerramenta(sb: SupabaseClient, nome: string, e: En
         os: (p.inspecoes || []).filter((i: any) => !i.excluido_em).map((i: any) => ({
           id: i.id, identificacao: i.identificacao, procedimento: i.procedimento, com_inspecao: i.com_inspecao,
           fase: i.fase, fase_titulo: tituloFase(i.fase), encerrada_em: i.encerrada_em,
-          relatorio_inspecao: i.status_relatorio_inspecao, relatorio_execucao: i.status_relatorio_execucao,
+          relatorio_inspecao: rotuloStatus(i.status_relatorio_inspecao), relatorio_execucao: rotuloStatus(i.status_relatorio_execucao),
           link: `/inspecoes/${i.id}`,
         })),
       };
@@ -169,11 +172,11 @@ export async function executarFerramenta(sb: SupabaseClient, nome: string, e: En
         id: os.id, identificacao: os.identificacao, procedimento: os.procedimento, com_inspecao: os.com_inspecao,
         fase: os.fase, fase_titulo: tituloFase(os.fase), encerrada_em: os.encerrada_em,
         encerramento_justificativa: os.encerramento_justificativa, tanque: os.tanque,
-        relatorio_inspecao: os.status_relatorio_inspecao, relatorio_execucao: os.status_relatorio_execucao,
+        relatorio_inspecao: rotuloStatus(os.status_relatorio_inspecao), relatorio_execucao: rotuloStatus(os.status_relatorio_execucao),
         projeto: os.projeto, link: `/inspecoes/${os.id}`,
         agendamentos: ag.data || [],
         coletas: co.data || [],
-        relatorios: relatorios.map((r: any) => ({ tipo: r.tipo, versao: r.versao, status: r.status, motivo_ajuste: r.motivo_ajuste, enviado_em: r.enviado_em, assinado_em: r.assinado_em })),
+        relatorios: relatorios.map((r: any) => ({ tipo: r.tipo, versao: r.versao, status: rotuloStatus(r.status), motivo_ajuste: r.motivo_ajuste, enviado_em: r.enviado_em, assinado_em: r.assinado_em })),
         dados_relatorio_execucao: dadosExec,
         rdos: (rd.data || []).map((r: any) => ({ numero: r.numero, data: r.data, observacoes: semHtml(r.dados?.observacoes) })),
         entregas: en.data || [],
