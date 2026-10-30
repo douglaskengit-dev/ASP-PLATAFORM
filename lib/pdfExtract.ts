@@ -40,6 +40,20 @@ export async function renderizarPaginaPdf(arquivo: Buffer, pagina: number, largu
   }
 }
 
+/** Todas as páginas do PDF (até `max`) em PNG — "prints" do laudo para o
+ *  relatório. `largura` em pixels. */
+export async function renderizarPaginasPdf(arquivo: Buffer, largura: number, max: number): Promise<Buffer[]> {
+  await garantirPolyfillPdfjs();
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: arquivo });
+  try {
+    const r = await parser.getScreenshot({ first: max, desiredWidth: largura, imageBuffer: true, imageDataUrl: false });
+    return r.pages.filter((p) => p?.data).map((p) => Buffer.from(p.data));
+  } finally {
+    await parser.destroy();
+  }
+}
+
 /**
  * Extrai o texto de um PDF localmente (no servidor), sem enviar o arquivo
  * binário para nenhuma API externa. O texto extraído é o que será usado

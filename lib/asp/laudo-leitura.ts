@@ -19,6 +19,8 @@ export interface LaudoLido {
   amostra?: string;
   /** Data da coleta (ISO) — ordena antes/depois. */
   dataColeta?: string;
+  /** "Ponto de Coleta" como escrito no laudo (ex.: "Registro Tanque"). */
+  pontoColeta?: string;
   /** Medidos em campo pelo amostrador (só para conferir com a coleta). */
   cloro?: number;
   ph?: number;
@@ -132,6 +134,9 @@ export function lerLaudoTexto(texto: string): LaudoLido {
   return {
     amostra,
     dataColeta: dc ? `${dc[3]}-${dc[2]}-${dc[1]}` : undefined,
+    // "Ponto de Coleta: Registro Tanque <tab> Cloro Residual Livre: 0.24" — no
+    // texto do OCR a coluna da direita vem na mesma linha, sem tabulação.
+    pontoColeta: /Ponto\s+de\s+Coleta:[ \t]*([^\t\n]+?)[ \t]*(?:\t|Cloro\s+Residual|Data\s+Recebimento|$)/im.exec(t)?.[1]?.trim() || undefined,
     cloro: num(/Cloro\s+Residual\s+Livre:\s*([\d.,]+)/i.exec(t)?.[1]),
     ph: num(/\bpH:\s*([\d.,]+)/i.exec(t)?.[1]),
     grade, lidos, naoAtende, incompletos,

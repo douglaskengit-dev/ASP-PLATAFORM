@@ -38,6 +38,9 @@ export interface ImagemRelatorio {
   fonte?: string;
   /** Largura em cm (padrão 15, cabe na mancha ABNT de 16 cm). */
   larguraCm?: number;
+  /** Altura máxima em cm (padrão 11, a das fotos). As páginas dos laudos do
+   *  laboratório usam mais, para o texto ficar legível. */
+  alturaMaxCm?: number;
   /** Em qual tópico entra (número original). */
   topico: number;
   /** Subtópico de destino ("6.1", "6.2", "6.3"). A figura entra logo abaixo
@@ -53,6 +56,15 @@ export interface ImagemRelatorio {
    *  as da coleta de fotos da execução. Sem índice, a foto ocupa a próxima
    *  vaga livre, na ordem em que chegou. */
   vagaIndice?: number;
+}
+
+/** Tabela simples gerada no documento (título + cabeçalho + linhas). */
+export interface TabelaAnalise {
+  titulo: string;
+  cabecalho: string[];
+  linhas: string[][];
+  /** Larguras das colunas em dxa (somam ~9070, a mancha de 16 cm). */
+  larguras?: number[];
 }
 
 export interface DadosRelatorio {
@@ -116,6 +128,18 @@ export interface DadosRelatorio {
    *  "Antes da Limpeza (Amostra [amostra antes])" da tabela do laudo. */
   amostraAntes?: string;
   amostraDepois?: string;
+  /** Tabelas montadas pelo formulário (valores medidos em campo, amostras
+   *  enviadas ao laboratório) — entram na seção de análise, antes de
+   *  "Resultados das análises laboratoriais". */
+  tabelasAnalise?: TabelaAnalise[];
+  /** Formulário: data (ISO) e ponto de coleta de cada amostra — vêm do laudo
+   *  lido e alimentam a tabela "Amostras enviadas ao laboratório". */
+  dataColetaAntes?: string;
+  dataColetaDepois?: string;
+  pontoColetaAntes?: string;
+  pontoColetaDepois?: string;
+  /** Formulário: incluir as páginas dos laudos (prints) no relatório. */
+  semPrintsLaudo?: boolean;
   /** "Conclusão das Análises Laboratoriais" (HTML do editor) — entra no
    *  lugar do marcador [conclusão das análises] da seção de análise. */
   conclusaoAnalises?: string;
@@ -1200,6 +1224,47 @@ function preencherAmostras(xml: string, antes?: string, depois?: string): string
   return xml;
 }
 
+/** Tabela no padrão da do laudo: Arial 10, cabeçalho azul-claro repetido em
+ *  nova página, bordas finas, linha que não quebra entre páginas. */
+function tabelaSimples(t: TabelaAnalise): string {
+  const total = 9070;
+  const n = t.cabecalho.length;
+  const larg = t.larguras && t.larguras.length === n ? t.larguras : Array.from({ length: n }, () => Math.floor(total / n));
+  const borda = "<w:tblBorders>" + ["top", "left", "bottom", "right", "insideH", "insideV"]
+    .map((b) => `<w:${b} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`).join("") + "</w:tblBorders>";
+  const cel = (txt: string, w: number, cab: boolean) =>
+    `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${cab ? '<w:shd w:val="clear" w:color="auto" w:fill="D9E2F3"/>' : ""}<w:vAlign w:val="center"/></w:tcPr>` +
+    '<w:p><w:pPr><w:spacing w:before="40" w:after="40" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/></w:pPr>' +
+    `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>${cab ? "<w:b/>" : ""}<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>` +
+    `<w:t xml:space="preserve">${esc(txt || "—")}</w:t></w:r></w:p></w:tc>`;
+  const linha = (cols: string[], cab: boolean) =>
+    `<w:tr><w:trPr><w:cantSplit/>${cab ? "<w:tblHeader/>" : ""}</w:trPr>${cols.map((c, i) => cel(c, larg[i], cab)).join("")}</w:tr>`;
+  return `<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/><w:jc w:val="center"/>${borda}<w:tblLayout w:type="fixed"/></w:tblPr>` +
+    `<w:tblGrid>${larg.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>` +
+    linha(t.cabecalho, true) + t.linhas.map((l) => linha(l, false)).join("") + "</w:tbl>";
+}
+
+/**
+ * Tabelas do formulário (valores medidos em campo, amostras) na seção de
+ * análise, logo ANTES de "Resultados das análises laboratoriais:" — o título
+ * de cada uma copia o estilo desse parágrafo do modelo e fica preso à
+ * tabela. Modelo sem esse parágrafo: nada é inserido.
+ */
+function inserirTabelasAnalise(xml: string, tabelas?: TabelaAnalise[]): string {
+  const validas = (tabelas || []).filter((t) => t.linhas.length > 0);
+  if (!validas.length) return xml;
+  const iniBody = xml.indexOf("<w:body>") + "<w:body>".length;
+  const fimBody = xml.lastIndexOf("</w:body>");
+  const body = xml.slice(iniBody, fimBody);
+  const alvo = separarBlocos(body).find((b) => b.xml.startsWith("<w:p") && /^resultados das an[áa]lises laboratoriais/i.test(b.texto.trim()));
+  if (!alvo) return xml;
+  const atual = alvo.texto.trim();
+  const novo = validas.map((t) =>
+    comKeepNext(trocarTexto(alvo.xml, atual, t.titulo)) + tabelaSimples(t) +
+    '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>').join("");
+  return xml.slice(0, iniBody) + body.slice(0, alvo.ini) + novo + body.slice(alvo.ini) + xml.slice(fimBody);
+}
+
 /**
  * Troca o parágrafo que contém um marcador ("[conclusão das análises]") por
  * parágrafos de texto. Sem conteúdo, o parágrafo some — e também o título
@@ -1600,6 +1665,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = preencherLaudo(xml, "Após a Limpeza", dados.laudoDepois);
   xml = preencherLaudoCombinado(xml, dados.laudoAntes, dados.laudoDepois);
   xml = preencherAmostras(xml, dados.amostraAntes, dados.amostraDepois);
+  xml = inserirTabelasAnalise(xml, dados.tabelasAnalise);
   xml = substituirParagrafoMarcador(xml, "[conclusão das análises]",
     dados.conclusaoAnalises?.trim() ? htmlParaParagrafos(dados.conclusaoAnalises) : "",
     /^conclus[ãa]o das an[áa]lises/i);
@@ -1862,9 +1928,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     // acompanha.
     let largura = img.larguraCm || 15;
     let altura = alturaProporcional(img, largura);
-    if (altura > ALTURA_MAX_FIGURA_CM) {
-      largura = Math.round(largura * (ALTURA_MAX_FIGURA_CM / altura) * 100) / 100;
-      altura = ALTURA_MAX_FIGURA_CM;
+    const alturaMax = img.alturaMaxCm || ALTURA_MAX_FIGURA_CM;
+    if (altura > alturaMax) {
+      largura = Math.round(largura * (alturaMax / altura) * 100) / 100;
+      altura = alturaMax;
     }
     // Legenda ABAIXO da figura (padrão adotado pela ASP), seguida da fonte.
     // Modelo com legendas próprias (sob as vagas): a figura acrescentada usa
