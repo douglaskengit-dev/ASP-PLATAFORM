@@ -4,7 +4,7 @@ import { ResultadoAnaliseTR } from "./tr/types";
 
 let anthropicClient: Anthropic | null = null;
 
-export function getAnthropicClient(): Anthropic {
+function getAnthropicClient(): Anthropic {
   if (anthropicClient) return anthropicClient;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -14,7 +14,7 @@ export function getAnthropicClient(): Anthropic {
   return anthropicClient;
 }
 
-export const MODELO_ANALISE = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+const MODELO_ANALISE = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
 /** Conteúdo de referência (objeto "Securitização de Dívida Ativa"), cacheado
  * no prompt por raramente mudar — ver docs/ESPECIFICAÇÃO FUNCIONAL DO SISTEMA

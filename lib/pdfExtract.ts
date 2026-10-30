@@ -24,6 +24,22 @@ async function garantirPolyfillPdfjs() {
   }
 }
 
+/** Renderiza uma página do PDF (1 = primeira) em PNG, no servidor — para o
+ *  OCR de PDF que é imagem. `largura` em pixels. */
+export async function renderizarPaginaPdf(arquivo: Buffer, pagina: number, largura: number): Promise<Buffer> {
+  await garantirPolyfillPdfjs();
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: arquivo });
+  try {
+    const r = await parser.getScreenshot({ partial: [pagina], desiredWidth: largura, imageBuffer: true, imageDataUrl: false });
+    const p = r.pages[0];
+    if (!p?.data) throw new Error("Página do PDF não renderizada.");
+    return Buffer.from(p.data);
+  } finally {
+    await parser.destroy();
+  }
+}
+
 /**
  * Extrai o texto de um PDF localmente (no servidor), sem enviar o arquivo
  * binário para nenhuma API externa. O texto extraído é o que será usado
