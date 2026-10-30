@@ -9,6 +9,7 @@ import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
 import NotificacoesBotao from "./NotificacoesBotao";
 import FeedbackBotao from "./FeedbackBotao";
+import AssistenteBotao from "./AssistenteBotao";
 import SyncStatus from "./SyncStatus";
 import OrgaosConteudo from "./OrgaosConteudo";
 import HistoricoConteudo from "./HistoricoConteudo";
@@ -263,6 +264,7 @@ export default function BarraUsuario() {
           </div>
 
           {/* Sempre visíveis (desktop e celular): ações de uso frequente. */}
+          <AssistenteBotao />
           <FeedbackBotao />
           <NotificacoesBotao />
           <ThemeToggle />
