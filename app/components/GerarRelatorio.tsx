@@ -556,14 +556,27 @@ export default function GerarRelatorio({
   // Só depois de o modelo em uso ser lido: antes disso N é o do modelo
   // padrão (Batimetria = 7), e no POP 001 a 7 é "Dados do reservatório" —
   // que ficaria desmarcada por engano.
-  const modeloPronto = modeloLido !== null && modeloLido === (caminhoModelo || "");
+  // E só com o Catálogo carregado: o modelo padrão termina de ser lido ANTES
+  // de o procedimento da OS chegar — com caminhoModelo ainda vazio, "" === ""
+  // parecia pronto e a 7 (Dados do reservatório no POP 001) era desmarcada.
+  const modeloPronto = catalogoPronto && modeloLido !== null && modeloLido === (caminhoModelo || "");
   const comBatimetriaPadrao = (sel: Record<number, boolean>) =>
     modeloPronto && semMedicao && N.batimetria !== undefined ? { ...sel, [N.batimetria]: false } : sel;
   const batimetriaAplicada = useRef(false);
   useEffect(() => {
     if (!modeloPronto || batimetriaAplicada.current) return;
     batimetriaAplicada.current = true;
-    if (estadoSalvo?.visiveis || !semMedicao || N.batimetria === undefined) return;
+    if (!semMedicao || N.batimetria === undefined) return;
+    if (estadoSalvo?.visiveis) {
+      // Rascunho salvo com o bug da corrida: a 7 do modelo padrão (Batimetria)
+      // desmarcada, mas no modelo em uso a 7 é outra seção e a Batimetria de
+      // verdade ficou marcada sem medição. Só essa combinação é desfeita.
+      const v = estadoSalvo.visiveis as Record<number, boolean>;
+      if (N.batimetria !== 7 && v[7] === false && v[N.batimetria] !== false) {
+        setVisiveis((x) => ({ ...x, 7: true, [N.batimetria!]: false }));
+      }
+      return;
+    }
     setVisiveis((v) => ({ ...v, [N.batimetria!]: false }));
   }, [modeloPronto]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -599,7 +612,9 @@ export default function GerarRelatorio({
     if (t.numero === nLimpeza) cheio ||= !!d.volumeSedimento?.trim();
     if (!cheio) secoesVazias.add(t.numero);
   }
-  if (N.anexos !== undefined && !temTexto(d.anexos)) secoesVazias.add(N.anexos);
+  // Anexos: os PDFs dos laudos entram ali ("Laudo anexo: …") mesmo sem texto.
+  const temLaudoAnexo = !!execucao && !!(laudoPdf || laudoPdfDepois);
+  if (N.anexos !== undefined && !temTexto(d.anexos) && !temLaudoAnexo) secoesVazias.add(N.anexos);
   if (N.fotosInternas !== undefined && !temTexto(d.fotosInternas) && !temFoto(N.fotosInternas)) secoesVazias.add(N.fotosInternas);
   // Coluna "Limite" do laudo: os da Portaria 888/2021 nas células vazias,
   // uma vez (editáveis; o documento sai com o que estiver preenchido).
@@ -1037,9 +1052,9 @@ export default function GerarRelatorio({
       // tiver) só o cita.
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
       const anexosDoc = execucao
-        ? [[laudoPdf, "antes"], [laudoPdfDepois, "após"]].reduce((txt, [l, q]) => {
+        ? [[laudoPdf, "antes da"], [laudoPdfDepois, "após a"]].reduce((txt, [l, q]) => {
             const lp = l as LaudoPdf | null;
-            return lp && !(txt || "").includes(esc(lp.nome)) ? `${txt || ""}<p>Laudo anexo (${q} da limpeza): ${esc(lp.nome)}</p>` : txt;
+            return lp && !(txt || "").includes(esc(lp.nome)) ? `${txt || ""}<p>Laudo anexo (${q} limpeza): ${esc(lp.nome)}</p>` : txt;
           }, d.anexos)
         : d.anexos;
       // Pessoas: o documento leva o NOME do usuário escolhido (por id).
