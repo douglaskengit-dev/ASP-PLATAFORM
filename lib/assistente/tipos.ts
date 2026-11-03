@@ -12,6 +12,8 @@ export interface PedidoAssistente {
   naPagina?: boolean;
   /** Marcado pelo provedor quando a resposta foi montada pelo servidor. */
   registro?: { reserva: boolean; chamadas: number };
+  /** O que o robô está fazendo (mostrado enquanto a resposta não chega). */
+  aoEtapa?: (texto: string) => void;
 }
 
 /** Erro com mensagem já pronta para o usuário. */
