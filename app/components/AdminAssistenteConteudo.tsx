@@ -12,6 +12,100 @@ interface Resposta {
 }
 interface Exemplo { id?: string; pergunta: string; resposta: string; ativo?: boolean; origem_id?: string | null }
 interface Resumo { total: number; positivas: number; negativas: number; recusas: number; reservas: number }
+interface Uso {
+  por_dia: { dia: string; perguntas: number; chamadas: number }[];
+  hoje: { perguntas: number; chamadas: number };
+  tem_chamadas: boolean;
+  tempo_medio_s: number | null;
+  top_perguntas: { pergunta: string; vezes: number }[];
+  top_pessoas: { nome: string; perguntas: number }[];
+  provedores: Record<string, number>;
+}
+
+const ROTULO_PROVEDOR: Record<string, string> = {
+  cloudflare: "IA gratuita (Cloudflare)", anthropic: "Anthropic", "anthropic-reserva": "Anthropic (reserva)",
+  cache: "Resposta guardada", filtro: "Recusa automática",
+};
+const diaCurto = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
+/** Perguntas por dia (uma série: barras finas na cor primária, número ao
+ *  passar o mouse ou focar) + tabela, e os números de hoje. */
+function UsoRobo({ uso }: { uso: Uso }) {
+  const [foco, setFoco] = useState<number | null>(null);
+  const max = Math.max(1, ...uso.por_dia.map((d) => d.perguntas));
+  const atual = foco == null ? null : uso.por_dia[foco];
+  const tiles: [string, string][] = [
+    ["Perguntas hoje", String(uso.hoje.perguntas)],
+    ...(uso.tem_chamadas ? [["Chamadas à IA hoje", String(uso.hoje.chamadas)] as [string, string]] : []),
+    ["Tempo médio de resposta", uso.tempo_medio_s == null ? "—" : `${uso.tempo_medio_s.toLocaleString("pt-BR")} s`],
+  ];
+  return (
+    <section className="card">
+      <h2>Uso do robô</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 12 }}>
+        {tiles.map(([n, v]) => <div key={n} className="kpi"><div className="kpi-nome">{n}</div><div className="kpi-valor">{v}</div></div>)}
+      </div>
+      <p className="detalhe" style={{ marginTop: 0 }}>
+        A cota gratuita da IA renova às 21h (Brasília). Cada pergunta usa de 1 a 6 chamadas à IA, conforme as consultas ao banco.
+      </p>
+      <h3 style={{ fontSize: 14, margin: "8px 0 4px" }}>Perguntas por dia</h3>
+      <p className="detalhe" style={{ margin: "0 0 6px", minHeight: 18 }} aria-live="polite">
+        {atual ? `${diaCurto(atual.dia)}: ${atual.perguntas} ${atual.perguntas === 1 ? "pergunta" : "perguntas"}${uso.tem_chamadas ? ` · ${atual.chamadas} chamadas à IA` : ""}` : `Máximo no período: ${max}`}
+      </p>
+      <div role="img" aria-label="Gráfico de perguntas por dia; os valores estão na tabela abaixo" onMouseLeave={() => setFoco(null)}
+        style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 120, borderBottom: "1px solid var(--borda)" }}>
+        {uso.por_dia.map((d, i) => (
+          <div key={d.dia} tabIndex={0} onMouseEnter={() => setFoco(i)} onFocus={() => setFoco(i)} onBlur={() => setFoco(null)}
+            aria-label={`${diaCurto(d.dia)}: ${d.perguntas} perguntas`}
+            style={{ flex: 1, height: "100%", display: "flex", alignItems: "flex-end", cursor: "default", outline: "none" }}>
+            <div style={{
+              width: "100%", height: `${(d.perguntas / max) * 100}%`, minHeight: d.perguntas ? 2 : 0,
+              background: "var(--primaria)", borderRadius: "4px 4px 0 0", opacity: foco == null || foco === i ? 1 : 0.45,
+            }} />
+          </div>
+        ))}
+      </div>
+      <div className="detalhe" style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
+        <span>{uso.por_dia[0] && diaCurto(uso.por_dia[0].dia)}</span>
+        <span>{uso.por_dia.length > 0 && diaCurto(uso.por_dia[uso.por_dia.length - 1].dia)}</span>
+      </div>
+      <details style={{ marginTop: 8 }}>
+        <summary className="detalhe" style={{ cursor: "pointer" }}>Ver tabela</summary>
+        <table className="tabela" style={{ marginTop: 6 }}>
+          <thead><tr><th>Dia</th><th>Perguntas</th>{uso.tem_chamadas && <th>Chamadas à IA</th>}</tr></thead>
+          <tbody>
+            {uso.por_dia.filter((d) => d.perguntas).map((d) => (
+              <tr key={d.dia}><td>{diaCurto(d.dia)}</td><td>{d.perguntas}</td>{uso.tem_chamadas && <td>{d.chamadas}</td>}</tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, marginTop: 14 }}>
+        <div>
+          <h3 style={{ fontSize: 14, margin: "0 0 6px" }}>Perguntas mais repetidas</h3>
+          {!uso.top_perguntas.length ? <p className="vazio">Nenhuma pergunta repetida.</p> : (
+            <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13.5 }}>
+              {uso.top_perguntas.map((p) => <li key={p.pergunta}>{p.pergunta} <span className="detalhe">({p.vezes}×)</span></li>)}
+            </ol>
+          )}
+        </div>
+        <div>
+          <h3 style={{ fontSize: 14, margin: "0 0 6px" }}>Quem mais usa</h3>
+          <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13.5 }}>
+            {uso.top_pessoas.map((p) => <li key={p.nome}>{p.nome} <span className="detalhe">({p.perguntas})</span></li>)}
+          </ol>
+        </div>
+        <div>
+          <h3 style={{ fontSize: 14, margin: "0 0 6px" }}>Quem respondeu</h3>
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13.5 }}>
+            {Object.entries(uso.provedores).sort((a, b) => b[1] - a[1]).map(([k, v]) => <li key={k}>{ROTULO_PROVEDOR[k] || k} <span className="detalhe">({v})</span></li>)}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 const FILTROS: [string, string][] = [
   ["negativas", "👎 Negativas"], ["todas", "Todas"], ["positivas", "👍 Positivas"],
@@ -25,6 +119,7 @@ export default function AdminAssistenteConteudo() {
   const [dias, setDias] = useState(30);
   const [respostas, setRespostas] = useState<Resposta[]>([]);
   const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [uso, setUso] = useState<Uso | null>(null);
   const [exemplos, setExemplos] = useState<Exemplo[]>([]);
   const [editando, setEditando] = useState<Exemplo | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -41,6 +136,7 @@ export default function AdminAssistenteConteudo() {
       if (!r.ok) throw new Error(r.erro || "Falha ao carregar.");
       setRespostas(r.respostas);
       setResumo(r.resumo);
+      setUso(r.uso || null);
       setExemplos(e.ok ? e.exemplos : []);
     } catch (err: any) {
       setErro(err.message);
@@ -84,6 +180,8 @@ export default function AdminAssistenteConteudo() {
           ))}
         </div>
       )}
+
+      {uso && <UsoRobo uso={uso} />}
 
       <section className="card">
         <h2>Respostas do robô</h2>

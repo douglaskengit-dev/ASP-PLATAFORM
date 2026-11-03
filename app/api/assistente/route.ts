@@ -24,6 +24,7 @@ const MAX_CARACTERES = 4000;
  *  O histórico vem do navegador (só texto) a cada pergunta. IA: Cloudflare
  *  Workers AI (padrão, gratuito) ou Anthropic (ASSISTENTE_PROVEDOR=anthropic). */
 export async function POST(req: NextRequest) {
+  const inicio = Date.now();
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
 
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
     exemplosAprovados(sb).catch(() => ""),
   ]);
   const contexto = [contextoDaSessao(profile.nome_completo, profile.perfil, hoje), pagina && contextoDaPagina(pagina), exemplos].filter(Boolean).join("\n");
-  const registro = { reserva: false };
+  const registro = { reserva: false, chamadas: 0 };
   const pedido = { historico, contexto, executar, naPagina: !!pagina, registro };
 
   // dúvida de uso sem conversa anterior e fora de página de dados: pode vir
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
     }
     const id = await registrarResposta(sb, {
       pergunta, resposta: final.resposta, pagina: corpo?.pagina, consultas, foraDoEscopo: final.fora_do_escopo, reserva: registro.reserva, provedor: usado,
+      chamadasIa: registro.chamadas, duracaoMs: Date.now() - inicio,
     });
     const sugestoes = final.fora_do_escopo ? [] : sugestoesDeContinuacao(final.resposta, consultas, pergunta);
     return NextResponse.json({ ...final, id, sugestoes });
