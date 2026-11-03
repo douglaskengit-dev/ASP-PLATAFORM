@@ -1524,3 +1524,15 @@ details.val-resumo > summary:focus-visible { outline: 2px solid var(--primaria);
 }
 .assistente-avaliar:hover, .assistente-avaliar:focus-visible { opacity: 1; filter: none; }
 .assistente-avaliar[aria-pressed="true"] { opacity: 1; filter: none; border-color: var(--borda); background: var(--bg-hover); }
+
+/* Ditado da pergunta ao Robô ASP */
+.assistente-microfone {
+  width: 40px; flex: none; border: 1px solid var(--borda); border-radius: 8px; background: var(--bg-card);
+  font-size: 18px; cursor: pointer; color: var(--texto);
+}
+.assistente-microfone:hover { background: var(--bg-hover); }
+.assistente-microfone.ouvindo { border-color: var(--primaria); box-shadow: 0 0 0 3px var(--primaria-claro); }
+@media (prefers-reduced-motion: no-preference) {
+  .assistente-microfone.ouvindo { animation: assistente-ouvindo 1.2s ease-in-out infinite; }
+}
+@keyframes assistente-ouvindo { 50% { box-shadow: 0 0 0 6px var(--primaria-claro); } }
