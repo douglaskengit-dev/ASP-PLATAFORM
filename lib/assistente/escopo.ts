@@ -17,7 +17,7 @@ const RADICAIS = [
   "relator", "laudo", "colet", "amostr", "cloro", "sedimen", "agend", "agenda", "visita", "fase", "aprov",
   "assin", "entreg", "encerr", "plataf", "sistem", "login", "senha", "perfil", "usuari", "acess", "cnpj",
   "pedido", "municip", "prefeit", "contat", "catalog", "lixeir", "dashboa", "arquiv", "equipe", "robo",
-  "tela", "botao", "menu", "versao", "ajust", "pendent", "cadastr", "status", "operac", "comerci", "gerenc",
+  "tela", "botao", "menu", "versao", "ajust", "pendent", "pendenc", "tarefa", "cadastr", "status", "operac", "comerci", "gerenc",
 ];
 
 /** Assuntos claramente alheios (só valem se a pergunta não citar nada do sistema). */

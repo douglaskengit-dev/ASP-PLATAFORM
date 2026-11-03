@@ -19,7 +19,7 @@ export function precisaDoBanco(pergunta: string, naPagina = false): boolean {
   const t = normalizar(pergunta);
   if (naPagina && apontaParaPagina(t)) return true;
   if (/^(como|onde|o que (e|significa)|para que|pra que|posso|consigo|quem pode|qual a diferenca|por que)\b/.test(t)) return false;
-  return /\b(projet|client|orga|os\b|inspec|tanque|agend|agenda|rdo|relator|colet|fase|cnpj|contat|prefeit|pedido|entreg|encerr)/.test(t);
+  return /\b(projet|client|orga|os\b|inspec|tanque|agend|agenda|rdo|relator|colet|fase|cnpj|contat|prefeit|pedido|entreg|encerr|pendenc|tarefa|minha agenda|meus agend)/.test(t);
 }
 
 function semResultado(c: Consulta): boolean {
@@ -75,7 +75,10 @@ export function respostaDosDados(consultas: Consulta[]): string {
       : "Não encontrei isso no banco (ou você não tem acesso). Confira o nome do cliente, do projeto ou da OS.";
   }
   const j = JSON.parse(validas[validas.length - 1].conteudo);
-  const itens: any[] = Array.isArray(j) ? j : [j];
+  // objeto com grupos (minhas_pendencias): junta os itens das listas
+  const grupos = !Array.isArray(j) && !j.link ? Object.values(j).filter(Array.isArray).flat().filter((i) => i && typeof i === "object") : [];
+  const itens: any[] = Array.isArray(j) ? j : grupos.length ? grupos : [j];
+  if (!itens.length) return "Não encontrei nada no banco para isso.";
   const mostrar = itens.slice(0, 10).map(linha);
   const resto = itens.length > 10 ? `\n… e mais ${itens.length - 10}. Refine a pergunta para ver os demais.` : "";
   return `Encontrei no banco ${itens.length === 1 ? "este resultado" : `${itens.length} resultados`}:\n${mostrar.join("\n")}${resto}`;
