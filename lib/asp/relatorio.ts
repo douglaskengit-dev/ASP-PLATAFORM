@@ -17,6 +17,8 @@
  * evita depender do sistema de arquivos da função serverless.
  */
 
+import type { CAMPOS_DO_MODELO } from "../validacao/relatorio";
+
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
 /** Um tópico do relatório. `visivel: false` remove a seção inteira. */
@@ -1512,6 +1514,36 @@ export interface VagaImagem {
  * legendas no código, lemos o próprio arquivo: o formulário mostra a legenda
  * de cada vaga e o usuário só anexa a foto correspondente.
  */
+/** Campos do formulário que só fazem sentido se o modelo tiver o rótulo ou
+ *  marcador onde o gerador os escreve. Modelo sem nenhum deles = o campo não
+ *  chega ao documento, e o formulário o esconde. (Os demais campos saem por
+ *  tópico ou por rótulo presente em todos os modelos.) */
+export const MARCAS_DOS_CAMPOS: Record<(typeof CAMPOS_DO_MODELO)[number], string[]> = {
+  titulo: ["[TITULO]"],
+  historico: ["Histórico:"],
+  comprimento: ["Comprimento"],
+  largura: ["Largura"],
+  equipamentoTanque: ["Tanque de combate a incêndio"],
+  dataOperacao: ["[data]"],
+  horarios: ["[horario]"],
+  alturaSedimento: ["[altura de sedimento]"],
+};
+
+/** Quais campos de MARCAS_DOS_CAMPOS o modelo usa (texto do corpo, cabeçalho
+ *  e rodapé, com os marcadores que o Word quebra em pedaços já juntos). */
+export async function lerCamposDoModelo(templateUrl?: string): Promise<Set<string>> {
+  const JSZip = (await import("jszip")).default;
+  const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");
+  if (!resp.ok) throw new Error(`modelo indisponível (${resp.status})`);
+  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const partes = zip.file(/^word\/(document|header\d*|footer\d*)\.xml$/);
+  const textos = await Promise.all(partes.map((f) => f.async("string")));
+  const texto = textos.join(" ").replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/\s+/g, " ");
+  return new Set(Object.entries(MARCAS_DOS_CAMPOS).filter(([, marcas]) => marcas.some((m) => texto.includes(m))).map(([k]) => k));
+}
+
 export async function lerVagasDeImagem(templateUrl?: string): Promise<VagaImagem[]> {
   const JSZip = (await import("jszip")).default;
   const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");

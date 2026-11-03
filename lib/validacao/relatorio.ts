@@ -275,6 +275,22 @@ export interface SnapshotRelatorio {
   /** PDF do laudo do laboratório (relatório de execução, Fase 8). */
   laudoPdf?: LaudoPdf | null;
   laudoPdfDepois?: LaudoPdf | null;
+  /** Campos de CAMPOS_DO_MODELO que o modelo em uso não tem (o formulário
+   *  os esconde): as mensagens deles não valem. */
+  camposForaDoModelo?: string[];
+}
+
+/** Campos que só chegam ao documento se o modelo tiver o rótulo/marcador
+ *  deles (lib/asp/relatorio.ts → MARCAS_DOS_CAMPOS). Só estes podem ser
+ *  dispensados por `camposForaDoModelo` — qualquer outro campo vale sempre. */
+export const CAMPOS_DO_MODELO = ["titulo", "historico", "comprimento", "largura", "equipamentoTanque", "dataOperacao", "horarios", "alturaSedimento"] as const;
+
+/** Tira as mensagens dos campos que o modelo em uso não tem. */
+export function semCamposForaDoModelo(r: ResultadoValidacao, s: Pick<SnapshotRelatorio, "camposForaDoModelo">): ResultadoValidacao {
+  const fora = new Set((s.camposForaDoModelo || []).filter((k) => (CAMPOS_DO_MODELO as readonly string[]).includes(k)));
+  if (!fora.size) return r;
+  const limpa = (m: Record<string, string[]>) => Object.fromEntries(Object.entries(m).filter(([k]) => !fora.has(k)));
+  return { ...r, erros: limpa(r.erros), avisos: limpa(r.avisos) };
 }
 
 /** Campos que vêm do cadastro (só leitura no formulário). */

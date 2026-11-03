@@ -13,7 +13,7 @@ import { cloroDoProcedimento } from "@/lib/asp/fotos-execucao";
 import {
   addErro, caminhoFotoValido, caminhoLaudoValido, codigoRelatorio, examinarArquivoRelatorio, FormatoRelatorio, hojeBrasil,
   LaudoPdf, mesclar, MSG_LAUDO_OBRIGATORIO, novoResultado, pastaFotosRascunho, planejarEnvio, procedimentoUsaLaudo,
-  RELATORIO_MAX_BYTES, RelatorioRef, ResultadoValidacao, revisaoDoTipo, SnapshotRelatorio, validarRelatorio,
+  RELATORIO_MAX_BYTES, RelatorioRef, ResultadoValidacao, revisaoDoTipo, semCamposForaDoModelo, SnapshotRelatorio, validarRelatorio,
   validarRelatorioExecucao,
 } from "@/lib/validacao";
 
@@ -304,7 +304,7 @@ export async function validarSnapshotServidor(
     podeEditarRevisao: podeEditarRevisao(profile) || manualAnterior,
     cadastro: info.cadastro,
   });
-  return mesclar(r, v, rExec);
+  return semCamposForaDoModelo(mesclar(r, v, rExec), s);
 }
 
 export { MSG_LAUDO_OBRIGATORIO };
