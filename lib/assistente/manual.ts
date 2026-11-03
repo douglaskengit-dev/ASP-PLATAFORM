@@ -63,6 +63,7 @@ Todas as áreas ficam na barra azul do topo; no celular, elas ficam no botão de
 - **💬 Feedback**: envie erros e sugestões para a equipe do sistema.
 - **🔔 Notificações**: avisos de agendamentos, remarcações, relatórios e lembretes. O número mostra quantas estão sem ler.
 - **☀️ / 🌙 Tema**: alterna entre claro e escuro.
+- **🤖 Robô ASP**: o assistente, que fica flutuando no canto inferior direito da tela. Tira dúvidas de uso e consulta clientes, projetos e OS (veja a seção 16).
 - **Seu nome**: abre Meu perfil. Ao lado fica o botão **Sair**.
 
 ### Instalar como aplicativo (recomendado no celular)
@@ -200,6 +201,20 @@ O modal **Gerar Relatório Técnico** mostra as seções **na mesma ordem e com 
 - Adicione as **fotos**: cada foto precisa de legenda, e a mesma foto não entra duas vezes. Até 10 MB; WebP e HEIC são convertidos. Nas seções com **vagas** do modelo (ex.: 7.1 Fotos do tanque), a lista mostra a legenda de cada vaga; toque na miniatura para ampliar a foto.
 - Clique em **Salvar rascunho** ou **Gerar**.
 
+### Índice do relatório (no topo do modal; acompanha a rolagem)
+
+- Mostra quantos tópicos estão prontos (ex.: **10 de 12 tópicos prontos**) e o estado de cada um: **✓** pronto, **⚠️** aviso para conferir, **⛔** erro que impede gerar e **○** vazio (fica fora do relatório). Toque num tópico para ir direto a ele.
+- **Próxima pendência ↓** leva ao próximo tópico com algo a resolver.
+- **Recolher os prontos** fecha os tópicos já prontos, e cada tópico abre e fecha no **▾ / ▸**. Recolher só esconde: nada do que foi preenchido se perde. Ao reabrir um rascunho, os tópicos prontos já começam recolhidos.
+
+**Só os campos que o modelo usa**: o formulário lê o modelo do procedimento e esconde os campos que não iriam para o documento. Nos modelos de 2026 não aparecem **Título do relatório**, **Comprimento**, **Largura** e **Equipamento (tipo/uso)**; no POP 001 também **Histórico** e **Horários da operação**. Se um modelo voltar a ter o campo, ele reaparece sozinho.
+
+**Conclusão e Recomendações — ✍ Sugerir texto**: monta frases com os dados do relatório e as acrescenta no fim do texto, sem repetir o que já está escrito.
+
+- **Inspeção**: data e procedimento, sedimento da batimetria (volume, camada e % da capacidade) e os pontos registrados na inspeção visual interna; nas Recomendações, a limpeza do tanque quando há sedimento e o tratamento dos pontos encontrados.
+- **Execução**: data e volume de sedimento removido, os parâmetros do laudo fora do limite e o cloro e o pH de após a limpeza; nas Recomendações, desinfecção, nova análise, ajuste da cloração ou do pH, conforme o caso.
+- Só afirma o que os dados sustentam ("atenderam aos limites" só com o laudo de após completo e conforme). Revise o texto antes de gerar.
+
 ### Tópicos que saem do documento
 
 - Desmarcar a caixa do tópico tira a seção do documento; as seguintes são renumeradas.
@@ -217,7 +232,7 @@ O modal **Gerar Relatório Técnico** mostra as seções **na mesma ordem e com 
 
 **Relatório de execução (fase 8)**, além do acima:
 
-- **⬇ Puxar das RDOs** (no topo do modal): preenche, só quando você clica, a **equipe** (os nomes das RDOs da OS, marcados entre os usuários cadastrados; quem não tem cadastro aparece no aviso), a **data de execução** (1ª RDO), a **data e os horários da operação** (chegada, início e conclusão da limpeza e saída) e as **Observações**, em texto corrido dia a dia ("No dia 23/09/2026, às 08:10h, equipe ASP chega ao site…"). Revise antes de gerar.
+- **⬇ Puxar das RDOs** (no topo do modal): preenche, só quando você clica, a **equipe** (os nomes das RDOs da OS, marcados entre os usuários cadastrados; quem não tem cadastro aparece no aviso), a **data de execução** (1ª RDO), a **data e os horários da operação** (chegada, início e conclusão da limpeza e saída — quando o modelo os tem) e as **Observações**, em texto corrido dia a dia ("No dia 23/09/2026, às 08:10h, equipe ASP chega ao site…"). Revise antes de gerar.
 - **pH e cloro** antes e depois vêm da coleta de fotos; editar à mão mostra aviso de divergência. O botão **Valores de pH e cloro** fica nas seções **Antes da limpeza** e **Após a limpeza** (nos modelos antigos, em **Coleta das amostras**).
 - **PDFs dos laudos do laboratório** (dois: **antes** e **após** a limpeza): anexe cada um no seu campo. **Ao anexar, os valores já entram na tabela** — nº do relatório de ensaio, resultado, incerteza, LQ, LD e limite dos 5 parâmetros — e as células lidas ficam **em azul** até você editar. PDF original do laboratório é lido pelo texto; PDF que é **imagem** (escaneado ou "Imprimir em PDF") é lido por **reconhecimento de texto (OCR)** no próprio sistema, sem IA — confira cada célula com o laudo. O mesmo arquivo não pode ser os dois laudos. Os dois são **obrigatórios para enviar à aprovação** (o rascunho pode ser salvo sem eles) e aparecem citados em **Anexos**.
 - **Avisos da leitura**: o laboratório declarou **NÃO ATENDE**; pH ou cloro do laudo diferente do formulário; laudos possivelmente trocados (datas de coleta); linha que não deu para ler com segurança (fica em branco para digitar); "OCR com leitura duvidosa em: …".
@@ -350,6 +365,8 @@ Proteções: e-mail não se repete; você não pode rebaixar, desativar ou exclu
 
 Administrador e Gerência (e Operações, nas três últimas) já têm esses direitos pelo perfil.
 
+**Robô ASP — Avaliações**: o acompanhamento do assistente fica no link **Avaliações**, no rodapé do chat do robô (veja a seção 16).
+
 ## 15. Dashboard de Operações, Arquivos e Lixeira
 
 **Dashboard de Operações**: a visão geral da operação, com filtros de período, cliente, procedimento e pessoa. Os filtros ficam no endereço da página, então dá para compartilhar o link. Cada indicador tem um botão (i) com a definição exata e indica se mostra "Agora" ou "No período".
@@ -366,7 +383,47 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 
 **Lixeira**: projetos, OSs, clientes, medições e relatórios excluídos ficam aqui por **30 dias** e podem ser restaurados. Depois disso são apagados de vez. Restaurar um item que duplicaria outro ativo é bloqueado.
 
-## 16. Perguntas frequentes
+## 16. Robô ASP (assistente)
+
+O Robô ASP responde dúvidas de uso da plataforma e consulta os dados do sistema: clientes, projetos, OS, agenda, coletas e relatórios. Ele **só consulta** — não altera nada — e só vê o que você tem permissão de ver.
+
+### Abrir e fechar
+
+- Toque no robô, no canto inferior direito, para abrir o chat. Feche no **×** do painel ou com **Esc**.
+- Para esconder o robô, toque no **×** pequeno dele: o atalho passa para a cabeça do robô na barra superior. Para trazê-lo de volta, marque **Robô flutuante na tela** no rodapé do chat.
+- **🎤 Ditar**: toque no microfone e fale a pergunta (Chrome, Edge, Android e iPhone). O texto aparece no campo para você conferir antes de enviar.
+- A conversa fica só nesta aba do navegador; **Nova conversa** começa do zero.
+
+### O que perguntar
+
+- **Assunto** — **Exemplos**
+- Uso da plataforma — "Como gero o relatório de execução?" · "Esqueci minha senha, o que faço?"
+- Dados do sistema — "Projetos da Rhodia" · "Em que fase está a OS TQ-01?" · "O que está agendado para esta semana?"
+- Suas pendências — "Quais são as minhas pendências?" — OS paradas nas fases do seu perfil, fotos e RDO de hoje e a sua agenda dos próximos 7 dias
+- Resumos (números do Dashboard) — "Quantas OS há em cada fase?" · "Quais OS estão paradas há mais de 15 dias?" · "Quais clientes recorrentes estão com serviço vencendo?"
+- A página aberta — Numa OS, projeto ou cliente: "O que falta aqui?" · "Qual a situação desta OS?"
+
+### Como ele responde
+
+- Toda resposta sobre dados é **conferida com o banco**: os projetos, OS e clientes citados vêm com link e precisam existir. Se não encontrar, ele responde "Não encontrei isso no banco (ou você não tem acesso)".
+- Enquanto trabalha, mostra o que está fazendo ("Procurando projetos…", "Conferindo com o banco…").
+- Depois de cada resposta, botões sugerem a próxima pergunta.
+- Assuntos fora da ASP (piadas, notícias, receitas, programação…) recebem sempre a mesma resposta: "Desculpe, não respondo assuntos fora da ASP".
+- Avalie com **👍** ou **👎**. No 👎, conte o que estava errado (opcional): isso ajuda a melhorar o robô.
+
+### Limites
+
+- A IA gratuita tem uma cota diária que **renova às 21h** (horário de Brasília).
+- Cada pessoa pode fazer até **25 perguntas por dia** (o Administrador não tem limite). Dúvidas de uso já respondidas antes não contam.
+
+### Para o Administrador — Avaliações (link no rodapé do chat)
+
+- **Uso do robô**: perguntas por dia (gráfico e tabela), chamadas à IA, tempo médio de resposta, perguntas mais repetidas e quem mais usa.
+- **Teste do robô**: faz 14 perguntas de conferência com a IA de verdade (recusa fora do escopo, consulta certa, dúvidas pelo manual). Rode depois de mudanças no robô ou no manual; gasta parte da cota.
+- **Respostas do robô**: filtre as 👎, as recusas e as respostas de reserva. Em qualquer uma, **Virar exemplo** (ou **Escrever a resposta certa como exemplo**) grava a resposta ideal, que ensina o tom e o formato ao robô para **todos** — tire do texto o que nem todos podem ver.
+- **Respostas guardadas**: dúvidas de uso repetidas são respondidas sem gastar a cota. Um 👎 tira a resposta da memória; **apagar todas** limpa tudo.
+
+## 17. Perguntas frequentes
 
 - **Situação** — **O que fazer**
 - O botão Salvar está desativado — Procure o ⛔ ao lado dos campos; o resumo junto ao botão lista o que falta
@@ -389,7 +446,14 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 - A Conclusão das Análises não mudou ao trocar o laudo — Ela só se atualiza sozinha enquanto tem o texto automático. Se você editou, clique em Sugerir texto
 - As páginas do laudo não apareceram no relatório — Confira se os PDFs estão anexados e se a opção Incluir as páginas dos laudos (prints) está marcada
 - A tabela de valores medidos em campo não saiu — Ela só entra com pH ou cloro preenchidos (vêm da coleta de fotos ou do botão Valores de pH e cloro)
+- Um campo do relatório sumiu — O modelo do procedimento não usa esse campo — ele não iria para o documento
+- Não sei o que falta no relatório — Use o índice no topo do modal: ⛔ e ⚠️ mostram onde; Próxima pendência leva até lá
 - Não consigo enviar o relatório de execução — Faltam os PDFs dos laudos de antes e/ou de após a limpeza — anexe os dois e salve o rascunho
+- O robô respondeu "Não encontrei isso no banco" — Confira o nome do cliente, projeto ou OS. Se estiver certo, você pode não ter acesso a ele
+- O robô diz que não responde esse assunto — Ele só responde sobre a ASP: uso da plataforma e dados de clientes, projetos, OS, agenda e relatórios
+- "O limite diário gratuito do assistente acabou" — A cota volta às 21h (Brasília). Dúvidas de uso já respondidas continuam funcionando
+- O robô sumiu da tela — Ele foi escondido: toque na cabeça do robô na barra superior e marque Robô flutuante na tela
+- O 🎤 não aparece no chat — O navegador não tem reconhecimento de voz (ex.: Firefox). Use Chrome, Edge ou Safari
 - Seções do modelo novo não aparecem no modal — No Catálogo: Voltar ao padrão, envie o modelo e clique em importar do modelo
 
 Encontrou um erro ou tem uma sugestão? Use o botão **💬** na barra superior.
