@@ -43,6 +43,13 @@ export interface ImagemRelatorio {
   /** Altura máxima em cm (padrão 11, a das fotos). As páginas dos laudos do
    *  laboratório usam mais, para o texto ficar legível. */
   alturaMaxCm?: number;
+  /** Foto no quadro padrão do relatório (16:9, 15 × 8,44 cm), recortada pelo
+   *  Word (srcRect) — o arquivo não muda. Gráficos, fichas e páginas de laudo
+   *  não usam. */
+  quadro?: boolean;
+  /** Enquadramento do recorte, 0 a 1 (0,5 = centro): na foto mais alta que o
+   *  quadro, 0 = topo; na mais larga, 0 = esquerda. */
+  foco?: number;
   /** Em qual tópico entra (número original). */
   topico: number;
   /** Subtópico de destino ("6.1", "6.2", "6.3"). A figura entra logo abaixo
@@ -359,6 +366,25 @@ const DEPOIS_DE_KEEPNEXT = ["keepLines", "pageBreakBefore", "framePr", "widowCon
   "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr", "pPrChange"];
 const DEPOIS_DE_SPACING = DEPOIS_DE_KEEPNEXT.slice(DEPOIS_DE_KEEPNEXT.indexOf("ind"));
 
+/** Garante espaço mínimo antes/depois do parágrafo (twips; 240 = 12 pt),
+ *  sem diminuir o que o modelo já tinha. */
+function comEspacoMinimo(p: string, min: { antes?: number; depois?: number }): string {
+  const pPr = /<w:pPr\b[\s\S]*?<\/w:pPr>/.exec(p)?.[0] || "";
+  const sp = /<w:spacing\b[^>]*\/>/.exec(pPr)?.[0];
+  const attr = (s: string, nome: string) => Number(new RegExp(`w:${nome}="(\\d+)"`).exec(s)?.[1] || 0);
+  if (!sp) {
+    const a = [min.antes ? `w:before="${min.antes}"` : "", min.depois ? `w:after="${min.depois}"` : ""].filter(Boolean).join(" ");
+    return noPPr(p, `<w:spacing ${a}/>`, DEPOIS_DE_SPACING);
+  }
+  let novo = sp;
+  for (const [nome, valor] of [["before", min.antes], ["after", min.depois]] as const) {
+    if (!valor || attr(sp, nome) >= valor) continue;
+    novo = novo.replace(new RegExp(`\\s*w:${nome}="[^"]*"`), "").replace(new RegExp(`\\s*w:${nome}Autospacing="[^"]*"`), "")
+      .replace(/\/>$/, ` w:${nome}="${valor}"/>`);
+  }
+  return novo === sp ? p : p.replace(sp, novo);
+}
+
 function comKeepNext(p: string): string {
   return /<w:keepNext(\s[^>]*)?\/>/.test(p) ? p : noPPr(p, "<w:keepNext/>", DEPOIS_DE_KEEPNEXT);
 }
@@ -452,9 +478,22 @@ function removerSubtopicosVazios(body: string): string {
  */
 function acabamentoDoCorpo(body: string): string {
   const blocos = separarBlocos(body);
+  // Legenda ("Figura N –" / "Fonte:") e foto, para o respiro entre as figuras
+  // e o que vem depois: 12 pt depois da última linha da legenda, e antes de um
+  // título que vem logo após uma figura (o modelo dá 0 — tudo ficava colado).
+  const ehLegenda = (k: number) => !!blocos[k] && blocos[k].xml.startsWith("<w:p") && /^(Figura|Fonte)\b/i.test(blocos[k].texto.trim());
+  const ehFoto = (k: number) => !!blocos[k] && /<w:drawing\b/.test(blocos[k].xml) && !blocos[k].texto.trim();
+  const proximoCheio = (k: number) => { let j = k + 1; while (blocos[j] && !blocos[j].texto.trim() && !ehFoto(j)) j++; return j; };
+  const anteriorCheio = (k: number) => { let j = k - 1; while (j >= 0 && !blocos[j].texto.trim() && !ehFoto(j)) j--; return j; };
   let saida = "", ultimo = 0, noCorpo = false, amarrando = false;
-  for (const b of blocos) {
+  for (let k = 0; k < blocos.length; k++) {
+    const b = blocos[k];
     let x = b.xml;
+    if (ehLegenda(k) && !ehLegenda(proximoCheio(k))) x = comEspacoMinimo(x, { depois: 240 });
+    if (b.xml.startsWith("<w:p") && RE_TITULO_SECAO.test(b.texto.trim())) {
+      const a = anteriorCheio(k);
+      if (ehLegenda(a) || ehFoto(a)) x = comEspacoMinimo(x, { antes: 240 });
+    }
     if (b.xml.startsWith("<w:p")) {
       const t = b.texto.trim();
       const titulo = RE_TITULO_SECAO.test(t);
@@ -473,7 +512,12 @@ function acabamentoDoCorpo(body: string): string {
     saida += body.slice(ultimo, b.ini) + x;
     ultimo = b.fim;
   }
-  return saida + body.slice(ultimo);
+  saida += body.slice(ultimo);
+  // Corpo que termina numa tabela (o quadro das assinaturas): o Word põe um
+  // parágrafo vazio de tamanho normal depois dela, que vira uma página em
+  // branco quando a tabela encosta no pé. Fecha com um parágrafo de 1 pt.
+  return saida.replace(/<\/w:tbl>(\s*(?:<w:sectPr\b[\s\S]*?<\/w:sectPr>)?\s*)$/,
+    '</w:tbl><w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr></w:p>$1');
 }
 
 /** Renumera um título dentro de um bloco.
@@ -819,8 +863,29 @@ function alturaProporcional(img: { dados: ArrayBuffer; extensao: "png" | "jpeg" 
   return Math.round(larguraCm * razao * 100) / 100;
 }
 
+/** Quadro padrão das fotos do relatório: 16:9, 15 cm de largura — cabem
+ *  duas por página, com legenda. */
+export const QUADRO_FOTO = { larguraCm: 15, alturaCm: 8.44, razao: 9 / 16 } as const;
+
+/** Recorte (srcRect, em milésimos de %) que leva a foto à razão do quadro,
+ *  deslocado pelo foco. null = a foto já está na razão (ou é ilegível). */
+function recorteDoQuadro(img: { dados: ArrayBuffer; extensao: "png" | "jpeg" }, foco = 0.5): { l: number; t: number; r: number; b: number } | null {
+  const d = dimensoesImagem(img.dados, img.extensao);
+  if (!d || !d.w || !d.h) return null;
+  const f = Math.min(1, Math.max(0, Number.isFinite(foco) ? foco : 0.5));
+  const razao = d.h / d.w;
+  if (Math.abs(razao - QUADRO_FOTO.razao) < 0.005) return null;
+  if (razao > QUADRO_FOTO.razao) {
+    const corte = 1 - QUADRO_FOTO.razao / razao;       // fração da altura que sai
+    return { l: 0, r: 0, t: Math.round(corte * f * 100000), b: Math.round(corte * (1 - f) * 100000) };
+  }
+  const corte = 1 - razao / QUADRO_FOTO.razao;         // fração da largura que sai
+  return { t: 0, b: 0, l: Math.round(corte * f * 100000), r: Math.round(corte * (1 - f) * 100000) };
+}
+
 /** Figura centralizada. cx/cy em EMU (1 cm = 360000). */
-function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: number): string {
+function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: number,
+  recorte?: { l: number; t: number; r: number; b: number } | null): string {
   const cx = Math.round(larguraCm * 360000);
   const cy = Math.round(alturaCm * 360000);
   // keepNext: a foto não fica numa página e a legenda (logo abaixo) na outra.
@@ -832,7 +897,9 @@ function figuraXml(rId: string, idImg: number, larguraCm: number, alturaCm: numb
     '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
     '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
     `<pic:nvPicPr><pic:cNvPr id="${900 + idImg}" name="Figura ${idImg}"/><pic:cNvPicPr/></pic:nvPicPr>` +
-    `<pic:blipFill><a:blip r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:blipFill><a:blip r:embed="${rId}"/>` +
+    (recorte ? `<a:srcRect l="${recorte.l}" t="${recorte.t}" r="${recorte.r}" b="${recorte.b}"/>` : "") +
+    '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
     `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' +
     '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
@@ -2000,19 +2067,22 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       largura = Math.round(largura * (alturaMax / altura) * 100) / 100;
       altura = alturaMax;
     }
+    // Fotos: todas no mesmo quadro 16:9 (o Word recorta; o foco escolhe a parte)
+    const recorte = img.quadro ? recorteDoQuadro(img, img.foco) : null;
+    if (img.quadro) { largura = QUADRO_FOTO.larguraCm; altura = QUADRO_FOTO.alturaCm; }
     // Legenda ABAIXO da figura (padrão adotado pela ASP), seguida da fonte.
     // Modelo com legendas próprias (sob as vagas): a figura acrescentada usa
     // o MESMO estilo delas e só leva "Fonte:" quando foi informada — como nos
     // relatórios de referência, que não têm essa linha.
     const bloco =
-      figuraXml(rId, i + 1, largura, altura) +
+      figuraXml(rId, i + 1, largura, altura, recorte) +
       (estiloLegenda
         ? legendaNoEstilo(estiloLegenda, img.legenda) + (img.fonte?.trim() ? legendaAbnt(`Fonte: ${img.fonte.trim()}`) : "")
         : legendaFigura(img.legenda) + legendaAbnt(`Fonte: ${img.fonte || "ASP Serviços Industriais"}`));
     if (img.vaga) {
       // Vai para uma vaga do modelo: só a figura, sem legenda nem fonte —
       // o modelo já traz a legenda escrita logo abaixo da vaga.
-      const so = figuraXml(rId, i + 1, largura, altura);
+      const so = figuraXml(rId, i + 1, largura, altura, recorte);
       if (img.vagaIndice !== undefined && img.vagaIndice >= 0) {
         const fixas = vagasFixas.get(img.topico) || new Map<number, string>();
         fixas.set(img.vagaIndice, so);
