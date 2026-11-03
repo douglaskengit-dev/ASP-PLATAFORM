@@ -47,6 +47,41 @@ function Sugestoes({ pagina, lista, onEscolher }: { pagina: string; lista?: stri
   );
 }
 
+/** Ditado pelo reconhecimento de voz do navegador (Chrome, Edge, Safari;
+ *  no Chrome o áudio é processado pelo Google). O texto cai no campo para a
+ *  pessoa conferir antes de enviar. Sem suporte, o botão não aparece. */
+function useDitado(aoOuvir: (texto: string, final: boolean) => void, aoErro: (msg: string) => void) {
+  const [suportado, setSuportado] = useState(false);
+  const [ouvindo, setOuvindo] = useState(false);
+  const rec = useRef<any>(null);
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setSuportado(!!SR);
+    return () => rec.current?.abort?.();
+  }, []);
+  function alternar() {
+    if (ouvindo) { rec.current?.stop(); return; }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.lang = "pt-BR";
+    r.interimResults = true;
+    r.continuous = false;
+    r.onresult = (e: any) => {
+      const partes = Array.from(e.results as ArrayLike<any>);
+      aoOuvir(partes.map((x: any) => x[0].transcript).join(" "), partes.every((x: any) => x.isFinal));
+    };
+    r.onerror = (e: any) => aoErro(e.error === "not-allowed" || e.error === "service-not-allowed"
+      ? "Permita o uso do microfone no navegador para ditar a pergunta."
+      : e.error === "no-speech" ? "Não ouvi nada. Toque no microfone e fale de novo." : "Não foi possível usar o microfone agora.");
+    r.onend = () => setOuvindo(false);
+    rec.current = r;
+    setOuvindo(true);
+    r.start();
+  }
+  return { suportado, ouvindo, alternar };
+}
+
 /** 👍/👎 numa resposta; o 👎 pede (opcional) o que estava errado. */
 function Avaliacao({ msg, onAvaliar }: { msg: Mensagem; onAvaliar: (v: 1 | -1 | null, comentario?: string) => Promise<boolean> }) {
   const [comentando, setComentando] = useState(false);
@@ -95,6 +130,16 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
   const [acenando, setAcenando] = useState(false);
   const fimRef = useRef<HTMLDivElement>(null);
   const campoRef = useRef<HTMLTextAreaElement>(null);
+  // o ditado completa o que já estava escrito
+  const antesDoDitado = useRef("");
+  const ditado = useDitado(
+    (falado, final) => {
+      const base = antesDoDitado.current;
+      setTexto(`${base}${base && !/\s$/.test(base) ? " " : ""}${falado}`.slice(0, 4000));
+      if (final) campoRef.current?.focus();
+    },
+    (msg) => setErro(msg),
+  );
   const atalhoRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -228,9 +273,17 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
       <form onSubmit={(e) => { e.preventDefault(); perguntar(texto); }} className="assistente-painel-pe">
         <div style={{ display: "flex", gap: 8 }}>
           <textarea ref={campoRef} value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} maxLength={4000}
-            aria-label="Sua pergunta" placeholder="Escreva sua pergunta…"
+            aria-label="Sua pergunta" placeholder={ditado.ouvindo ? "Ouvindo… pode falar" : "Escreva sua pergunta…"}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); perguntar(texto); } }}
             style={{ flex: 1, padding: "8px 10px", border: "1px solid var(--borda)", borderRadius: 8, fontSize: 14, resize: "none" }} />
+          {ditado.suportado && (
+            <button type="button" className={`assistente-microfone${ditado.ouvindo ? " ouvindo" : ""}`} disabled={enviando}
+              aria-pressed={ditado.ouvindo} aria-label={ditado.ouvindo ? "Parar o ditado" : "Ditar a pergunta"}
+              title={ditado.ouvindo ? "Ouvindo… toque para parar" : "Ditar a pergunta (microfone)"}
+              onClick={() => { if (!ditado.ouvindo) { antesDoDitado.current = texto; setErro(null); } ditado.alternar(); }}>
+              {ditado.ouvindo ? "⏹" : "🎤"}
+            </button>
+          )}
           <button type="submit" className="btn-azul" disabled={enviando || !texto.trim()}>Enviar</button>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6, fontSize: 12.5 }}>
