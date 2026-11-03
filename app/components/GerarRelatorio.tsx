@@ -912,62 +912,87 @@ export default function GerarRelatorio({
     });
   }
 
-  /** Painel das fotos que vieram da coleta: miniatura, destino, legenda ou
-   *  vaga, e remover. Mostra todas num lugar só — algumas caem em tópicos
-   *  cujo bloco não lista fotos fora de vaga. */
-  function PainelColeta() {
+  /** Uma foto que veio da coleta: miniatura, destino, vaga (ou fora das
+   *  vagas, com legenda) e remover. */
+  function LinhaColeta(f: FotoTopico, i: number) {
+    const vagas = vagasModelo.filter((v) => v.topico === f.topico);
+    return (
+      <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 8, paddingTop: 8,
+        borderTop: "1px solid var(--borda)", flexWrap: "wrap" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {f.previa && <img src={f.previa} alt="" title="Ampliar" onClick={() => setAmpliada({ src: f.previa!, legenda: f.coleta })}
+          style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 6, flexShrink: 0, cursor: "zoom-in" }} />}
+        <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{f.coleta}</span>
+          <span className="detalhe" style={{ margin: 0 }}>→ {destinoDaFoto(f)}</span>
+          {vagas.length > 0 && (
+            <select style={campo} value={f.vaga && f.vagaIndice !== undefined ? f.vagaIndice : -1}
+              aria-label={`Vaga da foto ${f.coleta}`} onChange={(e) => moverParaVaga(i, Number(e.target.value))}>
+              {vagas.map((v, k) => (
+                <option key={k} value={k}>Vaga {k + 1}: {(v.legenda || v.marcador).slice(0, 90)}</option>
+              ))}
+              <option value={-1}>Fora das vagas (figura no fim da seção)</option>
+            </select>
+          )}
+          {!f.vaga && (
+            <input style={campo} placeholder="Legenda *" value={f.legenda} aria-label={`Legenda da foto ${f.coleta}`}
+              onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
+          )}
+          <MensagensCampo r={r} campo={`fotos.${i}`} />
+        </div>
+        <button className="btn-dl btn-sec btn-perigo"
+          onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
+      </div>
+    );
+  }
+
+  /** As fotos da coleta de execução que caem NESTE tópico — nas vagas do
+   *  modelo, no fim da seção ou num subtópico ("Higienização do robô"). Cada
+   *  tópico mostra as suas; não há mais um painel separado. */
+  function FotosDaColeta(numero: number) {
     if (!coletaFotos) return null;
-    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.coleta);
+    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.coleta && x.f.topico === numero);
+    if (!minhas.length) return null;
+    return (
+      <div style={{ marginTop: 10 }}>
+        <label style={rotulo}>
+          Fotos da coleta de execução <span className="detalhe">— {minhas.length} neste tópico, carregadas automaticamente</span>
+        </label>
+        {minhas.map(({ f, i }) => LinhaColeta(f, i))}
+      </div>
+    );
+  }
+
+  /** No topo: só o que falta na coleta e as fotos que ficaram sem lugar na
+   *  tela (tópico desmarcado ou que este relatório não mostra). */
+  function AvisoColeta() {
+    if (!coletaFotos) return null;
+    const naTela = new Set(indice.filter((it) => it.ativo).map((it) => it.id));
+    const semLugar = fotos.map((f, i) => ({ f, i }))
+      .filter((x) => x.f.coleta && indice.length > 0 && !naTela.has(`t${x.f.topico}`));
+    if (!pendColeta.length && !infoColeta && !semLugar.length) return null;
     return (
       <div className="rel-bloco">
-        <strong style={{ fontSize: 13.5 }}>
-          Fotos da coleta de execução <span className="detalhe">— {minhas.length} carregada(s) automaticamente</span>
-        </strong>
         {pendColeta.length > 0 && (
-          <div className="detalhe" style={{ margin: "6px 0 0", color: "var(--pendente)" }}>
-            ⚠ A coleta de fotos da execução está incompleta ({pendColeta.length} pendência(s)):
+          <details className="detalhe" style={{ margin: 0, color: "var(--pendente)" }}>
+            <summary style={{ cursor: "pointer" }}>
+              ⚠ Coleta de fotos da execução incompleta — {pendColeta.length} pendência(s). Dá para gerar assim mesmo: o que falta só não entra no relatório.
+            </summary>
             <ul style={{ margin: "4px 0 4px 18px", padding: 0 }}>
               {pendColeta.map((p) => <li key={p}>{p}</li>)}
             </ul>
-            Você pode gerar assim mesmo — o que falta só não entra no relatório. Para completar,
-            use o card “Coleta de fotos da execução” da OS.
-          </div>
+            Para completar, use o card “Coleta de fotos da execução” da OS.
+          </details>
         )}
         {infoColeta && <p className="detalhe" style={{ margin: "6px 0 0" }}>{infoColeta}</p>}
-        {minhas.length === 0 && !infoColeta && (
-          <p className="vazio" style={{ margin: "6px 0 0" }}>Nenhuma foto coletada nesta OS.</p>
+        {semLugar.length > 0 && (
+          <details style={{ marginTop: 6 }}>
+            <summary className="detalhe" style={{ cursor: "pointer" }}>
+              {semLugar.length} foto(s) da coleta estão em tópicos desmarcados e não entram no relatório
+            </summary>
+            {semLugar.map(({ f, i }) => LinhaColeta(f, i))}
+          </details>
         )}
-        {minhas.map(({ f, i }) => {
-          const vagas = vagasModelo.filter((v) => v.topico === f.topico);
-          return (
-            <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 8, paddingTop: 8,
-              borderTop: "1px solid var(--borda)", flexWrap: "wrap" }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              {f.previa && <img src={f.previa} alt="" title="Ampliar" onClick={() => setAmpliada({ src: f.previa!, legenda: f.coleta })}
-                style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 6, flexShrink: 0, cursor: "zoom-in" }} />}
-              <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{f.coleta}</span>
-                <span className="detalhe" style={{ margin: 0 }}>→ {destinoDaFoto(f)}</span>
-                {vagas.length > 0 && (
-                  <select style={campo} value={f.vaga && f.vagaIndice !== undefined ? f.vagaIndice : -1}
-                    onChange={(e) => moverParaVaga(i, Number(e.target.value))}>
-                    {vagas.map((v, k) => (
-                      <option key={k} value={k}>Vaga {k + 1}: {(v.legenda || v.marcador).slice(0, 90)}</option>
-                    ))}
-                    <option value={-1}>Fora das vagas (figura no fim da seção)</option>
-                  </select>
-                )}
-                {!f.vaga && (
-                  <input style={campo} placeholder="Legenda *" value={f.legenda}
-                    onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
-                )}
-                <MensagensCampo r={r} campo={`fotos.${i}`} />
-              </div>
-              <button className="btn-dl btn-sec btn-perigo"
-                onClick={() => setFotos((p) => p.filter((_, k) => k !== i))}>Remover</button>
-            </div>
-          );
-        })}
       </div>
     );
   }
@@ -1461,9 +1486,11 @@ export default function GerarRelatorio({
 
   /** Bloco de fotos de um tópico. */
   function BlocoFotos({ topico, max, legendaPadrao }: { topico: number; max?: number; legendaPadrao?: string }) {
-    const minhas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.topico === topico && !x.f.ancora);
+    const todas = fotos.map((f, i) => ({ f, i })).filter((x) => x.f.topico === topico && !x.f.ancora);
+    // as da coleta aparecem no bloco delas (FotosDaColeta), mas contam no limite
+    const minhas = todas.filter((x) => !x.f.coleta);
     const limite = max ?? 20;
-    const cheio = minhas.length >= limite;
+    const cheio = todas.length >= limite;
     return (
       <div style={{ marginTop: 10 }}>
         <label style={rotulo}>
@@ -1473,7 +1500,7 @@ export default function GerarRelatorio({
         {cheio ? <span className="detalhe">Limite de {limite} foto(s) atingido.</span> : (
         <input type="file" accept={ACEITA_FOTO} multiple disabled={processandoFotos}
           onChange={(e) => {
-            adicionarArquivos(e.target.files, limite - minhas.length, `t-${topico}`, { legenda: legendaPadrao || "", topico });
+            adicionarArquivos(e.target.files, limite - todas.length, `t-${topico}`, { legenda: legendaPadrao || "", topico });
             e.target.value = "";
           }} />)}
         {MsgFotos(`t-${topico}`)}
@@ -1547,6 +1574,7 @@ export default function GerarRelatorio({
         {on && (
           <div style={{ marginTop: 10, display: fechado ? "none" : "flex", flexDirection: "column", gap: 10 }}>
             {children}
+            {FotosDaColeta(numero)}
             {!semFotos && BlocoFotos({ topico: numero, max: maxFotos, legendaPadrao: legendaFoto })}
           </div>
         )}
@@ -2124,7 +2152,7 @@ export default function GerarRelatorio({
           </p>
         )}
 
-        {PainelColeta()}
+        {AvisoColeta()}
 
         {Topico({ numero: 0, titulo: TOPICO_CAPA.titulo, children: <>
           <div style={grade}>
