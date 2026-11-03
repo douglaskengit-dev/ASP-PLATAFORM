@@ -161,6 +161,19 @@ Editor do Supabase ou `supabase db push`). Os relevantes ao fluxo ASP:
 20260731100000_asp_soft_delete_inspecao_cliente.sql lixeira de inspeção/cliente
 ```
 
+### Manual do Robô ASP
+
+O assistente responde as dúvidas de uso pelo manual do usuário. Sempre que o
+manual em Word mudar, gere de novo a base dele e faça o commit de
+`lib/assistente/manual.ts`:
+
+```
+npm run manual:robo -- "caminho/para/Manual-do-Usuario-Plataforma-ASP.docx"
+```
+
+Os capítulos precisam usar os estilos **Título 1** (capítulos) e **Título 2/3**
+(subseções) do Word. As respostas guardadas antigas deixam de valer sozinhas.
+
 ### E-mail via Gmail
 
 Envia convites, redefinição de senha e agendamentos (com o `.ics`) por uma

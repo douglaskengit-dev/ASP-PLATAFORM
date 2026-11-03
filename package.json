@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "manual:robo": "node scripts/gerar-manual-assistente.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
