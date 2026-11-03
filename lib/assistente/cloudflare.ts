@@ -111,7 +111,7 @@ async function rodar(modelo: string, mensagens: MensagemCf[]): Promise<{ texto: 
   return { texto, chamadas };
 }
 
-export async function responderCloudflare({ historico, contexto, executar, naPagina, registro }: PedidoAssistente): Promise<string> {
+export async function responderCloudflare({ historico, contexto, executar, naPagina, registro, aoEtapa }: PedidoAssistente): Promise<string> {
   const modelo = process.env.ASSISTENTE_MODEL || MODELO_CLOUDFLARE_PADRAO;
   const pergunta = historico[historico.length - 1].texto;
   const mensagens: MensagemCf[] = [
@@ -131,11 +131,13 @@ export async function responderCloudflare({ historico, contexto, executar, naPag
     const pedidas = chamadas.length ? chamadas : chamadasNoTexto(texto);
     if (!pedidas.length) {
       const final = texto.trim();
+      if (consultas.length) aoEtapa?.("Conferindo com o banco…");
       const problema = problemaNaResposta(final, consultas, pergunta, naPagina);
       if (!problema) return final || "Não consegui montar uma resposta. Tente reformular a pergunta.";
       // citou algo que o banco não devolveu: uma correção; se insistir, só os dados
       if (corrigiu || nadaEncontrado(consultas)) return reserva();
       corrigiu = true;
+      aoEtapa?.("Revisando a resposta…");
       mensagens.push({ role: "assistant", content: final });
       mensagens.push({ role: "user", content: `[Conferência automática, não é o usuário] ${problema} Refaça a resposta.` });
       continue;

@@ -117,6 +117,32 @@ function Avaliacao({ msg, onAvaliar }: { msg: Mensagem; onAvaliar: (v: 1 | -1 | 
   );
 }
 
+/** Lê a resposta do robô: em linhas JSON (etapas e, no fim, o resultado)
+ *  ou, se o servidor não mandou em linhas, o JSON comum. */
+async function lerResposta(resp: Response, aoEtapa: (t: string) => void): Promise<{ ok: boolean; j: any }> {
+  if (!(resp.headers.get("content-type") || "").includes("ndjson") || !resp.body) {
+    return { ok: resp.ok, j: await resp.json().catch(() => ({})) };
+  }
+  const leitor = resp.body.getReader();
+  const decodificador = new TextDecoder();
+  let resto = "", fim: any = null;
+  for (;;) {
+    const { value, done } = await leitor.read();
+    resto += decodificador.decode(value || new Uint8Array(), { stream: !done });
+    const linhas = resto.split("\n");
+    resto = linhas.pop() || "";
+    for (const l of linhas) {
+      if (!l.trim()) continue;
+      try {
+        const o = JSON.parse(l);
+        if (o.fim) fim = o; else if (typeof o.etapa === "string") aoEtapa(o.etapa);
+      } catch {}
+    }
+    if (done) break;
+  }
+  return fim ? { ok: fim.status < 400, j: fim } : { ok: false, j: { erro: "A resposta chegou incompleta. Tente de novo." } };
+}
+
 export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean }) {
   const router = useRouter();
   const pagina = usePathname() || "";
@@ -126,6 +152,8 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
+  /** O que o robô está fazendo agora ("Procurando projetos…"). */
+  const [etapa, setEtapa] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [acenando, setAcenando] = useState(false);
   const fimRef = useRef<HTMLDivElement>(null);
@@ -192,13 +220,14 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
     setTexto("");
     setErro(null);
     setEnviando(true);
+    setEtapa(null);
     try {
       const resp = await fetch("/api/assistente", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
         body: JSON.stringify({ mensagens: nova.map(({ papel, texto }) => ({ papel, texto })), pagina }),
       });
-      const j = await resp.json().catch(() => ({}));
-      if (!resp.ok || typeof j.resposta !== "string") throw new Error(j.erro || "O assistente não respondeu.");
+      const { ok, j } = await lerResposta(resp, setEtapa);
+      if (!ok || typeof j.resposta !== "string") throw new Error(j.erro || "O assistente não respondeu.");
       setMensagens((m) => [...m, {
         papel: "assistente", texto: j.resposta,
         ...(j.fora_do_escopo ? { foraDoEscopo: true } : {}), ...(typeof j.id === "string" ? { id: j.id } : {}),
@@ -208,6 +237,7 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
       setErro(e.message || "Falha ao consultar o assistente.");
     } finally {
       setEnviando(false);
+      setEtapa(null);
     }
   }
 
@@ -263,7 +293,7 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
         )}
         {enviando && (
           <span className="detalhe" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <span className="assistente-digitando" aria-hidden="true"><i /><i /><i /></span> Consultando…
+            <span className="assistente-digitando" aria-hidden="true"><i /><i /><i /></span> {etapa || "Consultando…"}
           </span>
         )}
         {erro && <span className="msg erro" style={{ margin: 0 }}>{erro}</span>}

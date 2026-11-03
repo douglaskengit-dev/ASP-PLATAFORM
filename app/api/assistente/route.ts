@@ -19,15 +19,53 @@ export const maxDuration = 60;
 const MAX_MENSAGENS = 20;
 const MAX_CARACTERES = 4000;
 
+/** O que o robô está fazendo, para mostrar enquanto a resposta não chega. */
+const ETAPA_DA_CONSULTA: Record<string, string> = {
+  buscar_projetos: "Procurando projetos…", detalhar_projeto: "Abrindo o projeto…",
+  buscar_os: "Procurando OS…", detalhar_os: "Abrindo a OS…", buscar_clientes: "Procurando clientes…",
+  agenda: "Olhando a agenda…", indicadores: "Calculando os números do Dashboard…", minhas_pendencias: "Juntando as suas pendências…",
+};
+
+type Profile = NonNullable<Awaited<ReturnType<typeof getProfileAtual>>>;
+interface Saida { status: number; corpo: Record<string, unknown> }
+
 /** Assistente da plataforma: responde dúvidas de uso (manual) e consulta os
  *  dados do sistema com ferramentas só de leitura, sob o RLS de quem pergunta.
  *  O histórico vem do navegador (só texto) a cada pergunta. IA: Cloudflare
- *  Workers AI (padrão, gratuito) ou Anthropic (ASSISTENTE_PROVEDOR=anthropic). */
+ *  Workers AI (padrão, gratuito) ou Anthropic (ASSISTENTE_PROVEDOR=anthropic).
+ *
+ *  Com "Accept: application/x-ndjson" a resposta vem em linhas JSON: antes,
+ *  as etapas ({ etapa }) — o que o robô está fazendo —, e por último o
+ *  resultado ({ fim: true, status, ... }). O texto da IA só aparece depois de
+ *  conferido com o banco; nunca vai pela metade para a tela. */
 export async function POST(req: NextRequest) {
-  const inicio = Date.now();
+  // sessão antes de abrir o fluxo (a renovação do login grava cookies)
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
+  const sb = getSupabaseRouteClient();
 
+  if (!(req.headers.get("accept") || "").includes("application/x-ndjson")) {
+    const { status, corpo } = await processar(req, profile, sb, () => {});
+    return NextResponse.json(corpo, { status });
+  }
+  const codificador = new TextEncoder();
+  const fluxo = new ReadableStream({
+    async start(controle) {
+      const enviar = (o: Record<string, unknown>) => controle.enqueue(codificador.encode(JSON.stringify(o) + "\n"));
+      try {
+        const { status, corpo } = await processar(req, profile, sb, (etapa) => enviar({ etapa }));
+        enviar({ fim: true, status, ...corpo });
+      } catch {
+        enviar({ fim: true, status: 502, erro: "O assistente não conseguiu responder agora. Tente de novo." });
+      }
+      controle.close();
+    },
+  });
+  return new Response(fluxo, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+async function processar(req: NextRequest, profile: Profile, sb: ReturnType<typeof getSupabaseRouteClient>, aoEtapa: (texto: string) => void): Promise<Saida> {
+  const inicio = Date.now();
   const corpo = (await req.json().catch(() => null)) as { mensagens?: MensagemChat[]; pagina?: string } | null;
   const historico = (Array.isArray(corpo?.mensagens) ? corpo!.mensagens : [])
     .filter((m) => (m?.papel === "usuario" || m?.papel === "assistente") && typeof m.texto === "string" && m.texto.trim())
@@ -35,22 +73,22 @@ export async function POST(req: NextRequest) {
     .map((m) => ({ papel: m.papel, texto: m.texto.slice(0, MAX_CARACTERES) }));
   while (historico.length && historico[0].papel !== "usuario") historico.shift();
   if (!historico.length || historico[historico.length - 1].papel !== "usuario") {
-    return NextResponse.json({ erro: "Envie uma pergunta." }, { status: 400 });
+    return { status: 400, corpo: { erro: "Envie uma pergunta." } };
   }
 
-  const sb = getSupabaseRouteClient();
   const pergunta = historico[historico.length - 1].texto;
   const provedor = process.env.ASSISTENTE_PROVEDOR === "anthropic" ? "anthropic" : "cloudflare";
 
   // assunto claramente alheio à ASP: recusa sem gastar a cota da IA
   if (foraDoEscopoObvio(pergunta)) {
     const id = await registrarResposta(sb, { pergunta, resposta: MSG_FORA_DO_ESCOPO, pagina: corpo?.pagina, consultas: [], foraDoEscopo: true, provedor: "filtro" });
-    return NextResponse.json({ resposta: MSG_FORA_DO_ESCOPO, fora_do_escopo: true, id });
+    return { status: 200, corpo: { resposta: MSG_FORA_DO_ESCOPO, fora_do_escopo: true, id } };
   }
 
   const consultas: string[] = [];
   const executar: ExecutarFerramenta = async (nome, entrada) => {
     consultas.push(nome);
+    aoEtapa(ETAPA_DA_CONSULTA[nome] || "Consultando o banco…");
     try {
       return { conteudo: JSON.stringify(await executarFerramenta(sb, nome, entrada, { id: profile.id, perfil: profile.perfil })) };
     } catch (e: any) {
@@ -66,7 +104,7 @@ export async function POST(req: NextRequest) {
   ]);
   const contexto = [contextoDaSessao(profile.nome_completo, profile.perfil, hoje), pagina && contextoDaPagina(pagina), exemplos].filter(Boolean).join("\n");
   const registro = { reserva: false, chamadas: 0 };
-  const pedido = { historico, contexto, executar, naPagina: !!pagina, registro };
+  const pedido = { historico, contexto, executar, naPagina: !!pagina, registro, aoEtapa };
 
   // dúvida de uso sem conversa anterior e fora de página de dados: pode vir
   // (e ir) para as respostas guardadas, sem gastar a cota da IA
@@ -76,15 +114,16 @@ export async function POST(req: NextRequest) {
     const guardada = await respostaGuardada(pergunta, versao).catch(() => null);
     if (guardada) {
       const id = await registrarResposta(sb, { pergunta, resposta: guardada, pagina: corpo?.pagina, consultas: [], provedor: "cache" });
-      return NextResponse.json({ resposta: guardada, id, sugestoes: [] });
+      return { status: 200, corpo: { resposta: guardada, id, sugestoes: [] } };
     }
   }
 
+  aoEtapa("Pensando…");
   // limite diário por pessoa (o admin não tem)
   const limite = limiteDiario();
   if (limite > 0 && profile.perfil !== "admin") {
     const feitas = await perguntasHoje(sb, profile.id, hoje).catch(() => null);
-    if (feitas != null && feitas >= limite) return NextResponse.json({ erro: msgLimite(limite) }, { status: 429 });
+    if (feitas != null && feitas >= limite) return { status: 429, corpo: { erro: msgLimite(limite) } };
   }
 
   // cota gratuita do Cloudflare acabou: se configurado, a Anthropic responde
@@ -113,10 +152,10 @@ export async function POST(req: NextRequest) {
       chamadasIa: registro.chamadas, duracaoMs: Date.now() - inicio,
     });
     const sugestoes = final.fora_do_escopo ? [] : sugestoesDeContinuacao(final.resposta, consultas, pergunta);
-    return NextResponse.json({ ...final, id, sugestoes });
+    return { status: 200, corpo: { ...final, id, sugestoes } };
   } catch (e) {
-    if (e instanceof ErroAssistente) return NextResponse.json({ erro: e.message }, { status: e.status });
+    if (e instanceof ErroAssistente) return { status: e.status, corpo: { erro: e.message } };
     console.error("assistente:", e);
-    return NextResponse.json({ erro: "O assistente não conseguiu responder agora. Tente de novo." }, { status: 502 });
+    return { status: 502, corpo: { erro: "O assistente não conseguiu responder agora. Tente de novo." } };
   }
 }
