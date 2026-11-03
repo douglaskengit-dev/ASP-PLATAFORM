@@ -693,9 +693,10 @@ export default function GerarRelatorio({
    *  não estão lá; o texto já escrito fica como está. */
   function sugerirTexto(campo: "conclusao" | "recomendacoes") {
     const dados: DadosSugestao = {
-      execucao: !!execucao, limpeza, tag: d.tag, procedimento: d.procedimento, dataExecucao: d.dataExecucao,
-      volumeSedimento: d.volumeSedimento, alturaSedimento: d.alturaSedimento, capacidadeTanque: d.capacidadeTanque,
-      phDepois: d.phDepois, cloroDepois: d.cloroDepois, laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois, unidadeCloro,
+      execucao: !!execucao, limpeza, tag: d.tag, cliente: d.cliente, procedimento: d.procedimento, dataExecucao: d.dataExecucao,
+      volumeSedimento: d.volumeSedimento, volumeMin: d.volumeMin, volumeMax: d.volumeMax, alturaSedimento: d.alturaSedimento,
+      capacidadeTanque: d.capacidadeTanque, phDepois: d.phDepois, cloroDepois: d.cloroDepois,
+      laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois, amostraAntes: d.amostraAntes, amostraDepois: d.amostraDepois, unidadeCloro,
       achados: N.fotosInternas !== undefined && ativo(N.fotosInternas) ? subs8.map((x) => x.titulo.trim()).filter(Boolean) : [],
     };
     const add = campo === "conclusao" ? sugestaoTextoConclusao(dados, d.conclusao) : sugestaoTextoRecomendacoes(dados, d.recomendacoes);
