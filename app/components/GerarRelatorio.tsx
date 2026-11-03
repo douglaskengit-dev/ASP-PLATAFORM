@@ -44,7 +44,8 @@ import {
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
   CAMPOS_PH_CLORO, CLORO_MAXIMO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
-  dadosDasRdos, mesmaPessoa, sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
+  dadosDasRdos, mesmaPessoa, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
+  sugestaoTextoConclusao, sugestaoTextoRecomendacoes, type DadosSugestao,
   CAMPOS_DO_MODELO, semCamposForaDoModelo,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
@@ -685,14 +686,38 @@ export default function GerarRelatorio({
     () => [...foraDoLimite("laudoAntes", d.laudoAntes), ...foraDoLimite("laudoDepois", d.laudoDepois)],
     [d.laudoAntes, d.laudoDepois]
   );
-  /** Acrescenta à Conclusão a frase de cada parâmetro fora do limite. */
-  function sugerirConclusao() {
-    setD((v) => {
-      const add = sugestaoConclusao(foraLimite, v.conclusao);
-      return add ? { ...v, conclusao: (v.conclusao || "") + add } : v;
-    });
-    const nc = N.conclusao;
-    if (nc !== undefined && !ativo(nc)) setVisiveis((v) => ({ ...v, [nc]: true }));
+  /** Resultado do último "Sugerir texto" de cada campo. */
+  const [msgSugestao, setMsgSugestao] = useState<Partial<Record<"conclusao" | "recomendacoes", string>>>({});
+  /** Acrescenta à Conclusão ou às Recomendações o texto montado com os dados
+   *  do relatório (lib/validacao/sugestaoTextos.ts) — só as frases que ainda
+   *  não estão lá; o texto já escrito fica como está. */
+  function sugerirTexto(campo: "conclusao" | "recomendacoes") {
+    const dados: DadosSugestao = {
+      execucao: !!execucao, limpeza, tag: d.tag, procedimento: d.procedimento, dataExecucao: d.dataExecucao,
+      volumeSedimento: d.volumeSedimento, alturaSedimento: d.alturaSedimento, capacidadeTanque: d.capacidadeTanque,
+      phDepois: d.phDepois, cloroDepois: d.cloroDepois, laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois, unidadeCloro,
+      achados: N.fotosInternas !== undefined && ativo(N.fotosInternas) ? subs8.map((x) => x.titulo.trim()).filter(Boolean) : [],
+    };
+    const add = campo === "conclusao" ? sugestaoTextoConclusao(dados, d.conclusao) : sugestaoTextoRecomendacoes(dados, d.recomendacoes);
+    if (!add) {
+      setMsgSugestao((m) => ({ ...m, [campo]: "Nada novo a sugerir com os dados atuais (o texto já tem essas frases)." }));
+      return;
+    }
+    setD((v) => ({ ...v, [campo]: (v[campo] || "") + add }));
+    setMsgSugestao((m) => ({ ...m, [campo]: "Texto sugerido acrescentado no fim — revise e ajuste antes de gerar." }));
+    const n = campo === "conclusao" ? N.conclusao : N.recomendacoes;
+    if (n !== undefined && !ativo(n)) setVisiveis((v) => ({ ...v, [n]: true }));
+  }
+
+  function BotaoSugerir(campo: "conclusao" | "recomendacoes") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" className="btn-dl btn-sec" onClick={() => sugerirTexto(campo)}>✍ Sugerir texto</button>
+        <span className="detalhe" aria-live="polite">
+          {msgSugestao[campo] || "Monta o texto com os dados deste relatório (medição, laudo, pH e cloro, inspeção). Revise antes de gerar."}
+        </span>
+      </div>
+    );
   }
   /** Muda uma célula do laudo (a grade é sempre completa). */
   function mudarCelula(chave: ChaveLaudo, i: number, j: number, valor: string) {
@@ -2005,7 +2030,7 @@ export default function GerarRelatorio({
                   {f.nome} — {f.chave === "laudoAntes" ? "antes" : "depois"}: {f.valor}{f.unidade ? ` ${f.unidade}` : ""} (limite {f.limite}{f.unidade ? ` ${f.unidade}` : ""})
                 </li>
               ))}</ul>
-              <button type="button" className="btn-dl btn-sec" onClick={sugerirConclusao}>
+              <button type="button" className="btn-dl btn-sec" onClick={() => sugerirTexto("conclusao")}>
                 ✍ Sugerir texto na conclusão
               </button>
               <MensagensCampo r={r} campo="conclusao" />
@@ -2466,11 +2491,12 @@ export default function GerarRelatorio({
         ),
 
         N.conclusao !== undefined && Topico({ numero: N.conclusao, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
+          {BotaoSugerir("conclusao")}
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
           <MensagensCampo r={r} campo="conclusao">
             {foraLimite.length > 0 && (
               <div className="val-sugestao">
-                <button type="button" className="btn-dl btn-sec" onClick={sugerirConclusao}>✍ Sugerir texto na conclusão</button>
+                <button type="button" className="btn-dl btn-sec" onClick={() => sugerirTexto("conclusao")}>✍ Sugerir texto na conclusão</button>
                 <span>{foraLimite.length} resultado(s) do laudo fora do limite</span>
               </div>
             )}
@@ -2478,6 +2504,7 @@ export default function GerarRelatorio({
         </> }),
 
         N.recomendacoes !== undefined && Topico({ numero: N.recomendacoes, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
+          {BotaoSugerir("recomendacoes")}
           <EditorTexto valor={d.recomendacoes || ""} onChange={(v) => setD((x) => ({ ...x, recomendacoes: v }))} altura={110} />
         </> }),
 
