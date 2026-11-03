@@ -30,6 +30,7 @@ export * from "./relatorio";
 export * from "./aprovacao";
 export * from "./fotosExecucao";
 export * from "./relatorioExecucao";
+export * from "./sugestaoTextos";
 export * from "./aprovacaoExecucao";
 export * from "./encerramento";
 export * from "./catalogo";
