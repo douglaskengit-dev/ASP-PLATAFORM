@@ -25,7 +25,7 @@ import EditorTexto from "./EditorTexto";
 import VisualizadorFoto from "./VisualizadorFoto";
 import type { LaudoLido } from "@/lib/asp/laudo-leitura";
 import {
-  gerarRelatorioDocx, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
+  gerarRelatorioDocx, lerCamposDoModelo, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
   TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada, numeroDaSecao,
   type DadosRelatorio, type ImagemRelatorio, type TabelaAnalise, type VagaImagem,
 } from "@/lib/asp/relatorio";
@@ -45,6 +45,7 @@ import {
   CAMPOS_PH_CLORO, CLORO_MAXIMO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusao, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
+  CAMPOS_DO_MODELO, semCamposForaDoModelo,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
 
@@ -210,6 +211,20 @@ function legendaDaVaga(legenda: string) {
   return legenda.replace(/^Figura\s+\S+\s*[–-]\s*/i, "").replace(/\s*\(\[dado coletado\]\)/gi, "").trim();
 }
 
+/** Um tópico no índice do topo, com o estado lido da tela: mensagens ⛔/⚠️
+ *  dentro do bloco, se está marcado e se ficou sem conteúdo. */
+interface ItemIndice { id: string; titulo: string; ativo: boolean; vazio: boolean; erros: number; avisos: number }
+
+const pendente = (it: ItemIndice) => it.ativo && (it.erros > 0 || it.avisos > 0 || it.vazio);
+
+function estadoDoItem(it: ItemIndice): { classe: string; icone: string; texto: string } {
+  if (!it.ativo) return { classe: "fora", icone: "—", texto: "fora do relatório" };
+  if (it.erros) return { classe: "erro", icone: "⛔", texto: `${it.erros} erro(s) — impede gerar` };
+  if (it.avisos) return { classe: "aviso", icone: "⚠️", texto: `${it.avisos} aviso(s) para conferir` };
+  if (it.vazio) return { classe: "vazio", icone: "○", texto: "não preenchido — fica fora do relatório" };
+  return { classe: "ok", icone: "✓", texto: "pronto" };
+}
+
 /** Blocos de seção do formulário na ordem do número no modelo
  *  (`data-secao`), que é a ordem em que saem no documento. */
 function emOrdemDoModelo(blocos: React.ReactNode[]) {
@@ -294,6 +309,15 @@ export default function GerarRelatorio({
    *  robotizada. Um tópico sem vaga aqui usa o upload de fotos livre de
    *  sempre. */
   const [vagasModelo, setVagasModelo] = useState<VagaImagem[]>([]);
+  /** Campos de CAMPOS_DO_MODELO que o modelo em uso tem (null = ainda não
+   *  lido ou falhou: mostra todos). Os outros não chegam ao documento e
+   *  saem do formulário. */
+  const [camposModelo, setCamposModelo] = useState<Set<string> | null>(null);
+  /** Tópicos recolhidos (só o cabeçalho aparece; os campos continuam lá). */
+  const [recolhidos, setRecolhidos] = useState<Record<string, boolean>>({});
+  /** Índice do topo: cada tópico com o estado dele, lido da própria tela. */
+  const [indice, setIndice] = useState<ItemIndice[]>([]);
+  const formRef = useRef<HTMLDivElement>(null);
   /** Texto das seções do modelo que não têm campos próprios, por número. */
   const [textosTopico, setTextosTopico] = useState<Record<number, string>>(salvo?.textosTopico || {});
   /** Diagnóstico do modelo em uso. Sem isso, uma falha de leitura fica
@@ -441,9 +465,14 @@ export default function GerarRelatorio({
     // livre, que é o comportamento de sempre.
     const vagas = lerVagasDeImagem(url).catch(() => [] as VagaImagem[])
       .then((v) => { if (vigente) setVagasModelo(v); });
+    setCamposModelo(null);
+    lerCamposDoModelo(url).then((c) => { if (vigente) setCamposModelo(c); }).catch(() => {});
     Promise.all([lidos, vagas]).then(() => { if (vigente) setModeloLido(caminhoModelo || ""); });
     return () => { vigente = false; };
   }, [caminhoModelo, proc?.codigo]);
+
+  const usaCampo = (k: (typeof CAMPOS_DO_MODELO)[number]) => !camposModelo || camposModelo.has(k);
+  const camposFora = camposModelo ? CAMPOS_DO_MODELO.filter((k) => !camposModelo.has(k)) : [];
 
   /** Seções que já possuem campos próprios no formulário, reconhecidas pelo
    *  TÍTULO — o número muda de um modelo para outro. */
@@ -1181,6 +1210,7 @@ export default function GerarRelatorio({
       versaoSnapshot: 2, d: { ...d, ...nomes }, visiveis, equipeIds, equipIds, coletaId, subs8, textosExtras, textosTopico,
       pessoas, revisaoManual, medicaoBase, fotos: fotosSalvas,
       ...(execucao ? { laudoPdf, laudoPdfDepois } : {}),
+      ...(camposFora.length ? { camposForaDoModelo: camposFora } : {}),
     };
   }
 
@@ -1216,7 +1246,8 @@ export default function GerarRelatorio({
     periodo: execucao?.periodo ?? null,
     equipeRelatorio: execucao ? usuarios.filter((u) => equipeIds.includes(u.id)).map((u) => u.nome) : undefined,
   });
-  const r = mesclar(rBase, rExec);
+  // campo que o modelo não tem fica escondido: a mensagem dele não vale
+  const r = semCamposForaDoModelo(mesclar(rBase, rExec), snapAtual);
   const rotulosResumo = { ...ROTULOS_RELATORIO, ...ROTULOS_RELATORIO_EXECUCAO };
   const [tentou, setTentou] = useState(false);
 
@@ -1456,24 +1487,130 @@ export default function GerarRelatorio({
     const on = ativo(numero);
     // O título que aparece é o do modelo em uso (como sai no documento).
     const nome = (numero > 0 && topicosModelo.find((t) => t.numero === numero)?.titulo) || titulo;
+    const id = `t${numero}`;
+    const rotuloTopico = numero === 0 ? nome : `${numero}. ${nome}`;
+    // recolhido só esconde: os campos (e as mensagens, que alimentam o índice) continuam montados
+    const fechado = on && !!recolhidos[id];
+    const item = indice.find((x) => x.id === id);
+    const estado = item && on ? estadoDoItem(item) : null;
     return (
-      <div key={`secao-${numero}`} data-secao={numero} className="rel-bloco" style={{ opacity: on ? 1 : 0.55 }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontWeight: 700, fontSize: 13.5 }}>
-          <input type="checkbox" checked={on}
-            onChange={(e) => setVisiveis((v) => ({ ...v, [numero]: e.target.checked }))} />
-          <span>{numero === 0 ? nome : `${numero}. ${nome}`}</span>
-          {nota && <span className="detalhe" style={{ fontWeight: 400 }}>— {nota}</span>}
-          {on && secoesVazias.has(numero) && (
-            <span className="detalhe" style={{ fontWeight: 400 }}>— não preenchido: fica fora do relatório</span>
+      <div key={`secao-${numero}`} data-secao={numero} data-indice={id} data-indice-titulo={rotuloTopico}
+        data-indice-ativo={on ? "1" : "0"} data-indice-vazio={on && secoesVazias.has(numero) ? "1" : "0"}
+        className="rel-bloco rel-topico" style={{ opacity: on ? 1 : 0.55 }}>
+        <div className="rel-topico-cabeca">
+          <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontWeight: 700, fontSize: 13.5, flex: 1, minWidth: 0 }}>
+            <input type="checkbox" checked={on}
+              onChange={(e) => setVisiveis((v) => ({ ...v, [numero]: e.target.checked }))} />
+            <span>{rotuloTopico}</span>
+            {nota && <span className="detalhe" style={{ fontWeight: 400 }}>— {nota}</span>}
+            {on && secoesVazias.has(numero) && (
+              <span className="detalhe" style={{ fontWeight: 400 }}>— não preenchido: fica fora do relatório</span>
+            )}
+          </label>
+          {estado && estado.classe !== "vazio" && (
+            <span className={`rel-estado rel-estado-${estado.classe}`} title={estado.texto}>
+              <span aria-hidden="true">{estado.icone}</span><span className="sr-only">{estado.texto}</span>
+            </span>
           )}
-        </label>
+          {on && (
+            <button type="button" className="rel-recolher" aria-expanded={!fechado}
+              aria-label={`${fechado ? "Abrir" : "Recolher"} ${rotuloTopico}`} title={fechado ? "Abrir" : "Recolher"}
+              onClick={() => setRecolhidos((v) => ({ ...v, [id]: !fechado }))}>{fechado ? "▸" : "▾"}</button>
+          )}
+        </div>
         {on && (
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ marginTop: 10, display: fechado ? "none" : "flex", flexDirection: "column", gap: 10 }}>
             {children}
             {!semFotos && BlocoFotos({ topico: numero, max: maxFotos, legendaPadrao: legendaFoto })}
           </div>
         )}
       </div>
+    );
+  }
+
+  // Índice: lido da tela a cada atualização (mensagens dentro de cada
+  // tópico), para não manter uma lista paralela de campo → tópico.
+  useEffect(() => {
+    const raiz = formRef.current;
+    if (!raiz) return;
+    const itens: ItemIndice[] = Array.from(raiz.querySelectorAll<HTMLElement>("[data-indice]")).map((el) => ({
+      id: el.dataset.indice || "", titulo: el.dataset.indiceTitulo || "",
+      ativo: el.dataset.indiceAtivo !== "0", vazio: el.dataset.indiceVazio === "1",
+      erros: el.querySelectorAll(".val-campo .val-erro").length,
+      avisos: el.querySelectorAll(".val-campo .val-aviso").length,
+    }));
+    const novo = JSON.stringify(itens);
+    setIndice((atual) => (JSON.stringify(atual) === novo ? atual : itens));
+  });
+
+  // Rascunho reaberto: os tópicos já prontos começam recolhidos (uma vez,
+  // depois que o modelo e o índice estão prontos).
+  const recolheuRascunho = useRef(false);
+  useEffect(() => {
+    if (recolheuRascunho.current || !estadoSalvo || !modeloPronto || restaurando || !indice.length) return;
+    recolheuRascunho.current = true;
+    recolherProntos();
+  }, [modeloPronto, restaurando, indice.length]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  function recolherProntos() {
+    setRecolhidos((v) => ({ ...v, ...Object.fromEntries(indice.filter((it) => it.ativo && !pendente(it)).map((it) => [it.id, true])) }));
+  }
+
+  /** Rola o formulário até o tópico (abrindo-o), descontando o índice fixo. */
+  function irPara(id: string) {
+    setRecolhidos((v) => ({ ...v, [id]: false }));
+    // depois de o tópico abrir (o React já aplicou o estado ao sair do clique)
+    setTimeout(() => {
+      const el = formRef.current?.querySelector<HTMLElement>(`[data-indice="${id}"]`);
+      const corpo = el?.closest<HTMLElement>(".modal-corpo");
+      if (!el || !corpo) return;
+      const fixo = formRef.current?.querySelector<HTMLElement>(".rel-indice")?.offsetHeight || 0;
+      corpo.scrollTo({ top: corpo.scrollTop + el.getBoundingClientRect().top - corpo.getBoundingClientRect().top - fixo - 8, behavior: "smooth" });
+    }, 0);
+  }
+
+  /** A próxima pendência abaixo do que está na tela (no fim, volta ao começo). */
+  function proximaPendencia() {
+    const pend = indice.filter(pendente);
+    if (!pend.length) return;
+    const fixo = formRef.current?.querySelector<HTMLElement>(".rel-indice")?.getBoundingClientRect().bottom || 0;
+    const abaixo = pend.find((it) => {
+      const el = formRef.current?.querySelector<HTMLElement>(`[data-indice="${it.id}"]`);
+      return el && el.getBoundingClientRect().top > fixo + 24;
+    });
+    irPara((abaixo || pend.find((it) => it.erros) || pend[0]).id);
+  }
+
+  function IndiceTopicos() {
+    if (!indice.length) return null;
+    const ativos = indice.filter((it) => it.ativo);
+    const prontos = ativos.filter((it) => !pendente(it)).length;
+    const erros = ativos.reduce((n, it) => n + it.erros, 0);
+    return (
+      <nav className="rel-indice" aria-label="Tópicos do relatório">
+        <div className="rel-indice-topo">
+          <span aria-live="polite">
+            <strong>{prontos} de {ativos.length}</strong> tópicos prontos{erros ? <> · <span className="val-erro">⛔ {erros} erro(s)</span></> : null}
+          </span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button type="button" className="btn-doc" disabled={prontos === ativos.length} onClick={proximaPendencia}>Próxima pendência ↓</button>
+            <button type="button" className="btn-doc" onClick={recolherProntos}>Recolher os prontos</button>
+            <button type="button" className="btn-doc rel-indice-abrir" onClick={() => setRecolhidos({})}>Abrir todos</button>
+          </div>
+        </div>
+        <ol className="rel-indice-lista">
+          {indice.map((it) => {
+            const e = estadoDoItem(it);
+            return (
+              <li key={it.id}>
+                <button type="button" className={`rel-indice-item rel-estado-${e.classe}`} title={`${it.titulo}: ${e.texto}`} onClick={() => irPara(it.id)}>
+                  <span aria-hidden="true">{e.icone}</span> {it.titulo}<span className="sr-only"> — {e.texto}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
     );
   }
 
@@ -1881,7 +2018,8 @@ export default function GerarRelatorio({
         </Modal>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div ref={formRef} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {IndiceTopicos()}
         <p className="detalhe" style={{ margin: 0 }}>
           📄 {listaProc.length > 0
             ? `tópicos do procedimento ${proc?.codigo} (${listaProc.length}, configurados no Catálogo)`
@@ -1918,7 +2056,7 @@ export default function GerarRelatorio({
               </button>
             </div>
             <span className="detalhe">
-              Preenche a equipe de trabalho, a data de execução, a data e os horários da operação e as
+              Preenche a equipe de trabalho, a data de execução{usaCampo("horarios") ? ", a data e os horários da operação" : ""} e as
               Observações (texto corrido das atividades, dia a dia). pH e cloro ficam em “Valores das coletas”.
             </span>
             {msgRdos && <p className="detalhe" style={{ margin: "6px 0 0" }} aria-live="polite">{msgRdos}</p>}
@@ -1964,9 +2102,9 @@ export default function GerarRelatorio({
 
         {Topico({ numero: 0, titulo: TOPICO_CAPA.titulo, children: <>
           <div style={grade}>
-            <div><label style={rotulo}>Título do relatório *</label>
+            {usaCampo("titulo") && <div><label style={rotulo}>Título do relatório *</label>
               <input style={campo} value={d.titulo || ""} onChange={set("titulo")} placeholder="ex.: Batimetria — Tanque TQ-01" />
-              <MensagensCampo r={r} campo="titulo" /></div>
+              <MensagensCampo r={r} campo="titulo" /></div>}
             <div><label style={rotulo}>Cliente <span className="detalhe">(cadastro)</span></label>
               <input style={campoLeitura} value={d.cliente || ""} readOnly placeholder="sem cliente no projeto" /></div>
             <div><label style={rotulo}>Endereço <span className="detalhe">(cadastro do projeto)</span></label>
@@ -2088,21 +2226,21 @@ export default function GerarRelatorio({
             <div><label style={rotulo}>Diâmetro</label><input style={campo} value={d.diametro || ""} onChange={set("diametro")} placeholder="ex.: 10,00 m" />
               <MensagensCampo r={r} campo="diametro" /></div>
           </div>
-          <div style={grade}>
-            <div><label style={rotulo}>Histórico</label>
+          {(usaCampo("historico") || usaCampo("comprimento") || usaCampo("largura")) && <div style={grade}>
+            {usaCampo("historico") && <div><label style={rotulo}>Histórico</label>
               <input style={campo} value={d.historico || ""} onChange={set("historico")}
-                placeholder="ex.: última limpeza em 03/2025" /></div>
-            <div><label style={rotulo}>Comprimento <span className="detalhe">(medição)</span></label>
+                placeholder="ex.: última limpeza em 03/2025" /></div>}
+            {usaCampo("comprimento") && <div><label style={rotulo}>Comprimento <span className="detalhe">(medição)</span></label>
               <input style={campo} value={d.comprimento || ""} onChange={set("comprimento")} placeholder="em metros" />
-              <MensagensCampo r={r} campo="comprimento" /></div>
-            <div><label style={rotulo}>Largura <span className="detalhe">(medição)</span></label>
+              <MensagensCampo r={r} campo="comprimento" /></div>}
+            {usaCampo("largura") && <div><label style={rotulo}>Largura <span className="detalhe">(medição)</span></label>
               <input style={campo} value={d.largura || ""} onChange={set("largura")} placeholder="em metros" />
-              <MensagensCampo r={r} campo="largura" /></div>
-          </div>
+              <MensagensCampo r={r} campo="largura" /></div>}
+          </div>}
 
           {/* Horários da operação: alimentam o texto padrão de Observações do
               POP 001, na ordem em que os marcadores aparecem no modelo. */}
-          {limpeza && (
+          {limpeza && (usaCampo("dataOperacao") || usaCampo("horarios")) && (
           <div className="rel-sub">
             <strong style={{ fontSize: 12.5 }}>Horários da operação <span className="detalhe">(texto padrão do procedimento)</span></strong>
             <div style={{ ...grade, marginTop: 6 }}>
@@ -2205,9 +2343,9 @@ export default function GerarRelatorio({
         N.reservatorio !== undefined && Topico({ numero: N.reservatorio, titulo: "Dados reservatório",
           semFotos: vagasModelo.some((v) => v.topico === N.reservatorio), children: <>
           <div style={grade}>
-            <div><label style={rotulo}>Equipamento <span className="detalhe">(tipo/uso do tanque)</span></label>
+            {usaCampo("equipamentoTanque") && <div><label style={rotulo}>Equipamento <span className="detalhe">(tipo/uso do tanque)</span></label>
               <input style={campo} value={d.equipamentoTanque || ""} onChange={set("equipamentoTanque")}
-                placeholder="ex.: Tanque de combate a incêndio" /></div>
+                placeholder="ex.: Tanque de combate a incêndio" /></div>}
             <div><label style={rotulo}>Altura <span className="detalhe">(o mesmo do tópico {N.tanque})</span></label>
               <input style={campo} value={d.alturaTanque || ""} onChange={set("alturaTanque")} />
               <MensagensCampo r={r} campo="alturaTanque" /></div>
@@ -2377,7 +2515,7 @@ export default function GerarRelatorio({
         }),
         ])}
 
-        <div className="rel-bloco">
+        <div className="rel-bloco rel-topico" data-indice="assinaturas" data-indice-titulo="Assinaturas" data-indice-ativo="1" data-indice-vazio="0">
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
           <div style={{ ...grade, marginTop: 8 }}>
             {SelectPessoa("elaboradoPor", "Relatório elaborado por (Operações)", operacoes)}

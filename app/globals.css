@@ -1536,3 +1536,36 @@ details.val-resumo > summary:focus-visible { outline: 2px solid var(--primaria);
   .assistente-microfone.ouvindo { animation: assistente-ouvindo 1.2s ease-in-out infinite; }
 }
 @keyframes assistente-ouvindo { 50% { box-shadow: 0 0 0 6px var(--primaria-claro); } }
+
+
+/* Gerar relatório: índice fixo dos tópicos e tópicos recolhíveis */
+.rel-indice {
+  position: sticky; top: -20px; z-index: 5; margin: -20px -24px 0; padding: 10px 24px 8px;
+  background: var(--bg-card); border-bottom: 1px solid var(--borda); box-shadow: 0 4px 8px -6px rgba(16, 24, 40, .25);
+}
+.rel-indice-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.rel-indice-lista { display: flex; gap: 6px; overflow-x: auto; list-style: none; margin: 8px 0 0; padding: 0 0 4px; scrollbar-width: thin; }
+.rel-indice-item {
+  position: relative; white-space: nowrap; border: 1px solid var(--borda); border-radius: 999px; background: var(--bg-card); color: var(--texto);
+  padding: 3px 10px; font-size: 12.5px; cursor: pointer;
+}
+.rel-indice-item:hover { background: var(--bg-hover); }
+.rel-indice-item.rel-estado-erro { border-color: var(--perigo); }
+.rel-indice-item.rel-estado-aviso { border-color: var(--aviso); }
+.rel-indice-item.rel-estado-ok { color: var(--cinza); }
+.rel-indice-item.rel-estado-fora { color: var(--cinza); text-decoration: line-through; }
+.rel-topico { scroll-margin-top: 120px; }
+.rel-topico-cabeca { display: flex; align-items: center; gap: 8px; }
+.rel-estado { font-size: 13px; flex: none; }
+.rel-recolher {
+  flex: none; width: 30px; height: 28px; border: 1px solid var(--borda); border-radius: 6px;
+  background: var(--bg-card); color: var(--texto); cursor: pointer; font-size: 13px;
+}
+.rel-recolher:hover { background: var(--bg-hover); }
+@media (max-width: 600px) {
+  .rel-indice { top: -16px; margin: -16px -16px 0; padding: 8px 16px 6px; }
+  .rel-indice-topo { font-size: 12px; gap: 4px 8px; }
+  .rel-indice-topo .btn-doc { padding: 3px 8px; font-size: 12px; min-height: 0; }
+  .rel-indice-lista { margin-top: 6px; }
+  .rel-indice-abrir { display: none; }
+}
