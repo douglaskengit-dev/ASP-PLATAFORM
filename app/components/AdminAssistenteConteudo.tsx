@@ -59,6 +59,12 @@ export default function AdminAssistenteConteudo() {
     carregar();
   }
 
+  async function limparGuardadas() {
+    if (!confirm("Apagar todas as respostas guardadas das dúvidas de uso? Elas voltam a ser geradas pela IA.")) return;
+    const r = await fetch("/api/assistente/cache", { method: "DELETE" }).then((x) => x.json()).catch(() => ({}));
+    alert(r.ok ? "Respostas guardadas apagadas." : r.erro || "Não foi possível apagar.");
+  }
+
   async function excluirExemplo(id: string) {
     if (!confirm("Excluir este exemplo? O robô deixa de usá-lo.")) return;
     await fetch(`/api/assistente/exemplos?id=${id}`, { method: "DELETE" });
@@ -90,6 +96,8 @@ export default function AdminAssistenteConteudo() {
           </select>
         </div>
         <p className="detalhe" style={{ marginTop: 0 }}>
+          “Resposta guardada” é uma dúvida de uso repetida, respondida sem gastar a cota da IA (um 👎 a tira da memória;{" "}
+          <button type="button" className="assistente-link" onClick={limparGuardadas}>apagar todas</button>).
           “Reserva” é quando a IA citou algo que não veio do banco e o sistema montou a resposta só com os dados encontrados.
         </p>
         {erro && <p className="msg erro">{erro}</p>}
@@ -104,6 +112,7 @@ export default function AdminAssistenteConteudo() {
                   {r.avaliacao === -1 && <span>· 👎</span>}
                   {r.fora_do_escopo && <span className="chip">fora do escopo</span>}
                   {r.reserva && <span className="chip">reserva</span>}
+                  {r.provedor === "cache" && <span className="chip">resposta guardada</span>}
                   {r.consultas?.length > 0 && <span>· consultas: {r.consultas.join(", ")}</span>}
                   {r.pagina && <span>· na página {r.pagina}</span>}
                 </div>

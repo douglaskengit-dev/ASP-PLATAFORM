@@ -7,6 +7,8 @@ import { responderClaude } from "@/lib/assistente/claude";
 import { carregarPagina, contextoDaPagina } from "@/lib/assistente/pagina";
 import { exemplosAprovados, registrarResposta } from "@/lib/assistente/registro";
 import { sugestoesDeContinuacao } from "@/lib/assistente/continuacao";
+import { guardarResposta, respostaGuardada, versaoDoCache } from "@/lib/assistente/cache";
+import { precisaDoBanco } from "@/lib/assistente/verificacao";
 import { finalizarResposta, foraDoEscopoObvio, MSG_FORA_DO_ESCOPO } from "@/lib/assistente/escopo";
 import { ErroAssistente, type ExecutarFerramenta, type MensagemChat } from "@/lib/assistente/tipos";
 
@@ -64,8 +66,24 @@ export async function POST(req: NextRequest) {
   const registro = { reserva: false };
   const pedido = { historico, contexto, executar, naPagina: !!pagina, registro };
 
+  // dúvida de uso sem conversa anterior e fora de página de dados: pode vir
+  // (e ir) para as respostas guardadas, sem gastar a cota da IA
+  const podeGuardar = historico.length === 1 && !pagina && !precisaDoBanco(pergunta);
+  const versao = versaoDoCache(exemplos);
+  if (podeGuardar) {
+    const guardada = await respostaGuardada(pergunta, versao).catch(() => null);
+    if (guardada) {
+      const id = await registrarResposta(sb, { pergunta, resposta: guardada, pagina: corpo?.pagina, consultas: [], provedor: "cache" });
+      return NextResponse.json({ resposta: guardada, id, sugestoes: [] });
+    }
+  }
+
   try {
     const final = finalizarResposta(provedor === "anthropic" ? await responderClaude(pedido) : await responderCloudflare(pedido));
+    const primeiroNome = (profile.nome_completo || "").trim().split(/\s+/)[0];
+    if (podeGuardar && !consultas.length && !final.fora_do_escopo && !registro.reserva && !(primeiroNome && final.resposta.includes(primeiroNome))) {
+      await guardarResposta(pergunta, final.resposta, versao).catch(() => {});
+    }
     const id = await registrarResposta(sb, {
       pergunta, resposta: final.resposta, pagina: corpo?.pagina, consultas, foraDoEscopo: final.fora_do_escopo, reserva: registro.reserva, provedor,
     });
