@@ -70,6 +70,10 @@ Todas as áreas ficam na barra azul do topo; no celular, elas ficam no botão de
 
 - **Android (Chrome)**: abra o site, toque no menu ⋮ e escolha **Instalar app** ou **Adicionar à tela inicial**.
 - **iPhone (Safari)**: toque em **Compartilhar** e escolha **Adicionar à Tela de Início**.
+- **Acesso rápido**: aponte a câmera do celular para o QR code abaixo e a plataforma abre no navegador.
+
+asp-plataform.vercel.app
+
 - Ao instalar, permita as **notificações** para receber os avisos no celular.
 
 **Sem internet (offline)**: em campo, você pode continuar registrando medições, fotos e RDOs. Os dados ficam numa fila no aparelho e são enviados sozinhos quando a conexão volta. O indicador ⏳ na barra mostra quantos itens estão pendentes — não feche o app nem limpe os dados do navegador enquanto houver pendências.
@@ -241,6 +245,8 @@ O modal **Gerar Relatório Técnico** mostra as seções **na mesma ordem e com 
 - **Avisos do laudo**: valor acima do limite ou P/A Presente; pH fora de **6,0 a 9,0**; cloro abaixo de 0,2 ou acima de 5; "<20" com limite 15 (não dá para afirmar que atende); limites diferentes entre os laudos; parâmetro fora do limite que nenhuma das conclusões cita como fora.
 - **Conclusão das Análises Laboratoriais** (seção Análise): **preenchida automaticamente** a cada laudo anexado ("✍ Preenchida automaticamente… revise"), com frases prontas pelo cloro, pH e laudos — sempre dizendo de qual amostra fala e só afirmando conformidade com dado completo. Se você já escreveu no campo, o seu texto é mantido e aparece "há uma sugestão nova"; **Sugerir texto** refaz quando quiser. Vazio, o título não sai no documento.
 - **Fotos da coleta**: entram sozinhas nas vagas do modelo, contando a história da operação — **Preparação** (higienização e robô) › **Antes da limpeza** (coleta de água, envio para análise, fundo do tanque) › **Durante a limpeza** › **Após a limpeza** (fundo limpo, coleta de água, envio para análise).
+- **Fotos da coleta dentro de cada tópico**: cada tópico mostra, no bloco **Fotos da coleta de execução**, as fotos que entram nele — nas vagas do modelo, no fim da seção ou num subtópico (ex.: "Higienização do robô") —, com miniatura (toque para ampliar), escolha da vaga ou **Fora das vagas** (com legenda) e **Remover**. No topo do modal fica só um aviso curto: as pendências da coleta, as fotos que não entraram (ex.: repetidas) e as que caíram em tópico desmarcado.
+- **Limpeza sem modelo próprio no Catálogo**: a **Análise Físico Química e Laboratorial** vira um tópico próprio, **antes da Conclusão**, com o texto padrão do POP 001 (já preenchido e editável), as tabelas **Valores medidos em campo**, **Amostras enviadas ao laboratório** e **Resultados das análises laboratoriais**, a **Conclusão das Análises Laboratoriais** e as páginas dos laudos (prints). Para usar o modelo completo do POP 001, anexe o .docx no Catálogo (seção 13).
 
 ## 10. Aprovação e versão assinada (fases 5 e 9)
 
@@ -325,6 +331,7 @@ O Catálogo guarda os procedimentos e os equipamentos usados em todo o sistema; 
 - **Tópicos do relatório**: o editor mostra o número que cada tópico terá no documento. Todo tópico precisa de título.
 - **Modelo .docx** do relatório (arquivo Word real, até 20 MB). **⬇ Baixar modelo** (no procedimento e na lista) baixa o modelo em uso para conferir ou ajustar no Word.
 - **Modelos 2026**: POP 001 (limpeza robotizada, em **linha do tempo**: Preparação › Antes › Durante › Após a limpeza) e P011 (inspeção visual), montados a partir dos relatórios atuais. Para trocar o modelo de um procedimento: **Voltar ao padrão**, enviar o novo .docx e **importar do modelo** para reimportar os tópicos — senão a lista antiga pode esconder seções.
+- **Anexar o modelo próprio** (ex.: POP 001): em **Editar procedimento → Modelo do relatório (.docx)**, envie o arquivo; quando aparecer **Modelo próprio: …**, clique em **⬇ Importar do modelo**, confira os tópicos marcados (ex.: **Análise Físico Química e Laboratorial**) e **Salve**. O tópico marcado aqui já vem marcado em todo relatório novo do procedimento.
 - **Limpeza robotizada**: ativa o bloco de laudo e o PDF do laudo no relatório de execução.
 - **Água potável**: deixa marcadas as coletas de água antes e depois na coleta de fotos.
 - **Cloro**: unidade (mg/L ou PPM) e limite de aviso (padrão 5).
@@ -446,6 +453,8 @@ O Robô ASP responde dúvidas de uso da plataforma e consulta os dados do sistem
 - A Conclusão das Análises não mudou ao trocar o laudo — Ela só se atualiza sozinha enquanto tem o texto automático. Se você editou, clique em Sugerir texto
 - As páginas do laudo não apareceram no relatório — Confira se os PDFs estão anexados e se a opção Incluir as páginas dos laudos (prints) está marcada
 - A tabela de valores medidos em campo não saiu — Ela só entra com pH ou cloro preenchidos (vêm da coleta de fotos ou do botão Valores de pH e cloro)
+- Não acho as fotos da coleta no relatório — Elas ficam dentro do tópico em que saem no documento, no bloco Fotos da coleta de execução. As que caíram em tópico desmarcado aparecem no aviso do topo
+- Apareceu "Este procedimento não tem o modelo da limpeza robotizada anexado" — Anexe o .docx do POP 001 no Catálogo e clique em Importar do modelo. Sem o modelo, a Análise sai como tópico próprio, montada pelo sistema
 - Um campo do relatório sumiu — O modelo do procedimento não usa esse campo — ele não iria para o documento
 - Não sei o que falta no relatório — Use o índice no topo do modal: ⛔ e ⚠️ mostram onde; Próxima pendência leva até lá
 - Não consigo enviar o relatório de execução — Faltam os PDFs dos laudos de antes e/ou de após a limpeza — anexe os dois e salve o rascunho
