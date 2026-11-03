@@ -15,7 +15,11 @@ import RoboAssistente from "./RoboAssistente";
 
 /** foraDoEscopo: recusa padrão do servidor (mostra as sugestões de novo). */
 /** id: registro da resposta no banco (para o 👍/👎); avaliacao: a do usuário. */
-interface Mensagem { papel: "usuario" | "assistente"; texto: string; foraDoEscopo?: boolean; id?: string; avaliacao?: 1 | -1 }
+interface Mensagem {
+  papel: "usuario" | "assistente"; texto: string; foraDoEscopo?: boolean; id?: string; avaliacao?: 1 | -1;
+  /** Perguntas de continuação montadas pelo servidor. */
+  sugestoes?: string[];
+}
 
 const CHAVE = "assistente-conversa";
 const CHAVE_OCULTO = "assistente-robo-oculto";
@@ -33,10 +37,10 @@ const SUGESTOES_PAGINA: [RegExp, string[]][] = [
 ];
 const sugestoesDa = (pagina: string) => SUGESTOES_PAGINA.find(([r]) => r.test(pagina))?.[1] || SUGESTOES;
 
-function Sugestoes({ pagina, onEscolher }: { pagina: string; onEscolher: (s: string) => void }) {
+function Sugestoes({ pagina, lista, onEscolher }: { pagina: string; lista?: string[]; onEscolher: (s: string) => void }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {sugestoesDa(pagina).map((s) => (
+      {(lista || sugestoesDa(pagina)).map((s) => (
         <button key={s} type="button" className="btn-doc" onClick={() => onEscolher(s)}>{s}</button>
       ))}
     </div>
@@ -153,6 +157,7 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
       setMensagens((m) => [...m, {
         papel: "assistente", texto: j.resposta,
         ...(j.fora_do_escopo ? { foraDoEscopo: true } : {}), ...(typeof j.id === "string" ? { id: j.id } : {}),
+        ...(Array.isArray(j.sugestoes) && j.sugestoes.length ? { sugestoes: j.sugestoes.filter((s: unknown) => typeof s === "string").slice(0, 3) } : {}),
       }]);
     } catch (e: any) {
       setErro(e.message || "Falha ao consultar o assistente.");
@@ -208,6 +213,9 @@ export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean
         )).flatMap((el, i) => (mensagens[i].papel === "assistente" && mensagens[i].id
           ? [el, <Avaliacao key={`a${i}`} msg={mensagens[i]} onAvaliar={(v, c) => avaliar(i, v, c)} />] : [el]))}
         {!enviando && mensagens[mensagens.length - 1]?.foraDoEscopo && <Sugestoes pagina={pagina} onEscolher={perguntar} />}
+        {!enviando && !!mensagens[mensagens.length - 1]?.sugestoes?.length && (
+          <Sugestoes pagina={pagina} lista={mensagens[mensagens.length - 1].sugestoes} onEscolher={perguntar} />
+        )}
         {enviando && (
           <span className="detalhe" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
             <span className="assistente-digitando" aria-hidden="true"><i /><i /><i /></span> Consultando…

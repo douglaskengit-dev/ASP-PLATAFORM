@@ -6,6 +6,7 @@ import { responderCloudflare } from "@/lib/assistente/cloudflare";
 import { responderClaude } from "@/lib/assistente/claude";
 import { carregarPagina, contextoDaPagina } from "@/lib/assistente/pagina";
 import { exemplosAprovados, registrarResposta } from "@/lib/assistente/registro";
+import { sugestoesDeContinuacao } from "@/lib/assistente/continuacao";
 import { finalizarResposta, foraDoEscopoObvio, MSG_FORA_DO_ESCOPO } from "@/lib/assistente/escopo";
 import { ErroAssistente, type ExecutarFerramenta, type MensagemChat } from "@/lib/assistente/tipos";
 
@@ -68,7 +69,8 @@ export async function POST(req: NextRequest) {
     const id = await registrarResposta(sb, {
       pergunta, resposta: final.resposta, pagina: corpo?.pagina, consultas, foraDoEscopo: final.fora_do_escopo, reserva: registro.reserva, provedor,
     });
-    return NextResponse.json({ ...final, id });
+    const sugestoes = final.fora_do_escopo ? [] : sugestoesDeContinuacao(final.resposta, consultas, pergunta);
+    return NextResponse.json({ ...final, id, sugestoes });
   } catch (e) {
     if (e instanceof ErroAssistente) return NextResponse.json({ erro: e.message }, { status: e.status });
     console.error("assistente:", e);
