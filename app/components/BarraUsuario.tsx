@@ -264,7 +264,7 @@ export default function BarraUsuario() {
           </div>
 
           {/* Sempre visíveis (desktop e celular): ações de uso frequente. */}
-          <AssistenteBotao />
+          <AssistenteBotao ehAdmin={ehAdmin} />
           <FeedbackBotao />
           <NotificacoesBotao />
           <ThemeToggle />
