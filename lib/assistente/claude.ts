@@ -26,6 +26,7 @@ export async function responderClaude({ historico, contexto, executar, naPagina,
   const reserva = () => { if (registro) registro.reserva = true; return respostaDosDados(consultas); };
   try {
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
+      if (registro) registro.chamadas++;
       const resp = await getClient().beta.messages.create({
         model: process.env.ASSISTENTE_MODEL || "claude-opus-5-5",
         max_tokens: 8000,

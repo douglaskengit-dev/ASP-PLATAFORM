@@ -11,7 +11,7 @@ export interface PedidoAssistente {
   /** O usuário está na página de uma OS, projeto ou cliente. */
   naPagina?: boolean;
   /** Marcado pelo provedor quando a resposta foi montada pelo servidor. */
-  registro?: { reserva: boolean };
+  registro?: { reserva: boolean; chamadas: number };
 }
 
 /** Erro com mensagem já pronta para o usuário. */

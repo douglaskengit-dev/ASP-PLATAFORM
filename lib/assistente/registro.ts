@@ -14,15 +14,23 @@ export interface DadosRegistro {
   foraDoEscopo?: boolean;
   reserva?: boolean;
   provedor: string;
+  chamadasIa?: number;
+  duracaoMs?: number;
 }
 
 /** Grava a resposta e devolve o id (para o 👍/👎), ou null se não deu. */
 export async function registrarResposta(sb: SupabaseClient, d: DadosRegistro): Promise<string | null> {
-  const { data, error } = await sb.from("gp_assistente_respostas").insert({
+  const linha = {
     pergunta: d.pergunta.slice(0, 4000), resposta: d.resposta.slice(0, 8000),
     pagina: typeof d.pagina === "string" ? d.pagina.slice(0, 300) : null,
     consultas: Array.from(new Set(d.consultas)), fora_do_escopo: !!d.foraDoEscopo, reserva: !!d.reserva, provedor: d.provedor,
-  }).select("id").single();
+  };
+  const uso = { chamadas_ia: d.chamadasIa ?? 0, duracao_ms: d.duracaoMs ?? null };
+  let { data, error } = await sb.from("gp_assistente_respostas").insert({ ...linha, ...uso }).select("id").single();
+  // sem as colunas de uso (migração 20261111 não aplicada): grava sem elas
+  if (error && /chamadas_ia|duracao_ms/.test(error.message)) {
+    ({ data, error } = await sb.from("gp_assistente_respostas").insert(linha).select("id").single());
+  }
   if (error) { console.error("assistente/registro:", error.message); return null; }
   return (data as any)?.id ?? null;
 }

@@ -126,6 +126,7 @@ export async function responderCloudflare({ historico, contexto, executar, naPag
   let corrigiu = false;
   const reserva = () => { if (registro) registro.reserva = true; return respostaDosDados(consultas); };
   for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
+    if (registro) registro.chamadas++;
     const { texto, chamadas } = await rodar(modelo, mensagens);
     const pedidas = chamadas.length ? chamadas : chamadasNoTexto(texto);
     if (!pedidas.length) {
