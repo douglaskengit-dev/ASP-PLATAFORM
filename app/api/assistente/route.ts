@@ -5,6 +5,7 @@ import { contextoDaSessao } from "@/lib/assistente/prompt";
 import { responderCloudflare } from "@/lib/assistente/cloudflare";
 import { responderClaude } from "@/lib/assistente/claude";
 import { carregarPagina, contextoDaPagina } from "@/lib/assistente/pagina";
+import { exemplosAprovados, registrarResposta } from "@/lib/assistente/registro";
 import { finalizarResposta, foraDoEscopoObvio, MSG_FORA_DO_ESCOPO } from "@/lib/assistente/escopo";
 import { ErroAssistente, type ExecutarFerramenta, type MensagemChat } from "@/lib/assistente/tipos";
 
@@ -32,13 +33,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: "Envie uma pergunta." }, { status: 400 });
   }
 
+  const sb = getSupabaseRouteClient();
+  const pergunta = historico[historico.length - 1].texto;
+  const provedor = process.env.ASSISTENTE_PROVEDOR === "anthropic" ? "anthropic" : "cloudflare";
+
   // assunto claramente alheio à ASP: recusa sem gastar a cota da IA
-  if (foraDoEscopoObvio(historico[historico.length - 1].texto)) {
-    return NextResponse.json({ resposta: MSG_FORA_DO_ESCOPO, fora_do_escopo: true });
+  if (foraDoEscopoObvio(pergunta)) {
+    const id = await registrarResposta(sb, { pergunta, resposta: MSG_FORA_DO_ESCOPO, pagina: corpo?.pagina, consultas: [], foraDoEscopo: true, provedor: "filtro" });
+    return NextResponse.json({ resposta: MSG_FORA_DO_ESCOPO, fora_do_escopo: true, id });
   }
 
-  const sb = getSupabaseRouteClient();
+  const consultas: string[] = [];
   const executar: ExecutarFerramenta = async (nome, entrada) => {
+    consultas.push(nome);
     try {
       return { conteudo: JSON.stringify(await executarFerramenta(sb, nome, entrada, { id: profile.id, perfil: profile.perfil })) };
     } catch (e: any) {
@@ -48,13 +55,20 @@ export async function POST(req: NextRequest) {
   };
   const hoje = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
   // página aberta (OS, projeto ou cliente): "esta OS" passa a valer para ela
-  const pagina = await carregarPagina(sb, corpo?.pagina).catch(() => null);
-  const contexto = [contextoDaSessao(profile.nome_completo, profile.perfil, hoje), pagina && contextoDaPagina(pagina)].filter(Boolean).join("\n");
-  const pedido = { historico, contexto, executar, naPagina: !!pagina };
+  const [pagina, exemplos] = await Promise.all([
+    carregarPagina(sb, corpo?.pagina).catch(() => null),
+    exemplosAprovados(sb).catch(() => ""),
+  ]);
+  const contexto = [contextoDaSessao(profile.nome_completo, profile.perfil, hoje), pagina && contextoDaPagina(pagina), exemplos].filter(Boolean).join("\n");
+  const registro = { reserva: false };
+  const pedido = { historico, contexto, executar, naPagina: !!pagina, registro };
 
   try {
-    const resposta = process.env.ASSISTENTE_PROVEDOR === "anthropic" ? await responderClaude(pedido) : await responderCloudflare(pedido);
-    return NextResponse.json(finalizarResposta(resposta));
+    const final = finalizarResposta(provedor === "anthropic" ? await responderClaude(pedido) : await responderCloudflare(pedido));
+    const id = await registrarResposta(sb, {
+      pergunta, resposta: final.resposta, pagina: corpo?.pagina, consultas, foraDoEscopo: final.fora_do_escopo, reserva: registro.reserva, provedor,
+    });
+    return NextResponse.json({ ...final, id });
   } catch (e) {
     if (e instanceof ErroAssistente) return NextResponse.json({ erro: e.message }, { status: e.status });
     console.error("assistente:", e);

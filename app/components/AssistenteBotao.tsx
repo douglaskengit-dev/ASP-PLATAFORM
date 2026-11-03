@@ -14,7 +14,8 @@ import { usePathname, useRouter } from "next/navigation";
 import RoboAssistente from "./RoboAssistente";
 
 /** foraDoEscopo: recusa padrão do servidor (mostra as sugestões de novo). */
-interface Mensagem { papel: "usuario" | "assistente"; texto: string; foraDoEscopo?: boolean }
+/** id: registro da resposta no banco (para o 👍/👎); avaliacao: a do usuário. */
+interface Mensagem { papel: "usuario" | "assistente"; texto: string; foraDoEscopo?: boolean; id?: string; avaliacao?: 1 | -1 }
 
 const CHAVE = "assistente-conversa";
 const CHAVE_OCULTO = "assistente-robo-oculto";
@@ -42,7 +43,42 @@ function Sugestoes({ pagina, onEscolher }: { pagina: string; onEscolher: (s: str
   );
 }
 
-export default function AssistenteBotao() {
+/** 👍/👎 numa resposta; o 👎 pede (opcional) o que estava errado. */
+function Avaliacao({ msg, onAvaliar }: { msg: Mensagem; onAvaliar: (v: 1 | -1 | null, comentario?: string) => Promise<boolean> }) {
+  const [comentando, setComentando] = useState(false);
+  const [comentario, setComentario] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  /** fechar: o 👎 grava na hora e deixa o campo do comentário aberto. */
+  async function avaliar(v: 1 | -1 | null, c?: string, fechar = true) {
+    setSalvando(true);
+    const ok = await onAvaliar(v, c);
+    setSalvando(false);
+    if (ok && fechar) setComentando(false);
+  }
+  const botao = (v: 1 | -1, rotulo: string, icone: string) => (
+    <button type="button" className="assistente-avaliar" aria-pressed={msg.avaliacao === v} disabled={salvando} title={rotulo} aria-label={rotulo}
+      onClick={() => (msg.avaliacao === v ? avaliar(null) : v === -1 ? (setComentando(true), avaliar(-1, undefined, false)) : avaliar(1))}>{icone}</button>
+  );
+  return (
+    <div style={{ alignSelf: "flex-start", marginTop: -4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        {botao(1, "Resposta útil", "👍")}
+        {botao(-1, "Resposta errada ou ruim", "👎")}
+        {msg.avaliacao && !comentando && <span className="detalhe" style={{ fontSize: 12 }}>Obrigado pela avaliação!</span>}
+      </div>
+      {comentando && msg.avaliacao === -1 && (
+        <form style={{ display: "flex", gap: 6, marginTop: 4 }} onSubmit={(e) => { e.preventDefault(); avaliar(-1, comentario); }}>
+          <input value={comentario} onChange={(e) => setComentario(e.target.value)} maxLength={1000} autoFocus
+            placeholder="O que estava errado? (opcional)" aria-label="O que estava errado na resposta"
+            style={{ flex: 1, minWidth: 0, padding: "4px 8px", border: "1px solid var(--borda)", borderRadius: 6, fontSize: 13 }} />
+          <button type="submit" className="btn-doc" disabled={salvando}>Enviar</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+export default function AssistenteBotao({ ehAdmin = false }: { ehAdmin?: boolean }) {
   const router = useRouter();
   const pagina = usePathname() || "";
   const [aberto, setAberto] = useState(false);
@@ -114,12 +150,26 @@ export default function AssistenteBotao() {
       });
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok || typeof j.resposta !== "string") throw new Error(j.erro || "O assistente não respondeu.");
-      setMensagens((m) => [...m, { papel: "assistente", texto: j.resposta, ...(j.fora_do_escopo ? { foraDoEscopo: true } : {}) }]);
+      setMensagens((m) => [...m, {
+        papel: "assistente", texto: j.resposta,
+        ...(j.fora_do_escopo ? { foraDoEscopo: true } : {}), ...(typeof j.id === "string" ? { id: j.id } : {}),
+      }]);
     } catch (e: any) {
       setErro(e.message || "Falha ao consultar o assistente.");
     } finally {
       setEnviando(false);
     }
+  }
+
+  async function avaliar(i: number, avaliacao: 1 | -1 | null, comentario?: string): Promise<boolean> {
+    const id = mensagens[i]?.id;
+    if (!id) return false;
+    const resp = await fetch("/api/assistente/avaliacao", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, avaliacao, comentario }),
+    }).catch(() => null);
+    if (!resp?.ok) { setErro("Não foi possível salvar a avaliação."); return false; }
+    setMensagens((ms) => ms.map((m, j) => (j === i ? { ...m, avaliacao: avaliacao ?? undefined } : m)));
+    return true;
   }
 
   function abrirLink(href: string) {
@@ -155,7 +205,8 @@ export default function AssistenteBotao() {
           }}>
             {m.papel === "usuario" ? m.texto : <TextoFormatado texto={m.texto} onLink={abrirLink} />}
           </div>
-        ))}
+        )).flatMap((el, i) => (mensagens[i].papel === "assistente" && mensagens[i].id
+          ? [el, <Avaliacao key={`a${i}`} msg={mensagens[i]} onAvaliar={(v, c) => avaliar(i, v, c)} />] : [el]))}
         {!enviando && mensagens[mensagens.length - 1]?.foraDoEscopo && <Sugestoes pagina={pagina} onEscolher={perguntar} />}
         {enviando && (
           <span className="detalhe" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -182,6 +233,9 @@ export default function AssistenteBotao() {
           {mensagens.length > 0 && (
             <button type="button" className="assistente-link" disabled={enviando}
               onClick={() => { setMensagens([]); setErro(null); }}>Nova conversa</button>
+          )}
+          {ehAdmin && (
+            <button type="button" className="assistente-link" onClick={() => abrirLink("/admin/assistente")}>Avaliações</button>
           )}
         </div>
       </form>

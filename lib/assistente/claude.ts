@@ -16,13 +16,14 @@ function getClient(): Anthropic {
   return client;
 }
 
-export async function responderClaude({ historico, contexto, executar, naPagina }: PedidoAssistente): Promise<string> {
+export async function responderClaude({ historico, contexto, executar, naPagina, registro }: PedidoAssistente): Promise<string> {
   const mensagens: Anthropic.Beta.BetaMessageParam[] = historico.map((m) => ({
     role: m.papel === "usuario" ? "user" : "assistant", content: m.texto,
   }));
   const pergunta = historico[historico.length - 1].texto;
   const consultas: Consulta[] = [];
   let corrigiu = false;
+  const reserva = () => { if (registro) registro.reserva = true; return respostaDosDados(consultas); };
   try {
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
       const resp = await getClient().beta.messages.create({
@@ -46,7 +47,7 @@ export async function responderClaude({ historico, contexto, executar, naPagina 
         const texto = resp.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
         const problema = problemaNaResposta(texto, consultas, pergunta, naPagina);
         if (!problema) return texto || "Não consegui montar uma resposta. Tente reformular a pergunta.";
-        if (corrigiu || nadaEncontrado(consultas)) return respostaDosDados(consultas);
+        if (corrigiu || nadaEncontrado(consultas)) return reserva();
         corrigiu = true;
         mensagens.push({ role: "assistant", content: resp.content as Anthropic.Beta.BetaContentBlockParam[] });
         mensagens.push({ role: "user", content: `[Conferência automática, não é o usuário] ${problema} Refaça a resposta.` });
@@ -62,7 +63,7 @@ export async function responderClaude({ historico, contexto, executar, naPagina 
       }));
       mensagens.push({ role: "user", content: resultados });
     }
-    return consultas.length ? respostaDosDados(consultas) : MSG_RODADAS;
+    return consultas.length ? reserva() : MSG_RODADAS;
   } catch (e) {
     if (e instanceof ErroAssistente) throw e;
     console.error("assistente/claude:", e);

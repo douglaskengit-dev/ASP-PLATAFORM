@@ -111,7 +111,7 @@ async function rodar(modelo: string, mensagens: MensagemCf[]): Promise<{ texto: 
   return { texto, chamadas };
 }
 
-export async function responderCloudflare({ historico, contexto, executar, naPagina }: PedidoAssistente): Promise<string> {
+export async function responderCloudflare({ historico, contexto, executar, naPagina, registro }: PedidoAssistente): Promise<string> {
   const modelo = process.env.ASSISTENTE_MODEL || MODELO_CLOUDFLARE_PADRAO;
   const pergunta = historico[historico.length - 1].texto;
   const mensagens: MensagemCf[] = [
@@ -124,6 +124,7 @@ export async function responderCloudflare({ historico, contexto, executar, naPag
   ];
   const consultas: Consulta[] = [];
   let corrigiu = false;
+  const reserva = () => { if (registro) registro.reserva = true; return respostaDosDados(consultas); };
   for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
     const { texto, chamadas } = await rodar(modelo, mensagens);
     const pedidas = chamadas.length ? chamadas : chamadasNoTexto(texto);
@@ -132,7 +133,7 @@ export async function responderCloudflare({ historico, contexto, executar, naPag
       const problema = problemaNaResposta(final, consultas, pergunta, naPagina);
       if (!problema) return final || "Não consegui montar uma resposta. Tente reformular a pergunta.";
       // citou algo que o banco não devolveu: uma correção; se insistir, só os dados
-      if (corrigiu || nadaEncontrado(consultas)) return respostaDosDados(consultas);
+      if (corrigiu || nadaEncontrado(consultas)) return reserva();
       corrigiu = true;
       mensagens.push({ role: "assistant", content: final });
       mensagens.push({ role: "user", content: `[Conferência automática, não é o usuário] ${problema} Refaça a resposta.` });
@@ -147,5 +148,5 @@ export async function responderCloudflare({ historico, contexto, executar, naPag
       consultas.push({ nome, conteudo: r.conteudo, erro: r.erro });
     }
   }
-  return consultas.length ? respostaDosDados(consultas) : MSG_RODADAS;
+  return consultas.length ? reserva() : MSG_RODADAS;
 }
