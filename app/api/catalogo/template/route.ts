@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual } from "@/lib/supabase/route";
-import { uploadArquivo, baixarArquivo, DOCX_MIME } from "@/lib/processos/arquivos";
+import { uploadArquivo, baixarArquivo, removerArquivos, BUCKET, DOCX_MIME } from "@/lib/processos/arquivos";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { examinarModeloDocx, PERFIS_EDICAO_CATALOGO, removerSeSemUso } from "@/lib/asp/catalogo-api";
 import { caminhoModeloValido, MODELO_MAX_BYTES, PASTA_MODELOS } from "@/lib/validacao";
 
@@ -15,12 +16,47 @@ export const runtime = "nodejs";
  *
  *  Confere pelos BYTES (DOCX de verdade, até 20 MB). O caminho usa um uuid —
  *  não o código, que pode ser renomeado. Só vira o modelo do procedimento
- *  quando ele é salvo; o modelo anterior é apagado depois disso. */
+ *  quando ele é salvo; o modelo anterior é apagado depois disso.
+ *
+ *  O arquivo NÃO passa pela Vercel (que recusa pedidos acima de 4,5 MB, e os
+ *  modelos com fotos passam disso): JSON { etapa: "preparar" } devolve um
+ *  link de envio direto ao storage; o navegador envia; JSON { etapa:
+ *  "conferir", caminho } baixa do storage, confere e apaga se não servir.
+ *  O envio antigo (multipart, arquivo no corpo) continua para arquivo pequeno. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   if (!PERFIS_EDICAO_CATALOGO.includes(profile.perfil)) {
     return NextResponse.json({ erro: "Sem permissão para editar o Catálogo." }, { status: 403 });
+  }
+
+  if ((req.headers.get("content-type") || "").includes("application/json")) {
+    const b = (await req.json().catch(() => null)) as { etapa?: string; caminho?: string } | null;
+    if (b?.etapa === "preparar") {
+      const caminho = `${PASTA_MODELOS}${randomUUID()}.docx`;
+      const { data, error } = await getSupabaseAdmin().storage.from(BUCKET).createSignedUploadUrl(caminho);
+      if (error || !data) return NextResponse.json({ erro: error?.message || "Falha ao preparar o envio do modelo." }, { status: 500 });
+      return NextResponse.json({ ok: true, caminho, token: data.token });
+    }
+    if (b?.etapa === "conferir") {
+      const caminho = b.caminho || "";
+      if (!caminhoModeloValido(caminho)) return NextResponse.json({ erro: "Caminho inválido." }, { status: 400 });
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await baixarArquivo(caminho));
+      } catch {
+        return NextResponse.json({ erro: "O modelo não chegou ao servidor. Envie de novo." }, { status: 400 });
+      }
+      const problema = bytes.length > MODELO_MAX_BYTES
+        ? "O modelo passa de 20 MB — reduza as imagens do .docx e envie de novo."
+        : await examinarModeloDocx(bytes);
+      if (problema) {
+        await removerArquivos([caminho]).catch(() => {});
+        return NextResponse.json({ erro: problema }, { status: 400 });
+      }
+      return NextResponse.json({ ok: true, caminho });
+    }
+    return NextResponse.json({ erro: "Etapa inválida." }, { status: 400 });
   }
 
   const form = await req.formData().catch(() => null);

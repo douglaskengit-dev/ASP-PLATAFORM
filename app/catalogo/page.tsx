@@ -17,6 +17,7 @@
  * das novas escolhas; o que já existe continua funcionando). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/app/components/Modal";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import { lerTopicosDoModelo, topicosDoProcedimento, ehLimpezaRobotizada, capaVisivel } from "@/lib/asp/relatorio";
 import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
@@ -339,11 +340,18 @@ export default function CatalogoPage() {
     if (arquivo.size > MODELO_MAX_BYTES) { setErroModal("O modelo passa de 20 MB — reduza as imagens do .docx e envie de novo."); return; }
     setEnviandoModelo(true);
     try {
-      const fd = new FormData();
-      fd.append("arquivo", arquivo);
-      const res = await fetch("/api/catalogo/template", { method: "POST", body: fd });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) { setErroModal(d?.erro || "Falha ao enviar o modelo."); return; }
+      // direto ao storage: pela Vercel, arquivo acima de 4,5 MB é recusado
+      const post = (corpo: object) => fetch("/api/catalogo/template", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+      }).then(async (r) => ({ ok: r.ok, d: await r.json().catch(() => ({})) }));
+      const prep = await post({ etapa: "preparar" });
+      if (!prep.ok) { setErroModal(prep.d?.erro || "Falha ao preparar o envio do modelo."); return; }
+      const up = await getSupabaseBrowserClient().storage.from("gp-arquivos")
+        .uploadToSignedUrl(prep.d.caminho, prep.d.token, arquivo, { contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+      if (up.error) { setErroModal(`Falha ao enviar o modelo: ${up.error.message}`); return; }
+      const conf = await post({ etapa: "conferir", caminho: prep.d.caminho });
+      if (!conf.ok) { setErroModal(conf.d?.erro || "Falha ao conferir o modelo."); return; }
+      const d = conf.d;
       enviadosSessao.current.push(d.caminho);
       setEdProc((p) => p && ({ ...p, template_path: d.caminho }));
     } finally {
