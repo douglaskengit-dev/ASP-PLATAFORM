@@ -9,6 +9,7 @@ import { exemplosAprovados, registrarResposta } from "@/lib/assistente/registro"
 import { sugestoesDeContinuacao } from "@/lib/assistente/continuacao";
 import { guardarResposta, respostaGuardada, versaoDoCache } from "@/lib/assistente/cache";
 import { precisaDoBanco } from "@/lib/assistente/verificacao";
+import { limiteDiario, msgLimite, perguntasHoje, temReservaAnthropic } from "@/lib/assistente/limite";
 import { finalizarResposta, foraDoEscopoObvio, MSG_FORA_DO_ESCOPO } from "@/lib/assistente/escopo";
 import { ErroAssistente, type ExecutarFerramenta, type MensagemChat } from "@/lib/assistente/tipos";
 
@@ -78,14 +79,36 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // limite diário por pessoa (o admin não tem)
+  const limite = limiteDiario();
+  if (limite > 0 && profile.perfil !== "admin") {
+    const feitas = await perguntasHoje(sb, profile.id, hoje).catch(() => null);
+    if (feitas != null && feitas >= limite) return NextResponse.json({ erro: msgLimite(limite) }, { status: 429 });
+  }
+
+  // cota gratuita do Cloudflare acabou: se configurado, a Anthropic responde
+  let usado = provedor;
+  const responder = async () => {
+    if (provedor === "anthropic") return responderClaude(pedido);
+    try {
+      return await responderCloudflare(pedido);
+    } catch (e) {
+      if (!(e instanceof ErroAssistente && e.status === 429 && temReservaAnthropic())) throw e;
+      consultas.length = 0;
+      registro.reserva = false;
+      usado = "anthropic-reserva";
+      return responderClaude(pedido);
+    }
+  };
+
   try {
-    const final = finalizarResposta(provedor === "anthropic" ? await responderClaude(pedido) : await responderCloudflare(pedido));
+    const final = finalizarResposta(await responder());
     const primeiroNome = (profile.nome_completo || "").trim().split(/\s+/)[0];
     if (podeGuardar && !consultas.length && !final.fora_do_escopo && !registro.reserva && !(primeiroNome && final.resposta.includes(primeiroNome))) {
       await guardarResposta(pergunta, final.resposta, versao).catch(() => {});
     }
     const id = await registrarResposta(sb, {
-      pergunta, resposta: final.resposta, pagina: corpo?.pagina, consultas, foraDoEscopo: final.fora_do_escopo, reserva: registro.reserva, provedor,
+      pergunta, resposta: final.resposta, pagina: corpo?.pagina, consultas, foraDoEscopo: final.fora_do_escopo, reserva: registro.reserva, provedor: usado,
     });
     const sugestoes = final.fora_do_escopo ? [] : sugestoesDeContinuacao(final.resposta, consultas, pergunta);
     return NextResponse.json({ ...final, id, sugestoes });
