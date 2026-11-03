@@ -10,6 +10,7 @@ import { FASES } from "@/lib/asp/fases";
 import { idsDaEquipe, pendenciasDoUsuario } from "@/lib/asp/pendencias-campo";
 import { carregarPendencias } from "@/lib/asp/pendencias-campo-api";
 import { hojeBrasil } from "@/lib/validacao/formatos";
+import { consultarIndicadores, FERRAMENTA_INDICADORES } from "./indicadores";
 import { ROTULO_STATUS_RELATORIO } from "@/lib/validacao/relatorio";
 
 const LIMITE = 40;
@@ -69,6 +70,7 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
       additionalProperties: false,
     },
   },
+  FERRAMENTA_INDICADORES,
   {
     name: "minhas_pendencias",
     description: "O que está com o usuário que pergunta: OS abertas paradas numa fase de responsabilidade do perfil dele (mais antigas primeiro), pendências de campo de hoje (fotos e RDO) e os agendamentos dos próximos 7 dias em que ele está na equipe. Use para \"minhas pendências\", \"o que eu tenho para fazer\", \"o que falta comigo\".",
@@ -266,6 +268,8 @@ export async function executarFerramenta(sb: SupabaseClient, nome: string, e: En
         link: `/inspecoes/${a.inspecao.id}`,
       }));
     }
+    case "indicadores":
+      return consultarIndicadores(sb, e);
     case "minhas_pendencias":
       if (!usuario) return { erro: "Usuário não identificado." };
       return minhasPendencias(sb, usuario);

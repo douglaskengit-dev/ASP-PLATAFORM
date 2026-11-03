@@ -19,7 +19,7 @@ export function precisaDoBanco(pergunta: string, naPagina = false): boolean {
   const t = normalizar(pergunta);
   if (naPagina && apontaParaPagina(t)) return true;
   if (/^(como|onde|o que (e|significa)|para que|pra que|posso|consigo|quem pode|qual a diferenca|por que)\b/.test(t)) return false;
-  return /\b(projet|client|orga|os\b|inspec|tanque|agend|agenda|rdo|relator|colet|fase|cnpj|contat|prefeit|pedido|entreg|encerr|pendenc|tarefa|minha agenda|meus agend)/.test(t);
+  return /\b(projet|client|orga|os\b|inspec|tanque|agend|agenda|rdo|relator|colet|fase|cnpj|contat|prefeit|pedido|entreg|encerr|pendenc|tarefa|quant|parad|recorr|venc|indicad|lead time|minha agenda|meus agend)/.test(t);
 }
 
 function semResultado(c: Consulta): boolean {
