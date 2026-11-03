@@ -178,7 +178,17 @@ export interface DadosRelatorio {
    *  qualquer posição — `apos` é o número do tópico padrão depois do qual ele
    *  entra (0 = logo após a capa). São numerados junto com os demais. As fotos
    *  chegam em `imagens` com ancora "extra-<índice>". */
-  topicosExtras?: { titulo: string; texto?: string; apos?: number }[];
+  topicosExtras?: {
+    titulo: string; texto?: string; apos?: number;
+    /** Tabelas depois do texto (cada uma com o seu título em negrito). */
+    tabelas?: TabelaAnalise[];
+    /** Texto depois das tabelas (HTML do editor), antes das fotos, com o
+     *  seu título em negrito. */
+    tituloFinal?: string;
+    textoFinal?: string;
+    /** Título em negrito acima das fotos do tópico (só se houver foto). */
+    tituloFiguras?: string;
+  }[];
   /** Modelo .docx a usar. Vazio = modelo padrão da ASP. */
   templateUrl?: string;
   /** Lista de tópicos do PROCEDIMENTO (Catálogo). Quando vem preenchida, é
@@ -1246,6 +1256,31 @@ function tabelaSimples(t: TabelaAnalise): string {
     linha(t.cabecalho, true) + t.linhas.map((l) => linha(l, false)).join("") + "</w:tbl>";
 }
 
+/** Título interno de um tópico gerado ("Resultados das análises
+ *  laboratoriais:"): Arial 12 em negrito, sem recuo, preso ao que vem abaixo. */
+function tituloDeTabela(titulo: string): string {
+  return '<w:p><w:pPr><w:keepNext/><w:spacing w:before="160" w:after="80" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/></w:pPr>' +
+    '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>' +
+    `<w:t xml:space="preserve">${esc(titulo)}</w:t></w:r></w:p>`;
+}
+
+/** Tabelas de um tópico gerado pelo sistema (sem lugar no modelo). */
+function tabelasDoTopico(tabelas?: TabelaAnalise[]): string {
+  return (tabelas || []).filter((t) => t.linhas.length > 0).map((t) =>
+    tituloDeTabela(t.titulo) + tabelaSimples(t) +
+    '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>').join("");
+}
+
+/** Texto padrão do tópico "Análise Físico Química e Laboratorial" — o mesmo
+ *  do modelo POP 001 (2026). Usado quando o procedimento de limpeza não tem
+ *  modelo próprio e a seção é gerada pelo sistema. */
+export const TEXTO_PADRAO_ANALISE = [
+  "No Estado de São Paulo, temos o comunicado CVS 36-91 de 27/06/1991, norma que regulamenta a limpeza de reservatórios e caixas d'água potável domiciliar. No entanto, ela não menciona explicitamente reservatórios indústrias de grande porte, nem contempla o uso de robôs nesse processo, o que reflete uma defasagem em relação às inovações tecnológicas aplicadas ao setor.",
+  "Diante da ausência de uma norma brasileira específica que aborde a limpeza com robôs, a ASP adota a Norma ANSI/AWWA C652-19 (Revisão C652-11), emitida pela American Water Works Association (AWWA). Esta norma contempla procedimentos detalhados para a desinfecção de instalações de armazenamento de água, incluindo métodos para inspeções e limpezas subaquáticas realizadas com veículos remotamente operados (ROVs), como robôs. O uso dessa tecnologia permite maior segurança e eficiência, assegurando que todas as partes em contato com a água potável sejam higienizadas e sanitizadas de maneira rigorosa, prevenindo contaminações.",
+  "Além dos procedimentos da AWWA, a ASP realiza ensaios físico-químicos e bacteriológicos antes e após a operação de limpeza, como medida de precaução e controle de qualidade. Esses ensaios verificam a qualidade da água antes da operação e após a limpeza, comparando-a com os padrões exigidos pela legislação vigente.",
+  "Os resultados das amostras são apresentados no quadro a seguir, comparando os parâmetros antes e após a limpeza com os limites estabelecidos pela Resolução Estadual nº SS 65/2005 e pela Portaria de Consolidação GM/MS nº 05/2017 (alterada pela Portaria GM/MS nº 888/2021).",
+].map((t) => `<p>${t.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`).join("");
+
 /**
  * Tabelas do formulário (valores medidos em campo, amostras) na seção de
  * análise, logo ANTES de "Resultados das análises laboratoriais:" — o título
@@ -2056,7 +2091,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     const figs = figurasDaAncora.get(ancora) || "";
     figurasDaAncora.delete(ancora);
     return tituloTopico(numeroExtra.get(i) ?? 0, e.titulo || "") +
-      (e.texto ? htmlParaParagrafos(e.texto) : "") + figs;
+      (e.texto ? htmlParaParagrafos(e.texto) : "") + tabelasDoTopico(e.tabelas) +
+      (e.textoFinal ? (e.tituloFinal ? tituloDeTabela(e.tituloFinal) : "") + htmlParaParagrafos(e.textoFinal) : "") +
+      (figs && e.tituloFiguras ? tituloDeTabela(e.tituloFiguras) : "") + figs;
   };
 
   // Tópico 8 — subtópicos criados pelo usuário (8.1, 8.2 …), cada um com o

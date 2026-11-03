@@ -25,7 +25,7 @@ import EditorTexto from "./EditorTexto";
 import VisualizadorFoto from "./VisualizadorFoto";
 import type { LaudoLido } from "@/lib/asp/laudo-leitura";
 import {
-  gerarRelatorioDocx, lerCamposDoModelo, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS,
+  gerarRelatorioDocx, lerCamposDoModelo, lerTopicosDoModelo, lerVagasDeImagem, LAUDO_COLUNAS, LAUDO_PARAMETROS, TEXTO_PADRAO_ANALISE,
   TOPICOS_PADRAO, TOPICO_CAPA, topicosDoProcedimento, capaVisivel, ehLimpezaRobotizada, numeroDaSecao,
   type DadosRelatorio, type ImagemRelatorio, type TabelaAnalise, type VagaImagem,
 } from "@/lib/asp/relatorio";
@@ -46,7 +46,7 @@ import {
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   sugestaoTextoConclusao, sugestaoTextoRecomendacoes, type DadosSugestao,
-  CAMPOS_DO_MODELO, semCamposForaDoModelo,
+  CAMPOS_DO_MODELO, semCamposForaDoModelo, infoParametro,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
 
@@ -200,6 +200,32 @@ function tabelasDaAnalise(d: Partial<DadosRelatorio>, unidade: string): TabelaAn
     linhas: amostras, larguras: [2070, 2500, 1700, 2800],
   });
   return out;
+}
+
+/** Título da seção de análise ("Análise Físico Química e Laboratorial"). */
+const RE_TITULO_ANALISE = /an[áa]lise\s+(f[íi]sico|laboratorial)/i;
+
+/** Tabela "Resultados das análises laboratoriais" (antes, após e limite),
+ *  para a seção de análise gerada pelo sistema — no modelo POP 001 ela já
+ *  vem pronta. Parâmetro sem resultado nos dois laudos não entra. */
+function tabelaResultadosLaudo(d: Partial<DadosRelatorio>, laudoDoc: (g?: string[][]) => string[][] | undefined): TabelaAnalise[] {
+  const ga = laudoDoc(d.laudoAntes), gd = laudoDoc(d.laudoDepois);
+  if (!ga && !gd) return [];
+  const linhas = gradeLaudo(null).map((_, i) => {
+    const info = infoParametro(i);
+    return [info.nome, info.unidade || (info.pa ? "P/A" : ""), ga?.[i]?.[COL_VALOR] || "", gd?.[i]?.[COL_VALOR] || "", gd?.[i]?.[COL_LIMITE] || ga?.[i]?.[COL_LIMITE] || ""];
+  }).filter((l) => l[2] || l[3]);
+  if (!linhas.length) return [];
+  return [{
+    titulo: "Resultados das análises laboratoriais:",
+    cabecalho: [
+      "Parâmetro", "Unidade",
+      `Antes da limpeza${d.amostraAntes?.trim() ? ` (Amostra ${d.amostraAntes.trim()})` : ""}`,
+      `Após a limpeza${d.amostraDepois?.trim() ? ` (Amostra ${d.amostraDepois.trim()})` : ""}`,
+      "Limite (Portaria GM/MS nº 888/2021)",
+    ],
+    linhas, larguras: [2270, 1300, 1900, 1900, 1700],
+  }];
 }
 
 /** Os dois laudos do laboratório e a grade de valores de cada um. */
@@ -665,6 +691,7 @@ export default function GerarRelatorio({
     // Análise Físico Química e Laboratorial tem texto fixo padrão do modelo
     // (CVS 36-91, AWWA, ensaios antes/após) — sempre sai, como Recomendações.
     if (t.numero === N.analise) continue;
+    if (limpeza && N.analise === undefined && RE_TITULO_ANALISE.test(t.titulo)) continue;   // gerada pelo sistema
     let cheio = temTexto(textosTopico[t.numero]) || temFoto(t.numero);
     if (t.numero === nLimpeza) cheio ||= !!d.volumeSedimento?.trim();
     if (!cheio) secoesVazias.add(t.numero);
@@ -787,6 +814,20 @@ export default function GerarRelatorio({
     return novas;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaNumerada, topicosModelo]);
+
+  /** Limpeza sem modelo próprio: a "Análise Físico Química e Laboratorial"
+   *  da lista do Catálogo é uma seção nova, e o sistema a monta — texto
+   *  padrão do POP 001, tabelas (campo, amostras, resultados), Conclusão das
+   *  Análises e as páginas dos laudos. */
+  const nAnaliseNova = limpeza && N.analise === undefined
+    ? secoesNovas.find((x) => RE_TITULO_ANALISE.test(x.titulo))?.numero : undefined;
+  // texto padrão do tópico, uma vez, se ainda não há texto (rascunho mantém o seu)
+  const analisePreenchida = useRef(false);
+  useEffect(() => {
+    if (nAnaliseNova === undefined || analisePreenchida.current) return;
+    analisePreenchida.current = true;
+    setTextosTopico((p) => (temTexto(p[nAnaliseNova]) ? p : { ...p, [nAnaliseNova]: TEXTO_PADRAO_ANALISE }));
+  }, [nAnaliseNova]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** SHA-256 do original de cada foto da coleta (por caminho) — é o que
    *  reconhece a mesma foto anexada também à mão. */
@@ -1132,7 +1173,8 @@ export default function GerarRelatorio({
       }) : undefined);
       // Prints dos laudos: cada página do PDF anexado vira figura num
       // subtópico "Laudos do laboratório", no fim da seção de análise.
-      if (execucao && limpeza && !d.semPrintsLaudo && N.analise !== undefined && ativo(N.analise)) {
+      const nPrints = N.analise ?? nAnaliseNova;
+      if (execucao && limpeza && !d.semPrintsLaudo && nPrints !== undefined && ativo(nPrints)) {
         for (const [l, quando, amostra] of [[laudoPdf, "antes da limpeza", d.amostraAntes], [laudoPdfDepois, "após a limpeza", d.amostraDepois]] as const) {
           if (!l?.caminho) continue;
           const resp = await fetch("/api/laudo/paginas", {
@@ -1148,7 +1190,7 @@ export default function GerarRelatorio({
             imgs.push({
               dados: bytes.buffer, extensao: "png", larguraCm: 16, alturaMaxCm: 21,
               legenda: `Laudo do laboratório — amostra ${quando}${amostra ? ` (Relatório de Ensaio ${amostra})` : ""}${todas.length > 1 ? `, página ${k + 1} de ${todas.length}` : ""}.`,
-              topico: N.analise!, ancora: "sub:Laudos do laboratório",
+              topico: nPrints, ancora: N.analise !== undefined ? "sub:Laudos do laboratório" : ancoraDaSecaoNova.get(nPrints),
             });
           });
         }
@@ -1208,7 +1250,14 @@ export default function GerarRelatorio({
           ...secoesNovas.map((s) => ({
             titulo: ativo(s.numero) ? s.titulo : "",
             texto: ativo(s.numero) ? (textosTopico[s.numero] || "") : "",
-            apos: s.apos,
+            // a Análise gerada entra antes da Conclusão (como no POP 001), mesmo listada depois
+            apos: s.numero === nAnaliseNova && N.conclusao !== undefined ? Math.min(s.apos, N.conclusao - 1) : s.apos,
+            ...(s.numero === nAnaliseNova && ativo(s.numero) ? {
+              tabelas: [...tabelasDaAnalise(d, unidadeCloro), ...tabelaResultadosLaudo(d, laudoDoc)],
+              tituloFinal: "Conclusão das Análises Laboratoriais:",
+              textoFinal: temTexto(d.conclusaoAnalises) ? d.conclusaoAnalises : "",
+              tituloFiguras: "Laudos do laboratório:",
+            } : {}),
           })),
         ],
         templateUrl: proc?.template_path
@@ -1506,9 +1555,11 @@ export default function GerarRelatorio({
    *  `semFotos` tira o upload de fotos livre — usado quando o próprio
    *  `children` já traz um BlocoVagasDoTopico, senão o tópico ganhava dois
    *  uploads de foto ao mesmo tempo. */
-  function Topico({ numero, titulo, children, maxFotos, legendaFoto, semFotos, nota }: {
+  function Topico({ numero, titulo, children, maxFotos, legendaFoto, semFotos, nota, posicao }: {
     numero: number; titulo: string; children?: React.ReactNode; maxFotos?: number; legendaFoto?: string;
     semFotos?: boolean; nota?: string;
+    /** Ordem na tela (padrão: o número) — a Análise gerada fica antes da Conclusão. */
+    posicao?: number;
   }) {
     const on = ativo(numero);
     // O título que aparece é o do modelo em uso (como sai no documento).
@@ -1520,7 +1571,7 @@ export default function GerarRelatorio({
     const item = indice.find((x) => x.id === id);
     const estado = item && on ? estadoDoItem(item) : null;
     return (
-      <div key={`secao-${numero}`} data-secao={numero} data-indice={id} data-indice-titulo={rotuloTopico}
+      <div key={`secao-${numero}`} data-secao={posicao ?? numero} data-indice={id} data-indice-titulo={rotuloTopico}
         data-indice-ativo={on ? "1" : "0"} data-indice-vazio={on && secoesVazias.has(numero) ? "1" : "0"}
         className="rel-bloco rel-topico" style={{ opacity: on ? 1 : 0.55 }}>
         <div className="rel-topico-cabeca">
@@ -1733,7 +1784,13 @@ export default function GerarRelatorio({
   function ConteudoAnalise() {
     return (
       <>
-      {!caminhoModelo ? (
+      {nAnaliseNova !== undefined ? (
+        <p className="detalhe" style={{ margin: "4px 0 8px" }}>
+          Este procedimento não tem modelo próprio, então o sistema monta este tópico no documento: o texto
+          acima (o padrão do POP 001, editável), as tabelas de valores medidos em campo, de amostras e de
+          resultados do laudo, a Conclusão das Análises e as páginas dos laudos (prints).
+        </p>
+      ) : !caminhoModelo ? (
         <p className="detalhe" style={{ margin: "4px 0 8px", color: "var(--erro, #b42318)" }}>
           <strong>⚠ Este procedimento não tem o modelo da limpeza robotizada anexado no Catálogo.</strong>{" "}
           Sem ele o relatório sai no modelo padrão da ASP, que não tem vaga para essas fotos nem
@@ -2479,7 +2536,7 @@ export default function GerarRelatorio({
         /* Blocos do POP 001. As legendas e as posições das figuras já estão
             no modelo — aqui só entram os valores medidos e as fotos, na ordem
             das vagas. Em modelo sem essas vagas, nada disso é usado. */
-        limpeza && N.analise === undefined && (
+        limpeza && N.analise === undefined && nAnaliseNova === undefined && (
         <div key="analise" data-secao={(N.conclusao ?? 99) - 0.25} className="rel-bloco">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ fontSize: 13.5 }}>
@@ -2516,10 +2573,12 @@ export default function GerarRelatorio({
             upload de fotos livre. */
         ...topicosGenericos.map((t) => {
           const temVagas = vagasModelo.some((v) => v.topico === t.numero);
-          const ehAnalise = limpeza && t.numero === N.analise;
+          const ehAnalise = limpeza && (t.numero === N.analise || t.numero === nAnaliseNova);
           const ehColeta = limpeza && [N.coletas, N.etapaAntes, N.etapaApos].includes(t.numero);
           return Topico({
             numero: t.numero, titulo: t.titulo, maxFotos: 20, legendaFoto: t.titulo,
+            ...(t.numero === nAnaliseNova && N.conclusao !== undefined
+              ? { posicao: N.conclusao - 0.5, nota: "entra no documento antes da Conclusão" } : {}),
             semFotos: temVagas,
             children: (
               <>
