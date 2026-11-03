@@ -7,6 +7,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FASES } from "@/lib/asp/fases";
+import { idsDaEquipe, pendenciasDoUsuario } from "@/lib/asp/pendencias-campo";
+import { carregarPendencias } from "@/lib/asp/pendencias-campo-api";
+import { hojeBrasil } from "@/lib/validacao/formatos";
 import { ROTULO_STATUS_RELATORIO } from "@/lib/validacao/relatorio";
 
 const LIMITE = 40;
@@ -67,6 +70,11 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "minhas_pendencias",
+    description: "O que está com o usuário que pergunta: OS abertas paradas numa fase de responsabilidade do perfil dele (mais antigas primeiro), pendências de campo de hoje (fotos e RDO) e os agendamentos dos próximos 7 dias em que ele está na equipe. Use para \"minhas pendências\", \"o que eu tenho para fazer\", \"o que falta comigo\".",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "agenda",
     description: "Agendamentos de inspeção e execução num período (datas ISO AAAA-MM-DD), com OS, projeto, cliente e equipe.",
     input_schema: {
@@ -101,8 +109,59 @@ const CAMPOS_RELATORIO = [
 ];
 
 type Entrada = Record<string, unknown>;
+/** Quem pergunta (para minhas_pendencias). */
+export interface UsuarioAssistente { id: string; perfil: string | null }
 
-export async function executarFerramenta(sb: SupabaseClient, nome: string, e: Entrada): Promise<unknown> {
+const diasDesde = (iso: string | null | undefined, hoje: string) =>
+  iso ? Math.max(0, Math.round((Date.parse(hoje) - Date.parse(iso.slice(0, 10))) / 86400000)) : null;
+const somarDias = (iso: string, n: number) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
+
+/** Fases em que o perfil é o responsável principal (fases.ts). */
+const fasesDoPerfil = (perfil: string | null) =>
+  FASES.filter((f) => !!perfil && (f.responsaveis as string[]).includes(perfil)).map((f) => f.numero);
+
+async function minhasPendencias(sb: SupabaseClient, u: UsuarioAssistente) {
+  const hoje = hojeBrasil();
+  const fases = fasesDoPerfil(u.perfil);
+  const [os, campo, ags] = await Promise.all([
+    fases.length
+      ? sb.from("gp_inspecoes")
+        .select("id, identificacao, fase, atualizado_em, status_relatorio_inspecao, status_relatorio_execucao, projeto:gp_projetos(codigo_projeto, excluido_em, cliente:gp_orgaos(razao_social))")
+        .is("excluido_em", null).is("encerrada_em", null).in("fase", fases).order("atualizado_em", { ascending: true }).limit(200)
+      : Promise.resolve({ data: [], error: null }),
+    carregarPendencias(sb, hoje).catch(() => []),
+    sb.from("gp_agendamentos")
+      .select("tipo, data_visita, data_fim, hora, a_definir, equipe, inspecao:gp_inspecoes(id, identificacao, excluido_em, projeto:gp_projetos(codigo_projeto, cliente:gp_orgaos(razao_social)))")
+      .is("substituido_em", null).gte("data_visita", hoje).lte("data_visita", somarDias(hoje, 7)).order("data_visita").limit(200),
+  ]);
+  if (os.error) throw os.error;
+  if (ags.error) throw ags.error;
+  const minhasOs = (os.data || []).filter((i: any) => i.projeto && !i.projeto.excluido_em);
+  return {
+    perfil: u.perfil,
+    fases_sob_sua_responsabilidade: fases.map((n) => `${n} — ${tituloFase(n)}`),
+    os_aguardando_voce: minhasOs.slice(0, LIMITE).map((i: any) => ({
+      identificacao: i.identificacao, projeto: i.projeto?.codigo_projeto, cliente: i.projeto?.cliente?.razao_social,
+      fase: i.fase, fase_titulo: tituloFase(i.fase), parada_ha_dias: diasDesde(i.atualizado_em, hoje),
+      relatorio_inspecao: rotuloStatus(i.status_relatorio_inspecao), relatorio_execucao: rotuloStatus(i.status_relatorio_execucao),
+      link: `/inspecoes/${i.id}`,
+    })),
+    total_os_aguardando_voce: minhasOs.length,
+    pendencias_de_campo_hoje: pendenciasDoUsuario(campo, u.id).map((p) => ({
+      identificacao: p.identificacao, projeto: p.projeto, fotos_faltando: p.fotos, falta_rdo_de_hoje: p.rdoFaltando,
+      link: `/inspecoes/${p.inspecaoId}`,
+    })),
+    sua_agenda_7_dias: (ags.data || [])
+      .filter((a: any) => a.inspecao && !a.inspecao.excluido_em && idsDaEquipe(a.equipe).includes(u.id))
+      .map((a: any) => ({
+        tipo: a.tipo, data: a.data_visita, data_fim: a.data_fim, hora: a.hora, a_definir: a.a_definir,
+        os: a.inspecao.identificacao, projeto: a.inspecao.projeto?.codigo_projeto, cliente: a.inspecao.projeto?.cliente?.razao_social,
+        link: `/inspecoes/${a.inspecao.id}`,
+      })),
+  };
+}
+
+export async function executarFerramenta(sb: SupabaseClient, nome: string, e: Entrada, usuario?: UsuarioAssistente): Promise<unknown> {
   switch (nome) {
     case "buscar_projetos": {
       const { data, error } = await sb.from("gp_projetos")
@@ -207,6 +266,9 @@ export async function executarFerramenta(sb: SupabaseClient, nome: string, e: En
         link: `/inspecoes/${a.inspecao.id}`,
       }));
     }
+    case "minhas_pendencias":
+      if (!usuario) return { erro: "Usuário não identificado." };
+      return minhasPendencias(sb, usuario);
     default:
       return { erro: `Ferramenta desconhecida: ${nome}` };
   }

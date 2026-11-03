@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   const sb = getSupabaseRouteClient();
   const executar: ExecutarFerramenta = async (nome, entrada) => {
     try {
-      return { conteudo: JSON.stringify(await executarFerramenta(sb, nome, entrada)) };
+      return { conteudo: JSON.stringify(await executarFerramenta(sb, nome, entrada, { id: profile.id, perfil: profile.perfil })) };
     } catch (e: any) {
       console.error("assistente/ferramenta:", nome, e);
       return { conteudo: `Falha na consulta: ${e?.message || e}`, erro: true };

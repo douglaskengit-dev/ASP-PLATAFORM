@@ -53,7 +53,7 @@ export interface LinhasPendencias {
   rdosHoje: { projeto_id: string }[];
 }
 
-function idsDaEquipe(equipe: unknown): string[] {
+export function idsDaEquipe(equipe: unknown): string[] {
   if (!Array.isArray(equipe)) return [];
   return Array.from(new Set(equipe.map((m: any) => (m && m.id ? String(m.id) : "")).filter(Boolean)));
 }

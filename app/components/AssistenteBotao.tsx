@@ -19,6 +19,7 @@ interface Mensagem { papel: "usuario" | "assistente"; texto: string; foraDoEscop
 const CHAVE = "assistente-conversa";
 const CHAVE_OCULTO = "assistente-robo-oculto";
 const SUGESTOES = [
+  "Quais são as minhas pendências?",
   "Como gero o relatório de execução?",
   "Quais OS estão aguardando aprovação de relatório?",
   "O que está agendado para esta semana?",
