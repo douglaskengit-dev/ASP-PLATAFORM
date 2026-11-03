@@ -91,18 +91,20 @@ export async function GET(req: NextRequest) {
   if (!caminho || !caminhoModeloValido(caminho)) {
     return NextResponse.json({ erro: "Caminho inválido." }, { status: 400 });
   }
-  // O arquivo NÃO passa pela Vercel (que recusa respostas acima de 4,5 MB, e
-  // os modelos com fotos passam disso — o do POP 001 tem 5,2 MB): redireciona
-  // para um link assinado do storage, curto, que o fetch e o link seguem.
-  let download: string | undefined;
-  if (req.nextUrl.searchParams.get("baixar") === "1") {
-    const nome = (req.nextUrl.searchParams.get("nome") || "modelo").replace(/[\\/:*?"<>|\r\n]+/g, " ").trim().slice(0, 80) || "modelo";
-    download = nome.toLowerCase().endsWith(".docx") ? nome : `${nome}.docx`;
+  try {
+    const buf = await baixarArquivo(caminho);
+    const headers: Record<string, string> = { "Content-Type": DOCX_MIME, "Cache-Control": "private, max-age=300" };
+    if (req.nextUrl.searchParams.get("baixar") === "1") {
+      const nome = (req.nextUrl.searchParams.get("nome") || "modelo").replace(/[\\/:*?"<>|\r\n]+/g, " ").trim().slice(0, 80) || "modelo";
+      const arquivo = nome.toLowerCase().endsWith(".docx") ? nome : `${nome}.docx`;
+      // filename= só aceita ASCII; o nome com acento vai no filename* (RFC 5987)
+      const ascii = arquivo.normalize("NFD").replace(/[^\x20-\x7e]/g, "").replace(/"/g, "");
+      headers["Content-Disposition"] = `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(arquivo)}`;
+    }
+    return new NextResponse(new Uint8Array(buf), { headers });
+  } catch {
+    return NextResponse.json({ erro: "Modelo não encontrado." }, { status: 404 });
   }
-  const { data, error } = await getSupabaseAdmin().storage.from(BUCKET)
-    .createSignedUrl(caminho, 120, download ? { download } : undefined);
-  if (error || !data?.signedUrl) return NextResponse.json({ erro: "Modelo não encontrado." }, { status: 404 });
-  return NextResponse.redirect(data.signedUrl, { status: 302, headers: { "Cache-Control": "no-store" } });
 }
 
 /** Descarta um modelo enviado e não usado (edição cancelada): ?caminho=...

@@ -280,6 +280,10 @@ export interface SnapshotRelatorio {
   /** Campos de CAMPOS_DO_MODELO que o modelo em uso não tem (o formulário
    *  os esconde): as mensagens deles não valem. */
   camposForaDoModelo?: string[];
+  /** Modelo em uso quando o rascunho foi salvo (template_path; "" = o padrão
+   *  da ASP). Reaberto com outro modelo, as fotos da coleta são recolocadas
+   *  pelos números e vagas do modelo atual. Ausente = rascunho antigo. */
+  modelo?: string;
 }
 
 /** Campos que só chegam ao documento se o modelo tiver o rótulo/marcador
