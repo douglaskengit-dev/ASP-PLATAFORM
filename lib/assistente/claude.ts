@@ -16,7 +16,7 @@ function getClient(): Anthropic {
   return client;
 }
 
-export async function responderClaude({ historico, contexto, executar }: PedidoAssistente): Promise<string> {
+export async function responderClaude({ historico, contexto, executar, naPagina }: PedidoAssistente): Promise<string> {
   const mensagens: Anthropic.Beta.BetaMessageParam[] = historico.map((m) => ({
     role: m.papel === "usuario" ? "user" : "assistant", content: m.texto,
   }));
@@ -44,7 +44,7 @@ export async function responderClaude({ historico, contexto, executar }: PedidoA
       if (resp.stop_reason === "refusal") return MSG_FORA_DO_ESCOPO;
       if (resp.stop_reason !== "tool_use") {
         const texto = resp.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
-        const problema = problemaNaResposta(texto, consultas, pergunta);
+        const problema = problemaNaResposta(texto, consultas, pergunta, naPagina);
         if (!problema) return texto || "Não consegui montar uma resposta. Tente reformular a pergunta.";
         if (corrigiu || nadaEncontrado(consultas)) return respostaDosDados(consultas);
         corrigiu = true;

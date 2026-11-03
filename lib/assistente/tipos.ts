@@ -8,6 +8,8 @@ export interface PedidoAssistente {
   /** Data de hoje e quem pergunta. */
   contexto: string;
   executar: ExecutarFerramenta;
+  /** O usuário está na página de uma OS, projeto ou cliente. */
+  naPagina?: boolean;
 }
 
 /** Erro com mensagem já pronta para o usuário. */
