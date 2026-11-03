@@ -51,6 +51,34 @@ async function converter(blob: Blob, tipo: "image/png" | "image/jpeg"): Promise<
   }
 }
 
+/** Orientação EXIF de um JPEG (1 = normal; 2–8 = girada/espelhada). A
+ *  câmera do celular grava a foto "deitada" e marca o giro aqui: o recorte do
+ *  quadro (que lê as dimensões do arquivo) cortaria o lado errado. */
+export function orientacaoExif(b: Uint8Array): number {
+  if (b[0] !== 0xff || b[1] !== 0xd8) return 1;
+  let i = 2;
+  while (i + 4 < b.length) {
+    if (b[i] !== 0xff) return 1;
+    const marcador = b[i + 1], tam = (b[i + 2] << 8) | b[i + 3];
+    if (marcador === 0xe1 && b[i + 4] === 0x45 && b[i + 5] === 0x78 && b[i + 6] === 0x69 && b[i + 7] === 0x66) {
+      const t = i + 10;                                   // início do TIFF
+      const le = b[t] === 0x49;                           // "II" = little endian
+      const u16 = (o: number) => (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1]);
+      const u32 = (o: number) => (le ? (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0 : ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0);
+      const ifd = t + u32(t + 4);
+      const n = u16(ifd);
+      for (let k = 0; k < n; k++) {
+        const e = ifd + 2 + k * 12;
+        if (u16(e) === 0x0112) return u16(e + 8) || 1;
+      }
+      return 1;
+    }
+    if (marcador === 0xda) return 1;                      // começo da imagem: sem EXIF antes
+    i += 2 + tam;
+  }
+  return 1;
+}
+
 export async function prepararImagemRelatorio(original: Blob, nome: string): Promise<ImagemPreparada | { erro: string }> {
   if (original.size > FOTO_MAX_BYTES) {
     return { erro: `“${nome}” tem ${mb(original.size)} MB — o limite por foto é 10 MB. Reduza a resolução e envie de novo.` };
@@ -59,6 +87,20 @@ export async function prepararImagemRelatorio(original: Blob, nome: string): Pro
   const bytes = new Uint8Array(await original.arrayBuffer());
   const fmt = formatoImagem(bytes);
   const base = nome.replace(/\.[^.]+$/, "") || "foto";
+  if (fmt === "jpeg" && orientacaoExif(bytes) > 1) {
+    // foto de celular "deitada" com marca de giro: grava já em pé (o
+    // createImageBitmap aplica o EXIF), para o quadro recortar o lado certo
+    const conv = await converter(new Blob([bytes], { type: "image/jpeg" }), "image/jpeg");
+    if (conv) {
+      const final = new Uint8Array(await conv.arrayBuffer());
+      if (final.length <= FOTO_MAX_BYTES) {
+        return {
+          arquivo: new File([final], `${base}.jpg`, { type: "image/jpeg" }),
+          extensao: "jpeg", hash: await sha256Hex(final), hashOriginal: await sha256Hex(bytes),
+        };
+      }
+    }
+  }
   if (fmt === "png" || fmt === "jpeg") {
     const arquivo = original instanceof File && original.name === nome
       ? original : new File([bytes], nome, { type: `image/${fmt}` });

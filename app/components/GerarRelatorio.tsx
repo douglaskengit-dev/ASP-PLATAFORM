@@ -116,6 +116,8 @@ interface FotoTopico {
   hashOriginal?: string;
   /** SHA-256 do original guardado na coleta de fotos (foto pré-carregada). */
   hashColeta?: string;
+  /** Enquadramento no quadro 16:9 do relatório (0 a 1; ausente = centro). */
+  foco?: number;
 }
 
 /** Hashes que identificam a mesma imagem: o arquivo final, o original
@@ -236,6 +238,14 @@ const CHAVE_DO_LAUDO: Record<QualLaudo, ChaveLaudo> = { antes: "laudoAntes", dep
  *  modelo (o número sai certo só no documento) nem o marcador do valor. */
 function legendaDaVaga(legenda: string) {
   return legenda.replace(/^Figura\s+\S+\s*[–-]\s*/i, "").replace(/\s*\(\[dado coletado\]\)/gi, "").trim();
+}
+
+/** URL local de cada arquivo, criada uma vez (miniaturas do enquadramento). */
+const urlsDosArquivos = new WeakMap<File, string>();
+function urlDoArquivo(f: File): string {
+  let u = urlsDosArquivos.get(f);
+  if (!u) { u = URL.createObjectURL(f); urlsDosArquivos.set(f, u); }
+  return u;
 }
 
 /** Um tópico no índice do topo, com o estado lido da tela: mensagens ⛔/⚠️
@@ -432,7 +442,7 @@ export default function GerarRelatorio({
           arquivo: prep.arquivo, hash: prep.hash, extensao: prep.extensao, caminho: f.caminho,
           legenda: f.legenda, topico: f.topico, ancora: f.ancora, vaga: f.vaga, vagaIndice: f.vagaIndice,
           fonte: f.fonte, coleta: f.coleta, previa: f.coleta ? URL.createObjectURL(prep.arquivo) : undefined,
-          hashOriginal: f.hashOriginal,
+          hashOriginal: f.hashOriginal, foco: f.foco,
           hashColeta: (f.caminho && hashColetaPorCaminho.get(f.caminho)) || f.hashColeta,
         };
       } catch {
@@ -960,9 +970,7 @@ export default function GerarRelatorio({
     return (
       <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 8, paddingTop: 8,
         borderTop: "1px solid var(--borda)", flexWrap: "wrap" }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {f.previa && <img src={f.previa} alt="" title="Ampliar" onClick={() => setAmpliada({ src: f.previa!, legenda: f.coleta })}
-          style={{ width: 72, height: 54, objectFit: "cover", borderRadius: 6, flexShrink: 0, cursor: "zoom-in" }} />}
+        {Enquadramento(f, i)}
         <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{f.coleta}</span>
           <span className="detalhe" style={{ margin: 0 }}>→ {destinoDaFoto(f)}</span>
@@ -1183,6 +1191,7 @@ export default function GerarRelatorio({
           legenda: f.legenda.trim(),                  // obrigatória — sem cair no nome do arquivo
           topico: f.topico, ancora: f.ancora || ancoraDaSecaoNova.get(f.topico),
           fonte: f.fonte?.trim() || undefined,
+          quadro: true, foco: f.foco,                 // quadro padrão 16:9, 15 × 8,44 cm
           vaga: f.vaga,
           vagaIndice: f.vaga ? f.vagaIndice : undefined,
         });
@@ -1299,7 +1308,7 @@ export default function GerarRelatorio({
     const fotosSalvas: FotoSalva[] = fotos.map((f) => ({
       caminho: f.caminho, hash: f.hash, extensao: f.extensao, nome: f.arquivo.name, legenda: f.legenda,
       topico: f.topico, ancora: f.ancora, vaga: f.vaga, vagaIndice: f.vagaIndice, fonte: f.fonte, coleta: f.coleta,
-      hashOriginal: f.hashOriginal, hashColeta: f.hashColeta,
+      hashOriginal: f.hashOriginal, hashColeta: f.hashColeta, ...(f.foco !== undefined ? { foco: f.foco } : {}),
     }));
     const nomes: Partial<DadosRelatorio> = {};
     for (const k of PAPEIS_PESSOA) {
@@ -1470,9 +1479,31 @@ export default function GerarRelatorio({
 
   /** Linha de edição de uma foto: nome do arquivo, legenda, fonte e remover.
    *  A FONTE é o crédito da imagem — nossa, do cliente ou de terceiro. */
+  /** Miniatura no quadro 16:9 em que a foto sai no documento (mesmo recorte)
+   *  e o controle do enquadramento: na foto mais alta que o quadro, desloca
+   *  entre topo e base; na mais larga, entre esquerda e direita. */
+  function Enquadramento(f: FotoTopico, i: number) {
+    const src = f.previa || urlDoArquivo(f.arquivo);
+    const foco = f.foco ?? 0.5;
+    const pos = `${Math.round(foco * 100)}%`;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, width: 144, flexShrink: 0 }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" title="Ampliar (como sai no relatório: quadro 16:9)"
+          onClick={() => setAmpliada({ src, legenda: f.coleta || f.legenda })}
+          style={{ width: 144, height: 81, objectFit: "cover", objectPosition: `${pos} ${pos}`, borderRadius: 6, cursor: "zoom-in", background: "var(--bg-suave)" }} />
+        <input type="range" min={0} max={100} step={5} value={Math.round(foco * 100)}
+          aria-label={`Enquadramento de ${f.coleta || f.arquivo.name} (0 = topo ou esquerda, 100 = base ou direita)`}
+          title="Enquadramento: arraste para mostrar mais o topo/esquerda ou a base/direita"
+          onChange={(e) => { const v = Number(e.target.value) / 100; setFotos((p) => p.map((x, k) => k === i ? { ...x, foco: v } : x)); }} />
+      </div>
+    );
+  }
+
   function LinhaFoto(f: FotoTopico, i: number) {
     return (
       <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginTop: 6, alignItems: "center" }}>
+        {Enquadramento(f, i)}
         <span className="detalhe" style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.arquivo.name}</span>
         <input style={campo} placeholder="Legenda *" value={f.legenda} aria-invalid={!!r.erros[`fotos.${i}`]}
           onChange={(e) => setFotos((p) => p.map((x, k) => k === i ? { ...x, legenda: e.target.value } : x))} />
@@ -1517,6 +1548,7 @@ export default function GerarRelatorio({
           const v = vagas[i];
           return (
             <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+              {anexo && !anexo.f.coleta && Enquadramento(anexo.f, anexo.i)}
               <span className="detalhe" style={{ margin: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {i + 1}. {legendaDaVaga(v.legenda) || "(sem legenda no modelo)"}
                 {anexo && ` — ${anexo.f.coleta || anexo.f.arquivo.name}`}

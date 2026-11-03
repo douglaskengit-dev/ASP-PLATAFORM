@@ -209,6 +209,8 @@ export function formatoImagem(b: Uint8Array): FormatoImagem | null {
  *  no storage (rascunho-fotos/… ou a foto original da coleta da execução). */
 export interface FotoSalva {
   caminho?: string;
+  /** Enquadramento no quadro 16:9 (0 a 1; ausente = centro). */
+  foco?: number;
   hash: string;
   extensao: "png" | "jpeg";
   nome: string;
