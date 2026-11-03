@@ -619,8 +619,12 @@ export default function GerarRelatorio({
    *  POP 001, "7" é Dados do reservatório) e o bloco não pode marcar/ocultar
    *  nem receber fotos com o número errado. Achado pelo título, como faz o
    *  gerador. undefined = o modelo não tem a seção — o bloco não aparece. */
+  //  Sem o modelo lido (ainda lendo, ou falhou), vale a lista do Catálogo —
+  //  a MESMA numeração dos tópicos genéricos. Com o padrão 1 a 10 aqui, a
+  //  Conclusão virava "9" ao lado do "9. Preparação" do POP 001: tópicos
+  //  com o mesmo número (e a mesma chave), duplicados no índice.
   const N = useMemo(() => {
-    const base = topicosModelo.length > 0 ? topicosModelo : null;
+    const base = topicosModelo.length > 0 ? topicosModelo : listaNumerada.length > 0 ? listaNumerada : null;
     const num = (chave: string, padrao: number) => (base ? numeroDaSecao(base, chave) : padrao);
     return {
       local: num("local", 1), tanque: num("tanque", 2), metodos: num("metodos", 3),
@@ -636,7 +640,7 @@ export default function GerarRelatorio({
       etapaApos: base ? numeroDaSecao(base, "etapa-apos") : undefined,
       analise: base ? numeroDaSecao(base, "analise") : undefined,
     };
-  }, [topicosModelo]);
+  }, [topicosModelo, listaNumerada]);
 
   /** Batimetria só entra com medição: OS sem nenhuma medição (coleta de
    *  batimetria) começa com a seção desmarcada — dá para marcar à mão. */
@@ -1622,7 +1626,7 @@ export default function GerarRelatorio({
   }) {
     const on = ativo(numero);
     // O título que aparece é o do modelo em uso (como sai no documento).
-    const nome = (numero > 0 && topicosModelo.find((t) => t.numero === numero)?.titulo) || titulo;
+    const nome = (numero > 0 && (topicosModelo.find((t) => t.numero === numero) || listaNumerada.find((t) => t.numero === numero))?.titulo) || titulo;
     const id = `t${numero}`;
     const rotuloTopico = numero === 0 ? nome : `${numero}. ${nome}`;
     // recolhido só esconde: os campos (e as mensagens, que alimentam o índice) continuam montados

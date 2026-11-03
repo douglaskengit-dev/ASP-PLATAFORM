@@ -1566,6 +1566,8 @@ details.val-resumo > summary:focus-visible { outline: 2px solid var(--primaria);
   .rel-indice { top: -16px; margin: -16px -16px 0; padding: 8px 16px 6px; }
   .rel-indice-topo { font-size: 12px; gap: 4px 8px; }
   .rel-indice-topo .btn-doc { padding: 3px 8px; font-size: 12px; min-height: 0; }
-  .rel-indice-lista { margin-top: 6px; }
+  .rel-indice-lista { margin-top: 6px; gap: 8px; }
+  /* no celular é tocado com o dedo: alvo de 36px e letra legível */
+  .rel-indice-item { font-size: 14px; padding: 7px 13px; min-height: 36px; }
   .rel-indice-abrir { display: none; }
 }
