@@ -2019,6 +2019,16 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   if (dados.fotosInternas) addPorChave("fotos-internas", htmlParaParagrafos(dados.fotosInternas));
   if (dados.conclusao) addPorChave("conclusao", htmlParaParagrafos(dados.conclusao));
   if (dados.recomendacoes) addPorChave("recomendacoes", htmlParaParagrafos(dados.recomendacoes));
+  /** Conclusão e Recomendações escritas no formulário SUBSTITUEM o texto fixo
+   *  que o modelo traz na seção (o POP 001 vem com "Conforme o Comunicado CVS
+   *  36…" nas Recomendações) — antes os dois saíam juntos, e o do modelo, bem
+   *  maior, parecia ser a recomendação. Campo vazio: fica o texto do modelo. */
+  const textoVisivel = (html?: string) => !!html && html.replace(/<[^>]*>|&nbsp;/g, "").trim().length > 0;
+  const substituiTextoDoModelo = new Set<number>();
+  for (const [chave, html] of [["conclusao", dados.conclusao], ["recomendacoes", dados.recomendacoes]] as const) {
+    const n = numeroDaChave.get(chave);
+    if (n !== undefined && textoVisivel(html)) substituiTextoDoModelo.add(n);
+  }
 
   // Figuras: legenda ABNT acima ("Figura N – …") e fonte abaixo. As que têm
   // âncora ("6.1") entram logo abaixo daquele subtítulo; as demais, na seção.
@@ -2209,9 +2219,17 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
       const novo = novoNumero.get(nTop) ?? nTop;
       const figuras = figurasDoTopico.get(nTop);
       let figurasUsadas = false;
+      // texto fixo do modelo trocado pelo do formulário: só os parágrafos
+      // ANTES do primeiro quadro (no último tópico, o das assinaturas)
+      let passouQuadro = false;
       for (let k = idx; k < fim; k++) {
         let bx = blocos[k].xml;
         const t = blocos[k].texto;
+        if (bx.startsWith("<w:tbl")) passouQuadro = true;
+        if (k > idx && !passouQuadro && substituiTextoDoModelo.has(nTop) && bx.startsWith("<w:p") && t.trim() &&
+            !ehVagaDeImagem(t) && !ehLegendaDeFigura(t) && !/^\s*\d+\.\d+/.test(t) && !t.includes(MARCADOR_IMAGENS)) {
+          continue;
+        }
         // renumera o título e também os subtítulos (6.1, 6.2 → 5.1, 5.2)
         if (novo !== nTop && new RegExp(`^\\s*${nTop}(\\.|\\s|$)`).test(t)) {
           bx = renumerarBloco(bx, nTop, novo);
