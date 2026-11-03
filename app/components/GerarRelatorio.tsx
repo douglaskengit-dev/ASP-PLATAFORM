@@ -883,7 +883,11 @@ export default function GerarRelatorio({
     // Seleção de tópicos que vale para este procedimento — a mesma que o
     // efeito do Catálogo aplica; lida aqui porque o setVisiveis dele pode
     // ainda não ter chegado neste render.
-    const vis = estadoSalvo?.visiveis || selecaoDoCatalogo() || visiveis;
+    // Rascunho de outro modelo: a seleção dele está nos números daquele
+    // modelo (no padrão, 8 é a Inspeção visual interna; no POP 001, a
+    // Batimetria, desmarcada) — o plano usa a do Catálogo para o modelo atual.
+    const deOutroModelo = !!estadoSalvo && estadoSalvo.modelo !== (caminhoModelo || "");
+    const vis = (deOutroModelo ? selecaoDoCatalogo() : null) || estadoSalvo?.visiveis || selecaoDoCatalogo() || visiveis;
     const marcado = (n: number) => vis[n] !== false;
     const topicos = topicosModelo.length > 0 ? topicosModelo : TOPICOS_PADRAO;
     const plano = planejarFotosNoRelatorio(reg, {
@@ -914,7 +918,7 @@ export default function GerarRelatorio({
     // coleta que voltaram dele estão com os números daquele modelo — no POP
     // 001, as do tanque iam parar em "6. Equipe de trabalho", que no modelo
     // padrão é "Dados do reservatório". Recoloca-as pelo plano do modelo atual.
-    if (estadoSalvo && estadoSalvo.modelo !== (caminhoModelo || "")) {
+    if (deOutroModelo) {
       setFotos((lista) => lista.map((f) => {
         const p = f.coleta && f.caminho ? plano.find((x) => x.caminho === f.caminho) : undefined;
         return p ? { ...f, topico: p.topico, ancora: p.ancora, vaga: p.vaga, vagaIndice: p.vagaIndice } : f;
