@@ -114,6 +114,85 @@ const FILTROS: [string, string][] = [
 const quando = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
 const caixa = { border: "1px solid var(--borda)", borderRadius: 10, padding: "10px 12px" } as const;
 
+interface CasoBateria { pergunta: string; descricao: string }
+interface ResultadoBateria { passou: boolean; motivos: string[]; resposta: string; consultas: string[]; ms: number }
+
+/** Roda as perguntas de teste uma a uma (cada uma é uma chamada ao servidor,
+ *  para não estourar o tempo) e mostra o que passou. Gasta cota da IA. */
+function BateriaTestes() {
+  const [casos, setCasos] = useState<CasoBateria[]>([]);
+  const [resultados, setResultados] = useState<(ResultadoBateria | null)[]>([]);
+  const [rodando, setRodando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  async function rodar() {
+    if (!confirm("Rodar as perguntas de teste? Elas usam a IA de verdade e gastam parte da cota do dia (cerca de 30 chamadas).")) return;
+    setErro(null);
+    setRodando(true);
+    try {
+      const l = await fetch("/api/assistente/testes").then((x) => x.json());
+      if (!l.ok) throw new Error(l.erro || "Falha ao carregar os testes.");
+      setCasos(l.casos);
+      const res: (ResultadoBateria | null)[] = l.casos.map(() => null);
+      setResultados([...res]);
+      for (let i = 0; i < l.casos.length; i++) {
+        const r = await fetch("/api/assistente/testes", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ indice: i }),
+        }).then((x) => x.json()).catch(() => ({ ok: false, erro: "Falha de conexão." }));
+        res[i] = r.ok ? r : { passou: false, motivos: [r.erro || "Falha"], resposta: "", consultas: [], ms: 0 };
+        setResultados([...res]);
+      }
+    } catch (e: any) {
+      setErro(e.message);
+    } finally {
+      setRodando(false);
+    }
+  }
+
+  const feitos = resultados.filter(Boolean) as ResultadoBateria[];
+  const passaram = feitos.filter((r) => r.passou).length;
+  return (
+    <section className="card">
+      <h2>Teste do robô</h2>
+      <p className="detalhe" style={{ marginTop: 0 }}>
+        Faz {casos.length || 14} perguntas ao robô com a IA e o banco reais (com o seu acesso) e confere o comportamento: recusa fora do escopo,
+        consulta certa para cada pergunta, dúvida de uso pelo manual e nenhum texto técnico na resposta. Rode depois de mudanças no robô ou no manual.
+      </p>
+      <button type="button" className="btn-azul" disabled={rodando} onClick={rodar}>{rodando ? `Rodando… ${feitos.length}/${casos.length}` : "Rodar teste"}</button>
+      {erro && <p className="msg erro">{erro}</p>}
+      {casos.length > 0 && (
+        <>
+          <p style={{ margin: "10px 0 6px", fontWeight: 600 }}>
+            {feitos.length < casos.length ? `${feitos.length} de ${casos.length} feitos` : `${passaram} de ${casos.length} passaram`}
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {casos.map((c, i) => {
+              const r = resultados[i];
+              return (
+                <details key={c.pergunta} style={{ ...caixa, padding: "6px 10px" }}>
+                  <summary style={{ cursor: "pointer", fontSize: 13.5 }}>
+                    <span aria-hidden="true">{!r ? "…" : r.passou ? "✅" : "❌"}</span>{" "}
+                    <strong>{c.pergunta}</strong> <span className="detalhe">— {c.descricao}{r && !r.passou ? ` · ${r.motivos.join("; ")}` : ""}</span>
+                    <span className="sr-only">{!r ? "aguardando" : r.passou ? "passou" : "falhou"}</span>
+                  </summary>
+                  {r && (
+                    <div style={{ fontSize: 13, marginTop: 6 }}>
+                      <p className="detalhe" style={{ margin: "0 0 4px" }}>
+                        Consultas: {r.consultas.length ? r.consultas.join(", ") : "nenhuma"} · {(r.ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s
+                      </p>
+                      <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{r.resposta || "(sem resposta)"}</p>
+                    </div>
+                  )}
+                </details>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function AdminAssistenteConteudo() {
   const [filtro, setFiltro] = useState("negativas");
   const [dias, setDias] = useState(30);
@@ -182,6 +261,8 @@ export default function AdminAssistenteConteudo() {
       )}
 
       {uso && <UsoRobo uso={uso} />}
+
+      <BateriaTestes />
 
       <section className="card">
         <h2>Respostas do robô</h2>
