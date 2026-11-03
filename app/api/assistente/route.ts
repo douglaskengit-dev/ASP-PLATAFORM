@@ -4,6 +4,7 @@ import { executarFerramenta } from "@/lib/assistente/ferramentas";
 import { contextoDaSessao } from "@/lib/assistente/prompt";
 import { responderCloudflare } from "@/lib/assistente/cloudflare";
 import { responderClaude } from "@/lib/assistente/claude";
+import { carregarPagina, contextoDaPagina } from "@/lib/assistente/pagina";
 import { finalizarResposta, foraDoEscopoObvio, MSG_FORA_DO_ESCOPO } from "@/lib/assistente/escopo";
 import { ErroAssistente, type ExecutarFerramenta, type MensagemChat } from "@/lib/assistente/tipos";
 
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
 
-  const corpo = (await req.json().catch(() => null)) as { mensagens?: MensagemChat[] } | null;
+  const corpo = (await req.json().catch(() => null)) as { mensagens?: MensagemChat[]; pagina?: string } | null;
   const historico = (Array.isArray(corpo?.mensagens) ? corpo!.mensagens : [])
     .filter((m) => (m?.papel === "usuario" || m?.papel === "assistente") && typeof m.texto === "string" && m.texto.trim())
     .slice(-MAX_MENSAGENS)
@@ -46,7 +47,10 @@ export async function POST(req: NextRequest) {
     }
   };
   const hoje = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
-  const pedido = { historico, contexto: contextoDaSessao(profile.nome_completo, profile.perfil, hoje), executar };
+  // página aberta (OS, projeto ou cliente): "esta OS" passa a valer para ela
+  const pagina = await carregarPagina(sb, corpo?.pagina).catch(() => null);
+  const contexto = [contextoDaSessao(profile.nome_completo, profile.perfil, hoje), pagina && contextoDaPagina(pagina)].filter(Boolean).join("\n");
+  const pedido = { historico, contexto, executar, naPagina: !!pagina };
 
   try {
     const resposta = process.env.ASSISTENTE_PROVEDOR === "anthropic" ? await responderClaude(pedido) : await responderCloudflare(pedido);

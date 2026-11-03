@@ -5,6 +5,7 @@
  * só com os dados das consultas (nunca inventa).
  */
 import { normalizar } from "./manual-busca";
+import { apontaParaPagina } from "./pagina";
 
 /** Uma consulta feita para responder a pergunta (resultado em JSON). */
 export interface Consulta { nome: string; conteudo: string; erro?: boolean }
@@ -14,8 +15,9 @@ const DIZ_QUE_NAO_ACHOU = /n[aã]o (encontrei|achei|h[aá]|existe|consta|aparece
 
 /** Dúvida de uso ("como cadastro um cliente?") vai pelo manual; o resto que
  *  fala de projetos, clientes, OS, agenda… tem de passar pelo banco. */
-export function precisaDoBanco(pergunta: string): boolean {
+export function precisaDoBanco(pergunta: string, naPagina = false): boolean {
   const t = normalizar(pergunta);
+  if (naPagina && apontaParaPagina(t)) return true;
   if (/^(como|onde|o que (e|significa)|para que|pra que|posso|consigo|quem pode|qual a diferenca|por que)\b/.test(t)) return false;
   return /\b(projet|client|orga|os\b|inspec|tanque|agend|agenda|rdo|relator|colet|fase|cnpj|contat|prefeit|pedido|entreg|encerr)/.test(t);
 }
@@ -32,8 +34,8 @@ function semResultado(c: Consulta): boolean {
 export const nadaEncontrado = (consultas: Consulta[]) => consultas.length > 0 && consultas.every(semResultado);
 
 /** null = resposta confere; senão, o motivo (vira a correção para a IA). */
-export function problemaNaResposta(texto: string, consultas: Consulta[], pergunta: string): string | null {
-  if (!consultas.length && precisaDoBanco(pergunta)) {
+export function problemaNaResposta(texto: string, consultas: Consulta[], pergunta: string, naPagina = false): string | null {
+  if (!consultas.length && precisaDoBanco(pergunta, naPagina)) {
     return "Você respondeu sobre dados do sistema sem consultar o banco. Chame a ferramenta adequada antes de responder.";
   }
   const fontes = consultas.map((c) => c.conteudo).join("\n");

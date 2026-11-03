@@ -10,7 +10,7 @@
  * fica só nesta aba (sessionStorage). */
 import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import RoboAssistente from "./RoboAssistente";
 
 /** foraDoEscopo: recusa padrão do servidor (mostra as sugestões de novo). */
@@ -23,11 +23,18 @@ const SUGESTOES = [
   "Quais OS estão aguardando aprovação de relatório?",
   "O que está agendado para esta semana?",
 ];
+/** Na página de uma OS, projeto ou cliente, as sugestões falam dela. */
+const SUGESTOES_PAGINA: [RegExp, string[]][] = [
+  [/^\/inspecoes\/[^/]+$/, ["Qual a situação desta OS?", "O que falta para esta OS avançar?", "Quais os agendamentos desta OS?"]],
+  [/^\/projetos\/[^/]+$/, ["Qual a situação das OS deste projeto?", "Quais OS deste projeto estão abertas?"]],
+  [/^\/orgaos\/[^/]+$/, ["Quais os projetos deste cliente?", "Quais os contatos deste cliente?"]],
+];
+const sugestoesDa = (pagina: string) => SUGESTOES_PAGINA.find(([r]) => r.test(pagina))?.[1] || SUGESTOES;
 
-function Sugestoes({ onEscolher }: { onEscolher: (s: string) => void }) {
+function Sugestoes({ pagina, onEscolher }: { pagina: string; onEscolher: (s: string) => void }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {SUGESTOES.map((s) => (
+      {sugestoesDa(pagina).map((s) => (
         <button key={s} type="button" className="btn-doc" onClick={() => onEscolher(s)}>{s}</button>
       ))}
     </div>
@@ -36,6 +43,7 @@ function Sugestoes({ onEscolher }: { onEscolher: (s: string) => void }) {
 
 export default function AssistenteBotao() {
   const router = useRouter();
+  const pagina = usePathname() || "";
   const [aberto, setAberto] = useState(false);
   /** null até ler a preferência (evita o robô "piscar" na carga). */
   const [oculto, setOculto] = useState<boolean | null>(null);
@@ -101,7 +109,7 @@ export default function AssistenteBotao() {
     try {
       const resp = await fetch("/api/assistente", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mensagens: nova.map(({ papel, texto }) => ({ papel, texto })) }),
+        body: JSON.stringify({ mensagens: nova.map(({ papel, texto }) => ({ papel, texto })), pagina }),
       });
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok || typeof j.resposta !== "string") throw new Error(j.erro || "O assistente não respondeu.");
@@ -135,7 +143,7 @@ export default function AssistenteBotao() {
             <p className="detalhe" style={{ margin: 0 }}>
               <strong>Olá! Sou o Robô ASP.</strong> Pergunte como usar a plataforma ou sobre clientes, projetos e OS. Eu só consulto — não altero nada — e vejo apenas o que você pode ver.
             </p>
-            <Sugestoes onEscolher={perguntar} />
+            <Sugestoes pagina={pagina} onEscolher={perguntar} />
           </>
         )}
         {mensagens.map((m, i) => (
@@ -147,7 +155,7 @@ export default function AssistenteBotao() {
             {m.papel === "usuario" ? m.texto : <TextoFormatado texto={m.texto} onLink={abrirLink} />}
           </div>
         ))}
-        {!enviando && mensagens[mensagens.length - 1]?.foraDoEscopo && <Sugestoes onEscolher={perguntar} />}
+        {!enviando && mensagens[mensagens.length - 1]?.foraDoEscopo && <Sugestoes pagina={pagina} onEscolher={perguntar} />}
         {enviando && (
           <span className="detalhe" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
             <span className="assistente-digitando" aria-hidden="true"><i /><i /><i /></span> Consultando…
