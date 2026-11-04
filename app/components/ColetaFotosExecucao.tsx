@@ -66,16 +66,35 @@ function Selo({ ok, texto }: { ok: boolean; texto: string }) {
   );
 }
 
+/** Miniatura (~360 px, JPEG) da foto já comprimida, em base64 — vai como
+ *  campo de texto junto com a foto (e pela fila offline). Falhou ou ficou
+ *  grande demais: sem miniatura, a tela usa a foto inteira. */
+async function miniaturaBase64(arquivo: File): Promise<string | undefined> {
+  try {
+    const mini = await comprimirImagem(arquivo, 360, 0.7);
+    if (mini === arquivo || mini.type !== "image/jpeg" || mini.size > 140_000) return undefined;
+    const bytes = new Uint8Array(await mini.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Miniatura clicável (abre a foto inteira numa caixa por cima da tela —
  *  ver VisualizadorFoto); ✕ remove. `grupo` são as fotos do mesmo item, para
  *  passar de uma a outra na caixa. Fora do componente para não ser recriada a
  *  cada render (a imagem piscaria). */
-function Miniatura({ src, tamanho, onRemover, naFila, grupo, legenda }: {
+function Miniatura({ src, grande, tamanho, onRemover, naFila, grupo, legenda }: {
   src: string; tamanho: number | string; onRemover?: () => void; naFila?: boolean;
+  /** Foto inteira, para a caixa ampliada (`src` pode ser a miniatura). */
+  grande?: string;
   grupo?: string[]; legenda?: string;
 }) {
   const [aberta, setAberta] = useState(false);
-  const fotos = grupo && grupo.includes(src) ? grupo : [src];
+  const inteira = grande || src;
+  const fotos = grupo && grupo.includes(inteira) ? grupo : [inteira];
   return (
     <div style={{ position: "relative", width: tamanho, aspectRatio: "4 / 3", borderRadius: 8, overflow: "hidden",
       background: "var(--bg-suave)", border: "1px solid var(--borda)", flexShrink: 0 }}>
@@ -85,7 +104,7 @@ function Miniatura({ src, tamanho, onRemover, naFila, grupo, legenda }: {
         <img src={src} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       </button>
       {aberta && (
-        <VisualizadorFoto fotos={fotos} inicio={fotos.indexOf(src)} legenda={legenda} onFechar={() => setAberta(false)} />
+        <VisualizadorFoto fotos={fotos} inicio={fotos.indexOf(inteira)} legenda={legenda} onFechar={() => setAberta(false)} />
       )}
       {naFila && (
         <span style={{ position: "absolute", left: 4, bottom: 4, fontSize: 10.5, fontWeight: 700, padding: "1px 6px",
@@ -154,6 +173,10 @@ export default function ColetaFotosExecucao({
 
   const url = `/api/inspecoes/${inspecaoId}/fotos`;
   const urlFoto = (caminho: string) => `${url}?caminho=${encodeURIComponent(caminho)}`;
+  /** Miniatura quando a foto tem (as antigas não têm: vale a foto inteira).
+   *  Cada foto inteira passa pela function da Vercel — a tela mostrava ~30
+   *  delas em 104 px a cada abertura da OS. */
+  const urlMini = (f: { caminho: string; mini?: string | null }) => urlFoto(f.mini || f.caminho);
 
   const carregar = useCallback(() => {
     fetch(`/api/inspecoes/${inspecaoId}/fotos`).then((r) => r.ok ? r.json() : {})
@@ -196,7 +219,7 @@ export default function ColetaFotosExecucao({
   /** Confere o arquivo ORIGINAL (tipo real, tamanho), calcula o hash e lê a
    *  data da câmera; converte o que não é JPEG/PNG; comprime. Devolve o que
    *  enviar ou a mensagem de erro. */
-  async function prepararFoto(original: File): Promise<{ arquivo: File; hash: string; capturada: string | null } | string> {
+  async function prepararFoto(original: File): Promise<{ arquivo: File; hash: string; capturada: string | null; miniatura?: string } | string> {
     const nome = original.name || "foto";
     if (original.size > FOTO_MAX_BYTES) return `“${nome}” tem ${mb(original.size)} MB — o limite por foto é 10 MB.`;
     if (original.size === 0) return `“${nome}” está vazio.`;
@@ -214,7 +237,7 @@ export default function ColetaFotosExecucao({
     const arquivo = await comprimirImagem(base);
     const fmtFinal = formatoImagem(new Uint8Array(await arquivo.slice(0, 16).arrayBuffer()));
     if (fmtFinal !== "jpeg" && fmtFinal !== "png") return `Não foi possível preparar “${nome}”. Salve como JPEG e envie de novo.`;
-    return { arquivo, hash, capturada };
+    return { arquivo, hash, capturada, miniatura: await miniaturaBase64(arquivo) };
   }
 
   /** "Limpeza — Durante" de uma vaga. */
@@ -260,6 +283,7 @@ export default function ColetaFotosExecucao({
         pendentes.set(prep.hash, slot.id);
         const campos: Record<string, string> = { slot: slot.id, hash: prep.hash };
         if (prep.capturada) campos.capturada_em = prep.capturada;
+        if (prep.miniatura) campos.miniatura = prep.miniatura;
         const res = await enviarArquivo(url, campos, prep.arquivo, `Foto da execução — ${slot.rotulo}`);
         if (res.queued) {
           const local: FotoLocal = {
@@ -357,7 +381,7 @@ export default function ColetaFotosExecucao({
           <Selo ok={completo} texto={completo ? "✓" : "pendente"} />
         </div>
         {local ? <Miniatura src={local.url} tamanho="100%" naFila legenda={slot.rotulo} />
-          : foto ? <Miniatura src={urlFoto(foto.caminho)} tamanho="100%" legenda={slot.rotulo} onRemover={podeEditar ? () => remover(foto.caminho) : undefined} />
+          : foto ? <Miniatura src={urlMini(foto)} grande={urlFoto(foto.caminho)} tamanho="100%" legenda={slot.rotulo} onRemover={podeEditar ? () => remover(foto.caminho) : undefined} />
           : (
             <div style={{ width: "100%", aspectRatio: "4 / 3", borderRadius: 8, border: "1px dashed var(--borda)",
               display: "flex", alignItems: "center", justifyContent: "center", color: "var(--cinza)", fontSize: 12.5 }}>
@@ -406,7 +430,7 @@ export default function ColetaFotosExecucao({
         ) : (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {fotos.map((f) => (
-              <Miniatura key={f.caminho} src={urlFoto(f.caminho)} tamanho={104} grupo={grupo} legenda={slot.rotulo}
+              <Miniatura key={f.caminho} src={urlMini(f)} grande={urlFoto(f.caminho)} tamanho={104} grupo={grupo} legenda={slot.rotulo}
                 onRemover={podeEditar ? () => remover(f.caminho) : undefined} />
             ))}
             {meus.map((l) => <Miniatura key={l.chave} src={l.url} tamanho={104} naFila grupo={grupo} legenda={slot.rotulo} />)}

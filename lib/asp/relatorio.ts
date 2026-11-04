@@ -1631,13 +1631,33 @@ export const MARCAS_DOS_CAMPOS: Record<(typeof CAMPOS_DO_MODELO)[number], string
   alturaSedimento: ["[altura de sedimento]"],
 };
 
+/** Bytes do modelo .docx, baixados UMA vez por endereço enquanto a página
+ *  está aberta. Abrir "Gerar relatório" lia o mesmo arquivo 3 vezes (campos,
+ *  vagas, tópicos) e gerar, uma quarta — o do POP 001 tem 5,3 MB e cada
+ *  download passa pela function da Vercel (Fast Origin Transfer). O caminho
+ *  de um modelo do Catálogo leva um uuid: mesmo endereço, mesmo arquivo; o
+ *  padrão tem nome fixo, mas recarregar a página limpa a memória. Falha não
+ *  fica guardada — a próxima leitura tenta de novo. */
+const modelosBaixados = new Map<string, Promise<{ ok: true; dados: ArrayBuffer } | { ok: false; status: number }>>();
+function baixarModelo(templateUrl?: string) {
+  const url = templateUrl || "/templates/relatorio-asp-v3.docx";
+  let p = modelosBaixados.get(url);
+  if (!p) {
+    p = fetch(url).then(async (r) => (r.ok ? { ok: true as const, dados: await r.arrayBuffer() } : { ok: false as const, status: r.status }));
+    p.then((x) => { if (!x.ok) modelosBaixados.delete(url); }, () => modelosBaixados.delete(url));
+    modelosBaixados.set(url, p);
+    while (modelosBaixados.size > 3) modelosBaixados.delete(modelosBaixados.keys().next().value as string);
+  }
+  return p;
+}
+
 /** Quais campos de MARCAS_DOS_CAMPOS o modelo usa (texto do corpo, cabeçalho
  *  e rodapé, com os marcadores que o Word quebra em pedaços já juntos). */
 export async function lerCamposDoModelo(templateUrl?: string): Promise<Set<string>> {
   const JSZip = (await import("jszip")).default;
-  const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");
-  if (!resp.ok) throw new Error(`modelo indisponível (${resp.status})`);
-  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const resp = await baixarModelo(templateUrl);
+  if (!resp.ok) throw new Error(`modelo indisponível (${"status" in resp ? resp.status : "?"})`);
+  const zip = await JSZip.loadAsync(resp.dados);
   const partes = zip.file(/^word\/(document|header\d*|footer\d*)\.xml$/);
   const textos = await Promise.all(partes.map((f) => f.async("string")));
   const texto = textos.join(" ").replace(/<[^>]+>/g, "")
@@ -1648,9 +1668,9 @@ export async function lerCamposDoModelo(templateUrl?: string): Promise<Set<strin
 
 export async function lerVagasDeImagem(templateUrl?: string): Promise<VagaImagem[]> {
   const JSZip = (await import("jszip")).default;
-  const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");
+  const resp = await baixarModelo(templateUrl);
   if (!resp.ok) return [];
-  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const zip = await JSZip.loadAsync(resp.dados);
   const doc = zip.file("word/document.xml");
   if (!doc) return [];
   const xml = await doc.async("string");
@@ -1687,9 +1707,9 @@ export async function lerTopicosDoModelo(
   templateUrl?: string,
 ): Promise<{ numero: number; titulo: string }[]> {
   const JSZip = (await import("jszip")).default;
-  const resp = await fetch(templateUrl || "/templates/relatorio-asp-v3.docx");
+  const resp = await baixarModelo(templateUrl);
   if (!resp.ok) return [];
-  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const zip = await JSZip.loadAsync(resp.dados);
   const doc = zip.file("word/document.xml");
   if (!doc) return [];
   const xml = await doc.async("string");
@@ -1715,9 +1735,9 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
 
   // Cada procedimento pode ter o seu modelo; sem isso, usa o padrão da ASP.
-  const resp = await fetch(dados.templateUrl || "/templates/relatorio-asp-v3.docx");
+  const resp = await baixarModelo(dados.templateUrl);
   if (!resp.ok) throw new Error("Não foi possível carregar o modelo do relatório.");
-  const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+  const zip = await JSZip.loadAsync(resp.dados);
 
   const docFile = zip.file("word/document.xml");
   if (!docFile) throw new Error("Modelo inválido: falta word/document.xml.");

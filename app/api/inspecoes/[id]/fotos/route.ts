@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { uploadArquivo, baixarArquivo, removerArquivos } from "@/lib/processos/arquivos";
 import {
-  slotPorId, registroVazio, fotoRepetida,
+  slotPorId, registroVazio, fotoRepetida, caminhoMiniatura,
   type FotoColetada, type ItemColetado, type RegistroFotosExecucao,
 } from "@/lib/asp/fotos-execucao";
 import { erroValorColeta, formatoImagem, FOTO_MAX_BYTES } from "@/lib/validacao";
@@ -24,6 +24,8 @@ type Supa = ReturnType<typeof getSupabaseRouteClient>;
 type Linha = RegistroFotosExecucao & { id: string; atualizado_em: string };
 
 const prefixo = (inspecaoId: string) => `fotos-execucao/${inspecaoId}/`;
+/** Miniatura em base64: ~360 px em JPEG fica em 15–40 KB; folga até ~150 KB. */
+const MINI_MAX_BASE64 = 200_000;
 
 /** Padrão das coletas de água: vem do procedimento da inspeção. Coluna
  *  ausente (migration não rodada) ou procedimento sem cadastro = false. */
@@ -177,8 +179,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ erro: e instanceof Error ? e.message : "Falha ao salvar a foto." }, { status: 500 });
   }
 
+  // Miniatura feita no aparelho (base64 num campo de texto, para passar pela
+  // fila offline junto com a foto). Só JPEG pequeno; sem ela, a tela usa a
+  // foto inteira, como antes. `mini` vai sempre (null inclusive): na vaga de
+  // uma foto só o item é mesclado, e a miniatura da foto anterior ficaria.
+  let mini: string | null = null;
+  const b64 = String(form.get("miniatura") || "");
+  if (b64 && b64.length <= MINI_MAX_BASE64) {
+    const mb = new Uint8Array(Buffer.from(b64, "base64"));
+    if (formatoImagem(mb) === "jpeg") {
+      try { await uploadArquivo(caminhoMiniatura(caminho), Buffer.from(mb), "image/jpeg"); mini = caminhoMiniatura(caminho); }
+      catch { /* sem miniatura: a tela mostra a foto inteira */ }
+    }
+  }
+
   const foto: FotoColetada = {
-    caminho, por: profile.nome_completo || profile.email || null, em: new Date().toISOString(), hash, capturada_em,
+    caminho, por: profile.nome_completo || profile.email || null, em: new Date().toISOString(), hash, capturada_em, mini,
   };
   const troca = { anterior: null as string | null, repetida: false };
   const r = await alterar(supabase, params.id, profile.id, (atual) => {
@@ -196,10 +212,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return { itens };
   });
   if (typeof r === "string") {
-    await removerArquivos([caminho]);           // não deixa órfão no storage
+    await removerArquivos([caminho, caminhoMiniatura(caminho)]);   // não deixa órfão no storage
     return resposta(r, troca.repetida ? 409 : 500);
   }
-  if (troca.anterior && troca.anterior !== caminho) await removerArquivos([troca.anterior]);
+  if (troca.anterior && troca.anterior !== caminho) await removerArquivos([troca.anterior, caminhoMiniatura(troca.anterior)]);
   return resposta(r);
 }
 
@@ -265,6 +281,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     }
     return { itens };
   });
-  if (typeof r !== "string") await removerArquivos([caminho]);
+  if (typeof r !== "string") await removerArquivos([caminho, caminhoMiniatura(caminho)]);
   return resposta(r);
 }
