@@ -167,12 +167,21 @@ export const SECOES_FOTOS: SecaoFotos[] = [
 export interface FotoColetada {
   caminho: string; por?: string | null; em?: string | null;
   hash?: string | null; capturada_em?: string | null;
+  /** Miniatura (~360 px) gerada no aparelho, ao lado da foto — ver
+   *  caminhoMiniatura. A tela da OS mostra ela; a foto inteira só ao ampliar
+   *  e no relatório. null/ausente = foto antiga, sem miniatura. */
+  mini?: string | null;
 }
 /** Vaga de uma foto só. `valor` pode existir antes da foto (pH, cloro). */
 export interface ItemColetado {
   caminho?: string | null; valor?: number | null; por?: string | null; em?: string | null;
-  hash?: string | null; capturada_em?: string | null;
+  hash?: string | null; capturada_em?: string | null; mini?: string | null;
 }
+
+/** Caminho da miniatura de uma foto da coleta: o mesmo nome, ".mini.jpg".
+ *  Derivado do caminho para que remover ou trocar a foto leve a miniatura
+ *  junto sem consultar o registro. */
+export const caminhoMiniatura = (caminho: string) => caminho.replace(/\.[a-z0-9]+$/i, "") + ".mini.jpg";
 
 export interface RegistroFotosExecucao {
   /** null = ainda não gravado (a tela mostra os padrões do procedimento). */
@@ -203,7 +212,7 @@ export function slotPorId(id: string): { secao: SecaoFotos; slot: SlotFoto } | n
 export function fotosDoSlot(reg: RegistroFotosExecucao | null | undefined, id: string): FotoColetada[] {
   const v = reg?.itens?.[id];
   if (Array.isArray(v)) return v.filter((f) => f?.caminho);
-  return v?.caminho ? [{ caminho: v.caminho, por: v.por, em: v.em, hash: v.hash, capturada_em: v.capturada_em }] : [];
+  return v?.caminho ? [{ caminho: v.caminho, por: v.por, em: v.em, hash: v.hash, capturada_em: v.capturada_em, mini: v.mini }] : [];
 }
 
 /** Onde a mesma foto (mesmo hash) já está na coleta: "Limpeza — Durante".
