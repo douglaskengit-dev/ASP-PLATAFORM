@@ -23,6 +23,11 @@ export interface ItemChecklist {
   por_id?: string | null;
   em?: string | null;
   obs?: string;
+  /** Unidade levada a campo (gp_equipamento_unidades) — equipamento que
+   *  exige calibração. `unidade` = identificação, para exibir mesmo se a
+   *  unidade sair do Catálogo. */
+  unidade_id?: string | null;
+  unidade?: string | null;
 }
 
 export interface EquipamentoCatalogo {
@@ -113,6 +118,7 @@ export function mesclarChecklist(
       por_id: a.conferido ? a.por_id ?? null : null,
       em: a.conferido ? a.em ?? null : null,
       ...(a.obs ? { obs: a.obs } : {}),
+      ...(a.unidade_id ? { unidade_id: a.unidade_id, unidade: a.unidade ?? null } : {}),
     };
   });
 }

@@ -18,6 +18,7 @@ import { enviarEmail } from "@/lib/email";
 import { emailAgendamentoHtml } from "@/lib/email-templates";
 import { gerarIcsAgendamento } from "@/lib/ics";
 import { enviarPushParaUsuarios } from "@/lib/push/send";
+import { calibracoesParaAgendamento } from "@/lib/asp/calibracao-api";
 import {
   AgendamentoRef, ContextoAgendamento, DadosAgendamento, hojeBrasil, MembroEquipe, nomeDoCatalogo, nomesEquipamentosProcedimento,
   APP_URL_PADRAO, normalizarBaseUrl, normalizarEspacos, periodoDe, textoPeriodoLongo,
@@ -138,6 +139,7 @@ export async function contextoAgendamento(opts: {
     admin.from("gp_relatorios").select("versao, status").eq("inspecao_id", opts.inspecaoId).eq("tipo", "inspecao").is("excluido_em", null),
     carregarFuncoes(admin),
   ]);
+  const calibracoes = await calibracoesParaAgendamento(admin);
   const equipCatalogo = (catalogo.data || []) as any[];
   let equipamentosProcedimento: string[] | undefined;
   if (info?.procedimento) {
@@ -165,6 +167,7 @@ export async function contextoAgendamento(opts: {
       : relInsp.error ? undefined : (relInsp.data || []).map((r: any) => ({ versao: r.versao, status: r.status })),
     equipamentosProcedimento,
     procedimento: info?.procedimento || null,
+    calibracoes,
   };
   return { ctx, info };
 }

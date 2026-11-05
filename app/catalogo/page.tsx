@@ -17,13 +17,14 @@
  * das novas escolhas; o que já existe continua funcionando). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/app/components/Modal";
+import CalibracaoEquipamento, { SeloCalibracao } from "@/app/components/CalibracaoEquipamento";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import { lerTopicosDoModelo, topicosDoProcedimento, ehLimpezaRobotizada, capaVisivel } from "@/lib/asp/relatorio";
 import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
 import {
-  ativoNoCatalogo, equipamentosInexistentes, MODELO_MAX_BYTES, moverNaLista, numeracaoNoDocumento, ROTULOS_CATALOGO,
-  temErros, validarEquipamento, validarProcedimento,
+  ativoNoCatalogo, equipamentosInexistentes, hojeBrasil, MODELO_MAX_BYTES, moverNaLista, numeracaoNoDocumento, ROTULOS_CATALOGO,
+  situacaoEquipamento, temErros, textoVencimento, validarEquipamento, validarProcedimento, type UnidadeEquipamento,
 } from "@/lib/validacao";
 
 import {
@@ -103,6 +104,21 @@ export default function CatalogoPage() {
   /** Arquivos enviados ao storage NESTE modal (fotos/modelos). Cancelar
    *  descarta os que não foram salvos; salvar descarta os que saíram. */
   const enviadosSessao = useRef<string[]>([]);
+  /** Calibração (/api/calibracao): marcação por equipamento + unidades. */
+  const [calib, setCalib] = useState<{ hoje: string; exige: Set<string>; unidades: UnidadeEquipamento[]; erro?: string } | null>(null);
+  const carregarCalib = useCallback(() => {
+    fetch("/api/calibracao").then((r) => r.ok ? r.json() : null).then((d: any) => {
+      if (!d) return;
+      setCalib({
+        hoje: d.hoje || hojeBrasil(),
+        exige: new Set((d.equipamentos || []).filter((e: any) => e.exige_calibracao).map((e: any) => e.id)),
+        unidades: d.unidades || [],
+        erro: d.ok ? undefined : d.erro,
+      });
+    }).catch(() => {});
+  }, []);
+  useEffect(() => { carregarCalib(); }, [carregarCalib]);
+  const unidadesDe = (id: string) => (calib?.unidades || []).filter((u) => u.equipamento_id === id);
 
   const carregar = useCallback(() => {
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {})
@@ -138,6 +154,15 @@ export default function CatalogoPage() {
       .finally(() => setCarregando(false));
   }, []);
   useEffect(() => { carregar(); }, [carregar]);
+  // Veio de um aviso de calibração (/catalogo?equipamento=<id>): abre a ficha.
+  const pedidoAbrir = useRef<string | null>(typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("equipamento") : null);
+  useEffect(() => {
+    const id = pedidoAbrir.current;
+    if (!id || !equipamentos.length) return;
+    pedidoAbrir.current = null;
+    const e = equipamentos.find((x) => x.id === id);
+    if (e) abrir("equipamento", { ...e });
+  }, [equipamentos]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const procAtivos = useMemo(() => procedimentos.filter((p) => p.ativo), [procedimentos]);
   const procInativos = useMemo(() => procedimentos.filter((p) => !p.ativo), [procedimentos]);
@@ -560,6 +585,17 @@ export default function CatalogoPage() {
                 <span className="detalhe" style={{ display: "block" }}>
                   {(e.especificacoes || []).length} especificação(ões) · {(e.fotos || []).length} foto(s)
                 </span>
+                {calib?.exige.has(e.id) && (() => {
+                  const us = unidadesDe(e.id).filter((u) => u.ativo !== false);
+                  const sit = situacaoEquipamento(us, calib.hoje);
+                  const prox = us.filter((u) => u.vence_em).sort((a, b) => a.vence_em!.localeCompare(b.vence_em!))[0];
+                  return (
+                    <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                      <SeloCalibracao situacao={sit} texto={`Calibração: ${us.length ? (sit === "em_dia" ? "em dia" : sit === "vence_breve" ? "vence em breve" : sit === "vencida" ? "vencida" : "sem registro") : "sem unidade"}`} />
+                      {prox && <span className="detalhe" style={{ margin: 0 }}>{us.length > 1 ? `${us.length} unidades · ` : ""}{textoVencimento(prox.vence_em, calib.hoje)}</span>}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
             <span style={{ display: "flex", gap: 6 }}>
@@ -940,6 +976,20 @@ export default function CatalogoPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--borda)", paddingTop: 12 }}>
+              <label style={rot}>Calibração</label>
+              {!edEquip.id ? (
+                <p className="detalhe" style={{ margin: 0 }}>Salve o equipamento para cadastrar as unidades e a calibração.</p>
+              ) : !calib ? (
+                <p className="detalhe" style={{ margin: 0 }}>carregando…</p>
+              ) : calib.erro ? (
+                <p className="val-msg val-erro" style={{ margin: 0 }}>⛔ {calib.erro}</p>
+              ) : (
+                <CalibracaoEquipamento equipamentoId={edEquip.id} exige={calib.exige.has(edEquip.id)}
+                  unidades={unidadesDe(edEquip.id)} hoje={calib.hoje} podeEditar={editavel} onMudou={carregarCalib} />
+              )}
             </div>
 
             {editavel && <ResumoValidacao r={rEquip} rotulos={ROTULOS_CATALOGO} mostrarErros={tentou} />}
