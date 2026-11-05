@@ -1524,6 +1524,7 @@ export default function InspecaoDetalhePage() {
     catalogoFuncoes: agCtx.catalogoFuncoes || catalogoFuncoes,
     equipamentosProcedimento: agCtx.equipamentosProcedimento || equipProcOS,
     procedimento: agCtx.procedimento ?? insp?.procedimento ?? null,
+    calibracoes: agCtx.calibracoes,
   };
   const resultadoAgenda = mesclar(validarAgendamento(dadosAgenda, ctxAgenda), agServidor);
   const substituidosAgenda = agendamentosSubstituidos(dadosAgenda, ctxAgenda);

@@ -14,6 +14,10 @@
  * item repetido bloqueia; refazer a lista mantém a conferência dos itens que
  * ficam.
  *
+ * Equipamento que exige calibração: o item mostra a situação da calibração
+ * (lib/validacao/calibracao.ts) e, com mais de uma unidade, deixa escolher
+ * qual foi levada. Vencida só avisa — não impede conferir.
+ *
  * `embutido`: dentro de uma SecaoRecolhivel (página da inspeção) — a seção
  * já dá o card e o título; aqui fica só o conteúdo. */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,7 +25,8 @@ import Modal from "./Modal";
 import AvisoCliente from "./AvisoCliente";
 import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
-  ativoNoCatalogo, chaveItemChecklist, EquipamentoCatalogo, ItemChecklist, ROTULOS_CHECKLIST, temErros, validarItensChecklist,
+  ativoNoCatalogo, chaveItemChecklist, EquipamentoCatalogo, ICONE_SITUACAO_CALIBRACAO, ItemChecklist, melhorUnidade,
+  ROTULOS_CHECKLIST, situacaoCalibracao, temErros, textoVencimento, validarItensChecklist, type UnidadeEquipamento,
 } from "@/lib/validacao";
 
 type Item = ItemChecklist & { conferido: boolean };
@@ -58,6 +63,8 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [extra, setExtra] = useState("");
   const [erroLista, setErroLista] = useState<string | null>(null);
+  /** Calibração por slug do equipamento (só os que exigem). */
+  const [calib, setCalib] = useState<{ hoje: string; porSlug: Record<string, UnidadeEquipamento[]> } | null>(null);
 
   const carregar = useCallback(() => {
     fetch(`/api/checklist?inspecaoId=${inspecaoId}`).then((r) => r.ok ? r.json() : {})
@@ -72,6 +79,14 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
     fetch("/api/catalogo").then((r) => r.ok ? r.json() : {}).then((d: any) => {
       setProcedimentos(d.procedimentos || []);
       setEquipamentos(d.equipamentos || []);
+    }).catch(() => {});
+    fetch("/api/calibracao").then((r) => r.ok ? r.json() : {}).then((d: any) => {
+      if (!d?.ok) return;
+      const porSlug: Record<string, UnidadeEquipamento[]> = {};
+      for (const e of d.equipamentos || []) {
+        if (e.exige_calibracao) porSlug[e.slug] = (d.unidades || []).filter((u: UnidadeEquipamento) => u.equipamento_id === e.id);
+      }
+      setCalib({ hoje: d.hoje, porSlug });
     }).catch(() => {});
   }, [carregar]);
 
@@ -144,12 +159,19 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
 
   /** Grava UM item: o servidor junta a mudança no que está gravado e carimba
    *  quem conferiu e quando (sessão + relógio do servidor). */
-  async function gravarItem(c: Checklist, i: number, mudanca: { conferido?: boolean; obs?: string }) {
+  async function gravarItem(c: Checklist, i: number, mudanca: { conferido?: boolean; obs?: string; unidadeId?: string | null }) {
     const chave = chaveItemChecklist(c.itens[i], catalogo);
     // Otimista: marca na hora; o carimbo definitivo vem da resposta.
     setChecklists((p) => p.map((x) => x.id !== c.id ? x : {
       ...x,
-      itens: x.itens.map((y, k) => k !== i ? y : { ...y, ...mudanca, ...(mudanca.conferido === false ? { por: null, em: null } : {}) }),
+      itens: x.itens.map((y, k) => {
+        if (k !== i) return y;
+        const { unidadeId, ...resto } = mudanca;
+        return {
+          ...y, ...resto, ...(mudanca.conferido === false ? { por: null, em: null } : {}),
+          ...(unidadeId !== undefined ? { unidade_id: unidadeId } : {}),
+        };
+      }),
     }));
     try {
       const res = await fetch("/api/checklist", {
@@ -171,6 +193,42 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
 
   function anotar(c: Checklist, i: number, obs: string) {
     gravarItem(c, i, { obs });
+  }
+
+  /** Situação da calibração do item (equipamento que exige calibração). */
+  function calibracaoDoItem(c: Checklist, i: number, it: Item) {
+    const unidades = it.slug ? calib?.porSlug[it.slug] : undefined;
+    if (!calib || !unidades) return null;
+    const ativas = unidades.filter((u) => u.ativo !== false || u.id === it.unidade_id);
+    const escolhida = it.unidade_id ? unidades.find((u) => u.id === it.unidade_id) || null : null;
+    const ref = escolhida || (ativas.length === 1 ? ativas[0] : null) || melhorUnidade(ativas);
+    const sit = ref ? situacaoCalibracao(ref.vence_em, calib.hoje) : "sem_calibracao";
+    const cor = sit === "vencida" ? "#b91c1c" : sit === "vence_breve" ? "#92400e" : sit === "em_dia" ? "#166534" : "var(--texto-sec, #64748b)";
+    let texto: string;
+    if (!ativas.length) texto = "Exige calibração — nenhuma unidade cadastrada no Catálogo.";
+    else if (escolhida || ativas.length === 1) texto = `Unidade ${(escolhida || ativas[0]).identificacao}: ${textoVencimento(ref!.vence_em, calib.hoje)}.`;
+    else if (it.unidade_id && !escolhida) texto = `Unidade ${it.unidade || "?"} não está mais no Catálogo — escolha outra.`;
+    else texto = `Escolha a unidade levada (a mais recente ${textoVencimento(ref!.vence_em, calib.hoje)}).`;
+    return (
+      <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: cor }}>
+          {ICONE_SITUACAO_CALIBRACAO[sit]} {texto}
+          {sit === "vencida" && (escolhida || ativas.length === 1) && " Confira antes de levar a campo."}
+        </span>
+        {podeEditar && ativas.length > 1 && (
+          <select style={{ ...campo, width: "auto", minWidth: 200, padding: "5px 8px" }} aria-label={`Unidade de ${it.nome}`}
+            value={it.unidade_id || ""} onChange={(e) => gravarItem(c, i, { unidadeId: e.target.value || null })}>
+            <option value="">Unidade levada…</option>
+            {ativas.map((u) => (
+              <option key={u.id} value={u.id}>
+                {ICONE_SITUACAO_CALIBRACAO[situacaoCalibracao(u.vence_em, calib.hoje)]} {u.identificacao}
+              </option>
+            ))}
+          </select>
+        )}
+        {!podeEditar && escolhida && ativas.length > 1 && <span className="detalhe" style={{ margin: 0 }}>levada: {escolhida.identificacao}</span>}
+      </div>
+    );
   }
 
   function render(c: Checklist, principal: boolean) {
@@ -208,6 +266,7 @@ export default function ChecklistEquipamentos({ inspecaoId, etapa, procedimento,
                 )}
               </span>
             </label>
+            {calibracaoDoItem(c, i, it)}
             {podeEditar && (
               <input style={{ ...campo, marginTop: 6 }} placeholder="Observação (avaria, substituição, nº de série)"
                 defaultValue={it.obs || ""} onBlur={(e) => { if (e.target.value !== (it.obs || "")) anotar(c, i, e.target.value); }} />

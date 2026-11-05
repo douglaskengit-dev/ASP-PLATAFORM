@@ -9,6 +9,7 @@
  * periodo.ts + execucao.ts = Fase 6; fotosExecucao.ts + as regras do RDO
  * em lib/asp/rdo.ts = Fase 7; relatorioExecucao.ts = Fase 8; encerramento.ts =
  * Fase 10; catalogo.ts = Catálogo de procedimentos e equipamentos;
+ * calibracao.ts = calibração das unidades dos equipamentos;
  * usuario.ts = Administração de usuários; funcao.ts = Funções e
  * permissões por função; acesso.ts = convite e
  * redefinição de senha por e-mail; email.ts = provedor de e-mail SMTP/Resend). */
@@ -34,6 +35,7 @@ export * from "./sugestaoTextos";
 export * from "./aprovacaoExecucao";
 export * from "./encerramento";
 export * from "./catalogo";
+export * from "./calibracao";
 export * from "./usuario";
 export * from "./funcao";
 export * from "./recorrencia";

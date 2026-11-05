@@ -86,7 +86,9 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, checklist: data, avisos: r.avisos });
 }
 
-/** Um item por vez: { id, chave, conferido?: boolean, obs?: string }.
+/** Um item por vez: { id, chave, conferido?: boolean, obs?: string, unidadeId?: string | null }.
+ *  unidadeId: a unidade (nº de série) levada a campo — tem de ser do mesmo
+ *  equipamento do Catálogo do item; null tira a escolha.
  *  O servidor junta a mudança no que está gravado AGORA (não sobrescreve o
  *  array inteiro com o que a tela tinha) e repete se outra pessoa gravou no
  *  meio (atualizado_em mudou). */
@@ -102,7 +104,15 @@ export async function PATCH(req: NextRequest) {
   }
   const temConferido = typeof b.conferido === "boolean";
   const temObs = typeof b.obs === "string";
-  if (!temConferido && !temObs) return NextResponse.json({ erro: "Nada para alterar." }, { status: 400 });
+  const temUnidade = b.unidadeId === null || typeof b.unidadeId === "string";
+  if (!temConferido && !temObs && !temUnidade) return NextResponse.json({ erro: "Nada para alterar." }, { status: 400 });
+  let unidade: { id: string; identificacao: string; slug: string } | null = null;
+  if (typeof b.unidadeId === "string") {
+    const { data: u } = await getSupabaseAdmin().from("gp_equipamento_unidades")
+      .select("id, identificacao, equipamento:gp_equipamentos(slug)").eq("id", b.unidadeId).maybeSingle();
+    if (!u) return NextResponse.json({ erro: "Unidade não encontrada — recarregue." }, { status: 404 });
+    unidade = { id: (u as any).id, identificacao: (u as any).identificacao, slug: (u as any).equipamento?.slug || "" };
+  }
 
   // ⛔ OS encerrada: só consulta.
   const travada = await garantirOsAberta(await osDe("gp_checklist_equipamentos", b.id));
@@ -125,6 +135,13 @@ export async function PATCH(req: NextRequest) {
       else Object.assign(it, { conferido: false, por: null, por_id: null, em: null });
     }
     if (temObs) it.obs = b.obs.replace(/\s+/g, " ").trim();
+    if (temUnidade) {
+      if (unidade && unidade.slug !== it.slug) {
+        return NextResponse.json({ erro: "Esta unidade é de outro equipamento." }, { status: 400 });
+      }
+      it.unidade_id = unidade?.id || null;
+      it.unidade = unidade?.identificacao || null;
+    }
     const novos = itens.map((x, k) => (k === i ? it : x));
 
     const { data, error } = await supabase

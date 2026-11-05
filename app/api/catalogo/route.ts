@@ -307,6 +307,17 @@ export async function DELETE(req: NextRequest) {
       uso, emUso: true,
     }, { status: 409 });
   }
+  if (tipo === "equipamento") {
+    // Unidades com calibração não entram no gp_uso_catalogo; excluir o
+    // equipamento apagaria o histórico de calibração delas.
+    const { count } = await admin.from("gp_equipamento_unidades").select("id", { count: "exact", head: true }).eq("equipamento_id", id);
+    if (count) {
+      return NextResponse.json({
+        erro: `“${atual.nome}” tem ${count} unidade(s) com calibração cadastrada e não pode ser excluído. Use “Desativar” (o histórico fica guardado) ou exclua as unidades na ficha do equipamento.`,
+        emUso: true,
+      }, { status: 409 });
+    }
+  }
   const { error } = await admin.from(TABELA_CATALOGO[tipo]).delete().eq("id", id);
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   const arquivos = tipo === "equipamento"

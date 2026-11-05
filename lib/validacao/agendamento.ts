@@ -26,7 +26,11 @@
  *      previsão de execução do agendamento de inspeção · equipamento do
  *      procedimento fora da lista · equipe sem liderança (funções com
  *      "Conta como liderança" em gp_funcoes — Coordenador/Engenheiro) ·
- *      checklist de segurança incompleto com a execução já começando */
+ *      checklist de segurança incompleto com a execução já começando
+ *
+ * Calibração (lib/validacao/calibracao.ts):
+ *   ⚠️ equipamento que exige calibração sem unidade calibrada, vencido, ou
+ *      que vence antes do fim da visita (só avisa — não bloqueia) */
 import { addAviso, addErro, novoResultado, ResultadoValidacao } from "./resultado";
 import { dataIsoValida } from "./formatos";
 import { encontrarFuncao, FUNCOES_PADRAO, type FuncaoRef } from "./funcao";
@@ -34,6 +38,7 @@ import { duplicadosEmLista, nomesParecidos, normalizarTexto, semPontuacao } from
 import { normalizarEndereco } from "./projeto";
 import { feriadoNacional, fimDeSemana } from "./feriados";
 import { diasNaoUteis, duracaoDias, intersecao, Periodo, periodoDe, periodosSobrepoem, textoPeriodo } from "./periodo";
+import { avisoCalibracaoNaVisita, type CalibracaoDoEquipamento } from "./calibracao";
 
 /** Itens de segurança que nascem no checklist do agendamento (COWORK-ASP §3.2). */
 export const CHECKLIST_PADRAO = ["NR-33 (espaço confinado)", "NR-10 (elétrica)", "EPIs", "Permissão de Trabalho (PT)"];
@@ -120,6 +125,9 @@ export interface ContextoAgendamento {
   equipamentosProcedimento?: string[];
   /** Código do procedimento da OS (só para a mensagem). */
   procedimento?: string | null;
+  /** Equipamentos ativos que exigem calibração, com as unidades. undefined
+   *  = não checado (não avisa sem saber). */
+  calibracoes?: CalibracaoDoEquipamento[];
 }
 
 export const ROTULOS_AGENDAMENTO: Record<string, string> = {
@@ -430,6 +438,19 @@ export function validarAgendamento(d: DadosAgendamento, ctx: ContextoAgendamento
     if (faltam.length) {
       addAviso(r, "equipamentos", `Previsto(s) no procedimento${ctx.procedimento ? ` ${ctx.procedimento}` : ""} e fora desta lista: ${faltam.join(", ")}.`);
     }
+  }
+  // Calibração: até o último dia da visita (sem data: hoje)
+  if (ctx.calibracoes?.length) {
+    const porNome = new Map(ctx.calibracoes.map((c) => [normalizarEquipamento(c.nome), c]));
+    const vistos = new Set<string>();
+    equipamentos.forEach((e) => {
+      const n = normalizarEquipamento(e);
+      const c = porNome.get(n);
+      if (!c || vistos.has(n)) return;
+      vistos.add(n);
+      const aviso = avisoCalibracaoNaVisita(c, ctx.hoje, periodo?.fim || null);
+      if (aviso) addAviso(r, "equipamentos", `🔧 ${aviso}`);
+    });
   }
 
   // Checklist

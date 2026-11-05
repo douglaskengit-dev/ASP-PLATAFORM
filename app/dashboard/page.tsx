@@ -22,6 +22,7 @@ import {
 import { ROTULO_STATUS_RECORRENCIA } from "@/lib/validacao";
 import s from "./dashboard.module.css";
 import PendenciasCampo from "@/app/components/PendenciasCampo";
+import CalibracoesPainel from "@/app/components/CalibracoesPainel";
 
 const PERIODOS: { chave: ChavePeriodo; rotulo: string }[] = [
   { chave: "7", rotulo: "Últimos 7 dias" },
@@ -104,6 +105,7 @@ export default function DashboardPage() {
       <TituloPagina titulo="Dashboard de Operações" subtitulo="Fluxo das Ordens de Serviço (OS), relatórios, agenda e campo — horário de Brasília" />
 
       <PendenciasCampo />
+      <CalibracoesPainel />
 
       <form className={s.filtros} onSubmit={(e) => e.preventDefault()} aria-label="Filtros do Dashboard">
         <div className={s.campo}>
