@@ -455,6 +455,8 @@ export function planejarFotosNoRelatorio(
         const n = modelo.numeroDaChave(d.chave);
         if (n === undefined || !modelo.ativo(n)) continue;
         if (d.ancora && d.soNumero !== undefined && n !== d.soNumero) continue;
+        // Âncora é do modelo padrão; modelo com vagas na seção usa as vagas.
+        if (d.ancora && modelo.vagas.some((v) => v.topico === n)) continue;
         topico = n; ancora = d.ancora;
         break;
       }

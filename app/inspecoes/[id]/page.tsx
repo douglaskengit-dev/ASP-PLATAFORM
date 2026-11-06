@@ -652,6 +652,7 @@ export default function InspecaoDetalhePage() {
       dataRelatorio: hoje,
       tag: insp?.identificacao || "",
       material: doTanque.material,
+      origemAgua: doTanque.origemAgua,
       // A medição em campo tem a última palavra sobre as medidas; sem
       // medição, vale o cadastro do tanque. Capacidade é um campo só.
       alturaTanque: auto.alturaTanque || doTanque.alturaTanque,

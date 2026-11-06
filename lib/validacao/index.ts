@@ -36,6 +36,7 @@ export * from "./aprovacaoExecucao";
 export * from "./encerramento";
 export * from "./catalogo";
 export * from "./calibracao";
+export * from "./textosRecomendacao";
 export * from "./usuario";
 export * from "./funcao";
 export * from "./recorrencia";

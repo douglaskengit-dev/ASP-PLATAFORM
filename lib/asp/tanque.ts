@@ -13,6 +13,15 @@
 
 export type FormatoTanque = "circular" | "retangular";
 
+/** De onde vem a água do tanque. Opcional: define quais recomendações o
+ *  relatório já traz marcadas (lib/validacao/textosRecomendacao.ts). */
+export type OrigemAgua = "concessionaria" | "poco" | "outra";
+export const ORIGENS_AGUA: { valor: OrigemAgua; rotulo: string }[] = [
+  { valor: "concessionaria", rotulo: "Concessionária" },
+  { valor: "poco", rotulo: "Poço artesiano" },
+  { valor: "outra", rotulo: "Outra" },
+];
+
 export interface Tanque {
   formato: FormatoTanque;
   /** Circular: diâmetro, em metros. */
@@ -25,6 +34,8 @@ export interface Tanque {
   /** Capacidade nominal (dado de placa), em m³. */
   capacidade: number;
   material: string;
+  /** Ausente nos cadastros antigos. */
+  origem_agua?: OrigemAgua | null;
 }
 
 /** O mesmo tanque como o formulário o carrega: tudo texto, nada convertido. */
@@ -36,6 +47,7 @@ export interface TanqueForm {
   altura: string;
   capacidade: string;
   material: string;
+  origem_agua: string;
 }
 
 export const TANQUE_FORM_VAZIO: TanqueForm = {
@@ -46,6 +58,7 @@ export const TANQUE_FORM_VAZIO: TanqueForm = {
   altura: "",
   capacidade: "",
   material: "",
+  origem_agua: "",
 };
 
 /** Número a partir do que o usuário digitou. Aceita vírgula decimal. */
@@ -65,6 +78,10 @@ const positivo = (v: unknown) => {
 /** Formato válido; qualquer coisa fora da lista vira circular. */
 function formatoDe(v: unknown): FormatoTanque {
   return v === "retangular" ? "retangular" : "circular";
+}
+
+function origemDe(v: unknown): OrigemAgua | null {
+  return ORIGENS_AGUA.find((o) => o.valor === v)?.valor ?? null;
 }
 
 /** Mensagem do primeiro problema encontrado, ou null se o cadastro está bom.
@@ -97,6 +114,7 @@ export function normalizarTanque(bruto: unknown): Tanque {
     altura: positivo(t.altura) as number,
     capacidade: positivo(t.capacidade) as number,
     material: String(t.material ?? "").trim(),
+    origem_agua: origemDe(t.origem_agua),
   };
 }
 
@@ -113,6 +131,7 @@ export function tanqueParaForm(t?: Tanque | null): TanqueForm {
     altura: texto(t.altura),
     capacidade: texto(t.capacidade),
     material: t.material || "",
+    origem_agua: origemDe(t.origem_agua) || "",
   };
 }
 
@@ -149,9 +168,9 @@ export function resumoTanque(t?: Tanque | null): string {
  *  aqui vai o que está em cadastro, como ponto de partida do formulário. */
 export function dadosRelatorioDoTanque(t?: Tanque | null): {
   material: string; capacidadeNominal: string; alturaTanque: string;
-  diametro: string; comprimento: string; largura: string;
+  diametro: string; comprimento: string; largura: string; origemAgua: OrigemAgua | "";
 } {
-  if (!t) return { material: "", capacidadeNominal: "", alturaTanque: "", diametro: "", comprimento: "", largura: "" };
+  if (!t) return { material: "", capacidadeNominal: "", alturaTanque: "", diametro: "", comprimento: "", largura: "", origemAgua: "" };
   return {
     material: t.material || "",
     capacidadeNominal: volume(t.capacidade),
@@ -159,5 +178,6 @@ export function dadosRelatorioDoTanque(t?: Tanque | null): {
     diametro: t.formato === "circular" ? medida(t.diametro) : "",
     comprimento: t.formato === "retangular" ? medida(t.comprimento) : "",
     largura: t.formato === "retangular" ? medida(t.largura) : "",
+    origemAgua: origemDe(t.origem_agua) || "",
   };
 }

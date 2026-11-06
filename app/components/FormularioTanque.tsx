@@ -8,7 +8,7 @@
  * com `erroDoTanque` + `normalizarTanque`. */
 
 import { MATERIAIS_TANQUE } from "@/lib/asp/procedimentos";
-import type { FormatoTanque, TanqueForm } from "@/lib/asp/tanque";
+import { ORIGENS_AGUA, type FormatoTanque, type TanqueForm } from "@/lib/asp/tanque";
 
 const rotulo: React.CSSProperties = { fontWeight: 600, fontSize: 13, display: "block", marginBottom: 4 };
 const grade: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 };
@@ -78,6 +78,14 @@ export default function FormularioTanque({
             <option value="">— Selecione o material —</option>
             {MATERIAIS_TANQUE.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
+        </div>
+        <div>
+          <label style={rotulo}>Origem da água</label>
+          <select value={valor.origem_agua} onChange={set("origem_agua")} disabled={desabilitado}>
+            <option value="">— Não informada —</option>
+            {ORIGENS_AGUA.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+          </select>
+          <small style={{ color: "var(--cinza)" }}>Define as recomendações sugeridas no relatório.</small>
         </div>
       </div>
     </div>

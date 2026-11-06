@@ -93,6 +93,13 @@ export interface DadosRelatorio {
   relatorioCodigo?: string;  // automático: "<código do projeto> Rev<revisão>"
   codigoProjeto?: string;    // só para compor o campo acima (não vai ao doc)
   procedimento?: string;     // manual por enquanto
+  /** 2º procedimento do relatório (opcional): sai na capa ao lado do
+   *  primeiro, que é o da OS e define o modelo. */
+  procedimento2?: string;
+  /** Nº do relatório do 2º procedimento: sai ao lado de relatorioCodigo. */
+  relatorioCodigo2?: string;
+  /** Origem da água (cadastro do tanque): marca as recomendações sugeridas. */
+  origemAgua?: string;
   unidade?: string;
   contato?: string;
   dataExecucao?: string;
@@ -932,6 +939,21 @@ function limitesParagrafo(xml: string, pos: number): { ini: number; fim: number 
  * sair em negrito também. Herda o resto da formatação (fonte, tamanho, cor)
  * para o dado não destoar do rótulo.
  */
+/** Modelos 2026: "Relatório:" e "Procedimento:" dividem o parágrafo da capa,
+ *  separados por tabulações, numa célula estreita. Preenchidos, as
+ *  tabulações quebravam a palavra "Procedimento"; cada um fica na sua linha. */
+function procedimentoEmLinhaPropria(xml: string): string {
+  const i = xml.indexOf(">Procedimento:");
+  const par = i < 0 ? null : limitesParagrafo(xml, i);
+  if (!par) return xml;
+  const p = xml.slice(par.ini, par.fim);
+  if (!p.includes("Relatório:")) return xml;
+  const novo = p
+    .replace(/<w:r\b(?:(?!<\/w:r>)[\s\S])*?<\/w:r>/g, (r) => (r.includes("<w:tab/>") && !/<w:t[\s>]/.test(r) ? "" : r))
+    .replace(/(<w:r\b(?:(?!<\/w:r>)[\s\S])*?)(<w:t(?:\s[^>]*)?>Procedimento:)/, "$1<w:br/>$2");
+  return xml.slice(0, par.ini) + novo + xml.slice(par.fim);
+}
+
 function preencherRotulo(xml: string, rotuloBruto: string, valor?: string): string {
   if (!valor) return xml;
   // Os modelos variam nos espaços depois dos dois-pontos ("Unidade.: " vs
@@ -995,7 +1017,13 @@ function preencherRotulo(xml: string, rotuloBruto: string, valor?: string): stri
   let base = xml;
   const par = limitesParagrafo(xml, runs[alvo].ini);
   if (par) {
-    for (let k = runs.length - 1; k > alvo; k--) {
+    // Nos modelos 2026, "Relatório: " e "Procedimento: " dividem o parágrafo
+    // da capa: o outro rótulo fica, senão o procedimento não sai.
+    let limite = runs.length;
+    for (let k = alvo + 1; k < runs.length && runs[k].fim <= par.fim; k++) {
+      if (/(Relatório|Procedimento):/.test(runs[k].texto)) { limite = k; break; }
+    }
+    for (let k = limite - 1; k > alvo; k--) {
       const r = runs[k];
       if (r.ini < par.ini || r.fim > par.fim) continue;      // fora do parágrafo
       if (!r.texto) continue;
@@ -1338,14 +1366,14 @@ function tabelasDoTopico(tabelas?: TabelaAnalise[]): string {
     '<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>').join("");
 }
 
-/** Texto padrão do tópico "Análise Físico Química e Laboratorial" — o mesmo
- *  do modelo POP 001 (2026). Usado quando o procedimento de limpeza não tem
+/** Texto padrão do tópico "Análise Físico Química e Laboratorial" — o do
+ *  relatório de referência da Syngenta (2026). Usado quando o procedimento de limpeza não tem
  *  modelo próprio e a seção é gerada pelo sistema. */
 export const TEXTO_PADRAO_ANALISE = [
   "No Estado de São Paulo, temos o comunicado CVS 36-91 de 27/06/1991, norma que regulamenta a limpeza de reservatórios e caixas d'água potável domiciliar. No entanto, ela não menciona explicitamente reservatórios indústrias de grande porte, nem contempla o uso de robôs nesse processo, o que reflete uma defasagem em relação às inovações tecnológicas aplicadas ao setor.",
   "Diante da ausência de uma norma brasileira específica que aborde a limpeza com robôs, a ASP adota a Norma ANSI/AWWA C652-19 (Revisão C652-11), emitida pela American Water Works Association (AWWA). Esta norma contempla procedimentos detalhados para a desinfecção de instalações de armazenamento de água, incluindo métodos para inspeções e limpezas subaquáticas realizadas com veículos remotamente operados (ROVs), como robôs. O uso dessa tecnologia permite maior segurança e eficiência, assegurando que todas as partes em contato com a água potável sejam higienizadas e sanitizadas de maneira rigorosa, prevenindo contaminações.",
-  "Além dos procedimentos da AWWA, a ASP realiza ensaios físico-químicos e bacteriológicos antes e após a operação de limpeza, como medida de precaução e controle de qualidade. Esses ensaios verificam a qualidade da água antes da operação e após a limpeza, comparando-a com os padrões exigidos pela legislação vigente.",
-  "Os resultados das amostras são apresentados no quadro a seguir, comparando os parâmetros antes e após a limpeza com os limites estabelecidos pela Resolução Estadual nº SS 65/2005 e pela Portaria de Consolidação GM/MS nº 05/2017 (alterada pela Portaria GM/MS nº 888/2021).",
+  "Além dos procedimentos da AWWA, a ASP realiza ensaios físico-químicos e bacteriológicos antes e após a operação de limpeza como uma medida de precaução e garantia de qualidade. Esses ensaios garantem que a água não esteja contaminada antes da operação e que a limpeza foi eficaz ao ponto de manter a água dentro dos padrões exigidos pelas legislações vigentes.",
+  "Os resultados das amostras são apresentados no quadro a seguir, comparando os parâmetros antes e após a limpeza, e em conformidade com os limites estabelecidos pela Resolução Estadual nº SS 65/2005 e pela Portaria de Consolidação GM/MS nº 05/2017 (alterada pela Port. GM/MS nº 888/2021).",
 ].map((t) => `<p>${t.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`).join("");
 
 /**
@@ -1433,14 +1461,14 @@ export const TOPICOS_PADRAO: { numero: number; titulo: string }[] = [
  */
 const CHAVES_TOPICO: { chave: string; re: RegExp }[] = [
   { chave: "local", re: /identifica[çc][ãa]o do local/i },
-  { chave: "tanque", re: /identifica[çc][ãa]o do tanque/i },
+  { chave: "tanque", re: /identifica[çc][ãa]o do (tanque|reservat[óo]rio)/i },
   { chave: "metodos", re: /^\s*\d+\.?\s*m[ée]todos?\b/i },
   { chave: "equipamentos", re: /equipamentos?\s+utilizados?/i },
   { chave: "anexos", re: /^\s*\d+\.?\s*anexos\b/i },
   { chave: "equipe", re: /equipe de trabalho/i },
-  { chave: "reservatorio", re: /dados\s+(do\s+)?reservat[óo]rio/i },
+  { chave: "reservatorio", re: /dados\s+(do\s+)?(reservat[óo]rio|tanque)/i },
   { chave: "batimetria", re: /^\s*\d+\.?\s*batimetria\b/i },
-  { chave: "sanitizacao", re: /sanitiza[çc][ãa]o/i },
+  { chave: "sanitizacao", re: /sanitiza[çc][ãa]o|^\s*\d+\.?\s*higieniza[çc][ãa]o/i },
   { chave: "coletas", re: /coletas?\s+das?\s+amostras/i },
   { chave: "limpeza", re: /limpeza\s+robotizada/i },
   { chave: "apos-limpeza", re: /imagens?\s+ap[óo]s\s+a\s+limpeza/i },
@@ -1843,8 +1871,11 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     ...(dados.revisadoPorCapa ? [dados.revisadoPorCapa] : []),
     dados.aprovadoPor,
   ]);
-  xml = preencherRotulo(xml, "Relatório: ", dados.relatorioCodigo);
-  xml = preencherRotulo(xml, "Procedimento: ", dados.procedimento);
+  // Dois procedimentos: os dois saem na capa, com os dois números de relatório.
+  const relatorios = [dados.relatorioCodigo, dados.relatorioCodigo2].filter((x) => x?.trim()).join(" e ");
+  xml = preencherRotulo(xml, "Relatório: ", relatorios);
+  xml = preencherRotulo(xml, "Procedimento: ", [dados.procedimento, dados.procedimento2].filter((x) => x?.trim()).join(" e "));
+  xml = procedimentoEmLinhaPropria(xml);
 
   // 4) Tabelas (rótulo + valor)
   xml = preencherRotulo(xml, "Cliente...: ", dados.cliente);
@@ -1852,7 +1883,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = preencherRotulo(xml, "Contato.: ", dados.contato);
   xml = preencherRotulo(xml, "Execução...: ", dados.dataExecucao);
   // "Relatório.:" do tópico 1 leva o código do projeto (não a data).
-  xml = preencherRotulo(xml, "Relatório.: ", dados.relatorioCodigo);
+  xml = preencherRotulo(xml, "Relatório.: ", relatorios);
   xml = preencherRotulo(xml, "TAG: ", dados.tag);
   xml = preencherRotulo(xml, "Área: ", dados.area);
   xml = preencherRotulo(xml, "Material: ", dados.material);
