@@ -487,7 +487,7 @@ export default function ColetaFotosExecucao({
             {secao.id === "limpeza" && <MensagensCampo r={validacao} campo="limpeza_confirmada" />}
             {secao.id === "agua_depois" && <MensagensCampo r={validacao} campo="agua_depois" />}
             {gruposDaSecao(secao)
-              .map((g) => somentePendentes ? { ...g, slots: g.slots.filter((s) => !ok(s.id)) } : g)
+              .map((g) => somentePendentes ? { ...g, slots: g.slots.filter((s) => !ok(s.id) && !s.opcional) } : g)
               .filter((g) => g.slots.length > 0)
               .map((g) => {
               const feitosGrupo = g.slots.filter((s) => ok(s.id)).length;

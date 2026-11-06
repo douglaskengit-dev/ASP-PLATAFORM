@@ -60,6 +60,8 @@ export interface SlotFoto {
   /** Grupo dentro da seção no card da coleta ("pH e cloro", "Envio para
    *  análise"). Vagas seguidas com o mesmo grupo ficam sob o mesmo título. */
   grupo?: string;
+  /** Vaga opcional: não entra nas pendências nem no progresso. */
+  opcional?: boolean;
 }
 
 export interface SecaoFotos {
@@ -112,6 +114,8 @@ export const SECOES_FOTOS: SecaoFotos[] = [
       { id: "tanque_geral", rotulo: "Geral", legenda: "Vista geral do tanque", palavras: ["geral"] },
       { id: "tanque_abastecimento", rotulo: "Ponto de abastecimento", legenda: "Ponto de abastecimento do tanque", palavras: ["abastecimento"] },
       { id: "tanque_bomba", rotulo: "Saída da bomba", legenda: "Saída da bomba", palavras: ["bomba"] },
+      { id: "tanque_placa", rotulo: "Placa de identificação (se houver)", opcional: true,
+        legenda: "Placa de identificação do tanque", palavras: ["placa"] },
     ],
   },
   {
@@ -298,6 +302,7 @@ export function situacaoDosItens(reg: RegistroFotosExecucao | null | undefined):
       });
     }
     for (const slot of secao.slots) {
+      if (slot.opcional) continue;
       const n = fotosDoSlot(reg, slot.id).length;
       if (slot.minimo) {
         lista.push({ id: slot.id, secao, rotulo: slot.rotulo, completo: n >= slot.minimo, falta: `${n} de ${slot.minimo} fotos` });

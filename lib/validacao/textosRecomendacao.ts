@@ -1,13 +1,9 @@
-/** Textos padrão do relatório de inspeção + limpeza (referência: relatório da
- * Syngenta, 2026). Puras: o formulário chama.
+/** Recomendações padrão do relatório de limpeza (POP 001; referência:
+ * relatório da Syngenta de 26/08/2026). Puras: o formulário chama.
  *
- * Recomendações: cada bloco é um texto que o técnico liga e desliga. A origem
- * da água, no cadastro do tanque, decide só o que já nasce marcado — quem
- * recebe da concessionária não recebe o texto de poço artesiano, e vice-versa.
- *
- * Conclusão: nasce com o roteiro do exame visual (Teto, Costado, Fundo). As
- * frases entre parênteses são instruções ao técnico e não podem sair no
- * documento: `conclusaoComRoteiro` avisa, e o formulário não gera. */
+ * Cada bloco é um texto que o técnico liga e desliga. A origem da água, no
+ * cadastro do tanque, decide só o que já nasce marcado — quem recebe da
+ * concessionária não recebe o texto de poço artesiano, e vice-versa. */
 import { normalizarTexto } from "./texto";
 
 export interface BlocoRecomendacao {
@@ -24,7 +20,7 @@ export interface BlocoRecomendacao {
 
 export const BLOCOS_RECOMENDACAO: BlocoRecomendacao[] = [
   {
-    id: "repintura", titulo: "Preparação de superfície e repintura", padrao: true,
+    id: "repintura", titulo: "Preparação de superfície e repintura",
     paragrafos: ["Recomenda-se a realização de preparação de superfície conforme padrão técnico aplicável, seguida da reaplicação de sistema de pintura adequado nas regiões de teto, costado e fundo, visando interromper o processo corrosivo e restabelecer a proteção do reservatório."],
   },
   {
@@ -36,7 +32,7 @@ export const BLOCOS_RECOMENDACAO: BlocoRecomendacao[] = [
     paragrafos: ["Conforme o Comunicado CVS 36, de 27/06/1991, do Centro de Vigilância Sanitária, é indicado que a limpeza de reservatórios de água potável seja realizada periodicamente, com um intervalo máximo de seis meses entre as lavagens, como medida preventiva. Essa prática visa evitar o acúmulo de sedimentos e outros materiais que possam comprometer a qualidade da água armazenada."],
   },
   {
-    id: "artigo11", titulo: "Reparo do revestimento (Artigo 11)",
+    id: "artigo11", titulo: "Reparo do revestimento (Artigo 11)", padrao: true,
     paragrafos: [
       "Além disso, devido ao estado do piso e das paredes do reservatório observado durante a inspeção, recomendamos que sejam feitos reparos no revestimento, aplicando um acabamento antiaderente e atóxico, em conformidade com o Decreto Estadual nº 12.342/78, que estabelece:",
       "Artigo 11 – Os reservatórios prediais deverão:",
@@ -44,6 +40,10 @@ export const BLOCOS_RECOMENDACAO: BlocoRecomendacao[] = [
       "II – Ter a superfície lisa, resistente e impermeável.",
       "Esses reparos são essenciais para garantir que o reservatório atenda aos padrões de qualidade exigidos para o armazenamento de água potável, prevenindo a contaminação por partículas soltas, infiltrações ou outros materiais.",
     ],
+  },
+  {
+    id: "placa", titulo: "Instalação de placa de identificação do tanque",
+    paragrafos: ["Não foi identificada placa de identificação no reservatório. Recomenda-se a instalação de placa com os dados do tanque (identificação, capacidade e ano de fabricação), para facilitar a rastreabilidade e a manutenção."],
   },
   {
     id: "potabilidade", titulo: "Análise de potabilidade semestral (água da concessionária)", origem: "concessionaria",
@@ -91,25 +91,4 @@ export function alternarBloco(html: string | null | undefined, b: BlocoRecomenda
 /** Texto inicial das Recomendações para a origem da água do tanque. */
 export function recomendacoesIniciais(origem: string | null | undefined): string {
   return BLOCOS_RECOMENDACAO.filter((b) => b.padrao || (origem && b.origem === origem)).map(htmlDoBloco).join("");
-}
-
-/** Subtópicos da inspeção visual interna, na ordem do relatório. */
-export const SUBTOPICOS_INSPECAO = [
-  "Imagens do costado", "Imagens do fundo antes da limpeza", "Imagens do teto", "Imagens da escada interna",
-];
-
-const ROTEIRO = "(descreva";
-
-/** Roteiro inicial da Conclusão. */
-export const CONCLUSAO_ROTEIRO = [
-  "<p><strong>Exame Visual Interno:</strong></p>",
-  "<p><strong>Teto</strong></p>", `<p>${ROTEIRO} as condições encontradas no teto)</p>`,
-  "<p><strong>Costado</strong></p>", `<p>${ROTEIRO} as condições encontradas no costado)</p>`,
-  "<p><strong>Fundo</strong></p>", `<p>${ROTEIRO} as condições encontradas no fundo, antes e após a limpeza)</p>`,
-  `<p>${ROTEIRO} a condição geral do reservatório e a comparação com a inspeção anterior, se houver)</p>`,
-].join("");
-
-/** Ficou instrução do roteiro no texto? */
-export function conclusaoComRoteiro(html: string | null | undefined): boolean {
-  return (html || "").includes(ROTEIRO);
 }

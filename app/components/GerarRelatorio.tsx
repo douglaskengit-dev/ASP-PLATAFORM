@@ -46,8 +46,7 @@ import {
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   sugestaoTextoConclusao, sugestaoTextoRecomendacoes, type DadosSugestao,
-  alternarBloco, ativoNoCatalogo, BLOCOS_RECOMENDACAO, blocoNoTexto, CONCLUSAO_ROTEIRO, conclusaoComRoteiro, novoResultado, addErro,
-  recomendacoesIniciais, SUBTOPICOS_INSPECAO,
+  addAviso, alternarBloco, ativoNoCatalogo, BLOCOS_RECOMENDACAO, blocoNoTexto, novoResultado, recomendacoesIniciais,
   CAMPOS_DO_MODELO, semCamposForaDoModelo, infoParametro,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
@@ -213,23 +212,22 @@ const RE_TITULO_ANALISE = /an[áa]lise\s+(f[íi]sico|laboratorial)/i;
  *  para a seção de análise gerada pelo sistema — no modelo POP 001 ela já
  *  vem pronta. Parâmetro sem resultado nos dois laudos não entra. */
 function tabelaResultadosLaudo(d: Partial<DadosRelatorio>, laudoDoc: (g?: string[][]) => string[][] | undefined): TabelaAnalise[] {
-  const ga = laudoDoc(d.laudoAntes), gd = laudoDoc(d.laudoDepois);
-  if (!ga && !gd) return [];
-  const linhas = gradeLaudo(null).map((_, i) => {
-    const info = infoParametro(i);
-    return [info.nome, info.unidade || (info.pa ? "P/A" : ""), ga?.[i]?.[COL_VALOR] || "", gd?.[i]?.[COL_VALOR] || "", gd?.[i]?.[COL_LIMITE] || ga?.[i]?.[COL_LIMITE] || ""];
-  }).filter((l) => l[2] || l[3]);
-  if (!linhas.length) return [];
-  return [{
-    titulo: "Resultados das análises laboratoriais:",
-    cabecalho: [
-      "Parâmetro", "Unidade",
-      `Antes da limpeza${d.amostraAntes?.trim() ? ` (Amostra ${d.amostraAntes.trim()})` : ""}`,
-      `Após a limpeza${d.amostraDepois?.trim() ? ` (Amostra ${d.amostraDepois.trim()})` : ""}`,
-      "Limite (Portaria GM/MS nº 888/2021)",
-    ],
-    linhas, larguras: [2270, 1300, 1900, 1900, 1700],
-  }];
+  // Duas tabelas, antes e depois, como no relatório de referência do POP 001.
+  const tabela = (titulo: string, coluna: string, g?: string[][]): TabelaAnalise[] => {
+    if (!g) return [];
+    const linhas = gradeLaudo(null).map((_, i) => {
+      const info = infoParametro(i);
+      return [`${info.nome}${info.unidade ? ` (${info.unidade})` : info.pa ? " (P/A)" : ""}`, ...(g[i] || []).slice(0, 5).map((c) => c || "—")];
+    }).filter((l) => l[1] && l[1] !== "—");
+    return linhas.length ? [{
+      titulo, linhas, larguras: [2870, 1900, 1000, 1000, 1000, 1300],
+      cabecalho: ["Parâmetro (Port. GM/MS nº 888/2021)", coluna, "Incerteza", "LQ", "LD", "Limite da portaria"],
+    }] : [];
+  };
+  return [
+    ...tabela("Parâmetros antes da limpeza:", `Antes da limpeza${d.amostraAntes?.trim() ? ` (Amostra ${d.amostraAntes.trim()})` : ""}`, laudoDoc(d.laudoAntes)),
+    ...tabela("Parâmetros após a limpeza:", `Após a limpeza${d.amostraDepois?.trim() ? ` (Amostra ${d.amostraDepois.trim()})` : ""}`, laudoDoc(d.laudoDepois)),
+  ];
 }
 
 /** Os dois laudos do laboratório e a grade de valores de cada um. */
@@ -674,22 +672,16 @@ export default function GerarRelatorio({
   // de o procedimento da OS chegar — com caminhoModelo ainda vazio, "" === ""
   // parecia pronto e a 7 (Dados do reservatório no POP 001) era desmarcada.
   const modeloPronto = catalogoPronto && modeloLido !== null && modeloLido === (caminhoModelo || "");
-  /** Modelo que junta inspeção visual e limpeza (referência: Syngenta): tem as
-   *  duas seções. Só ele nasce com o roteiro da Conclusão, os subtópicos da
-   *  inspeção e as recomendações por origem da água. */
-  const modeloCombinado = modeloPronto && !!caminhoModelo && topicosBase.length > 0
-    && numeroDaSecao(topicosBase, "limpeza") !== undefined && numeroDaSecao(topicosBase, "fotos-internas") !== undefined;
-  const combinadoPreenchido = useRef(false);
+  /** Modelo do POP 001 com a seção "Limpeza robotizada": as Recomendações não
+   *  vêm fixas no arquivo; nascem dos blocos, pela origem da água. */
+  const modeloComBlocos = modeloPronto && !!caminhoModelo && topicosBase.length > 0
+    && numeroDaSecao(topicosBase, "limpeza") !== undefined;
+  const blocosPreenchidos = useRef(false);
   useEffect(() => {
-    if (!modeloCombinado || combinadoPreenchido.current || estadoSalvo?.d) return;
-    combinadoPreenchido.current = true;
-    setD((v) => ({
-      ...v,
-      conclusao: temTexto(v.conclusao) ? v.conclusao : CONCLUSAO_ROTEIRO,
-      recomendacoes: temTexto(v.recomendacoes) ? v.recomendacoes : recomendacoesIniciais(inicial.origemAgua),
-    }));
-    setSubs8((p) => (p.length ? p : SUBTOPICOS_INSPECAO.map((titulo) => ({ titulo }))));
-  }, [modeloCombinado]);   // eslint-disable-line react-hooks/exhaustive-deps
+    if (!modeloComBlocos || blocosPreenchidos.current || estadoSalvo?.d) return;
+    blocosPreenchidos.current = true;
+    setD((v) => (temTexto(v.recomendacoes) ? v : { ...v, recomendacoes: recomendacoesIniciais(inicial.origemAgua) }));
+  }, [modeloComBlocos]);   // eslint-disable-line react-hooks/exhaustive-deps
   const comBatimetriaPadrao = (sel: Record<number, boolean>) =>
     modeloPronto && semMedicao && N.batimetria !== undefined ? { ...sel, [N.batimetria]: false } : sel;
   const batimetriaAplicada = useRef(false);
@@ -771,9 +763,7 @@ export default function GerarRelatorio({
       volumeSedimento: d.volumeSedimento, volumeMin: d.volumeMin, volumeMax: d.volumeMax, alturaSedimento: d.alturaSedimento,
       capacidadeTanque: d.capacidadeTanque, phDepois: d.phDepois, cloroDepois: d.cloroDepois,
       laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois, amostraAntes: d.amostraAntes, amostraDepois: d.amostraDepois, unidadeCloro,
-      // Os subtópicos padrão são regiões do tanque, não ocorrências.
-      achados: N.fotosInternas !== undefined && ativo(N.fotosInternas)
-        ? subs8.map((x) => x.titulo.trim()).filter((t) => t && !SUBTOPICOS_INSPECAO.includes(t)) : [],
+      achados: N.fotosInternas !== undefined && ativo(N.fotosInternas) ? subs8.map((x) => x.titulo.trim()).filter(Boolean) : [],
     };
     const add = campo === "conclusao" ? sugestaoTextoConclusao(dados, d.conclusao) : sugestaoTextoRecomendacoes(dados, d.recomendacoes);
     if (!add) {
@@ -1356,7 +1346,9 @@ export default function GerarRelatorio({
         templateUrl: proc?.template_path
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,
-        elaboradoPor: nomeDe("elaboradoPor"), revisadoPor: nomeDe("revisadoPor"),
+        elaboradoPor: [nomeDe("elaboradoPor"), nomeDe("elaboradoPor2")].filter(Boolean).join("\n"),
+        revisadoPor: nomeDe("revisadoPor"),
+        notaOcorrencia: d.notaOcorrencia,
         topicos: TOPICOS_EM_USO.map((t) => ({ ...t, visivel: ativo(t.numero) && !secoesVazias.has(t.numero) })),
         imagens: imgs,
       });
@@ -1416,9 +1408,14 @@ export default function GerarRelatorio({
     equipeRelatorio: execucao ? usuarios.filter((u) => equipeIds.includes(u.id)).map((u) => u.nome) : undefined,
   });
   // campo que o modelo não tem fica escondido: a mensagem dele não vale
-  const rRoteiro = novoResultado();
-  if (conclusaoComRoteiro(d.conclusao)) addErro(rRoteiro, "conclusao", "Troque as instruções entre parênteses pelo texto da conclusão.");
-  const r = semCamposForaDoModelo(mesclar(rBase, rExec, rRoteiro), snapAtual);
+  // Sem foto da placa de identificação: o técnico decide se vira recomendação.
+  const rPlaca = novoResultado();
+  const blocoPlaca = BLOCOS_RECOMENDACAO.find((b) => b.id === "placa")!;
+  if (modeloComBlocos && !fotosDoSlot(coletaFotos, "tanque_placa").length
+    && !fotos.some((f) => /placa/i.test(f.legenda || "")) && !blocoNoTexto(d.recomendacoes, blocoPlaca)) {
+    addAviso(rPlaca, "recomendacoes", "Sem foto da placa de identificação do tanque. Se ele não tiver placa, marque “Instalação de placa de identificação do tanque” nas Recomendações.");
+  }
+  const r = semCamposForaDoModelo(mesclar(rBase, rExec, rPlaca), snapAtual);
   const rotulosResumo = { ...ROTULOS_RELATORIO, ...ROTULOS_RELATORIO_EXECUCAO };
   const [tentou, setTentou] = useState(false);
 
@@ -1963,6 +1960,14 @@ export default function GerarRelatorio({
         <EditorTexto valor={d.conclusaoAnalises || ""} altura={90}
           onChange={(v) => setD((x) => ({ ...x, conclusaoAnalises: v }))} />
       </div>
+      {usaCampo("notaOcorrencia") && (
+        <div style={{ marginTop: 10 }}>
+          <label style={rotulo}>Nota de ocorrência <span className="detalhe">(opcional — sai como “Nota:” depois da Conclusão das Análises; as fotos vão no fim deste tópico)</span></label>
+          <textarea style={{ ...campo, minHeight: 60 }} value={d.notaOcorrencia || ""}
+            placeholder="Ex.: Durante a limpeza robotizada, notamos a presença de…"
+            onChange={(e) => setD((x) => ({ ...x, notaOcorrencia: e.target.value }))} />
+        </div>
+      )}
       {/* As vagas de foto de cada seção (Sanitização, Coletas, Limpeza…)
           aparecem no bloco da própria seção, com o título do modelo em uso —
           antes havia aqui uma lista fixa dos números 8 a 12 do modelo
@@ -2704,7 +2709,7 @@ export default function GerarRelatorio({
 
         N.recomendacoes !== undefined && Topico({ numero: N.recomendacoes, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
           {BotaoSugerir("recomendacoes")}
-          {modeloCombinado && (
+          {modeloComBlocos && (
             <div style={{ margin: "6px 0 8px" }}>
               <strong style={{ fontSize: 12.5 }}>Textos padrão</strong>
               <span className="detalhe" style={{ display: "block" }}>
@@ -2722,6 +2727,7 @@ export default function GerarRelatorio({
             </div>
           )}
           <EditorTexto valor={d.recomendacoes || ""} onChange={(v) => setD((x) => ({ ...x, recomendacoes: v }))} altura={110} />
+          <MensagensCampo r={r} campo="recomendacoes" />
         </> }),
 
         /* Seções do modelo do procedimento que não têm campos próprios no
@@ -2745,7 +2751,7 @@ export default function GerarRelatorio({
                     <span className="detalhe" style={{ margin: 0 }}>
                       {ehColeta
                         ? `pH e cloro antes/depois entram nas legendas das figuras${resumoColetas ? ` — ${resumoColetas}` : ""}.`
-                        : "Nº das amostras e resultados do laudo entram na tabela “Resultados das análises laboratoriais”."}
+                        : "Nº das amostras e resultados do laudo entram nas tabelas de parâmetros do relatório."}
                     </span>
                     {BotaoValores(ehColeta ? "Valores de pH e cloro" : "Amostras e laudo")}
                   </div>
@@ -2764,6 +2770,7 @@ export default function GerarRelatorio({
           <strong style={{ fontSize: 13.5 }}>Assinaturas</strong>
           <div style={{ ...grade, marginTop: 8 }}>
             {SelectPessoa("elaboradoPor", "Relatório elaborado por (Operações)", operacoes)}
+            {SelectPessoa("elaboradoPor2", "2ª pessoa em “elaborado por” (opcional — sai na linha abaixo)", operacoes)}
             {SelectPessoa("revisadoPor", "Relatório revisado por (Gerência)", gerencia)}
           </div>
           {gerencia.length === 0 && (

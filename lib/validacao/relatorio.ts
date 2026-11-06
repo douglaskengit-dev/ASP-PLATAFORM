@@ -251,8 +251,8 @@ export function caminhoFotoValido(caminho: string | null | undefined, inspecaoId
 
 // ── Snapshot do formulário ───────────────────────────────────────────────────
 
-export type PapelPessoa = "preparadoPor" | "checadoPor" | "revisadoPorCapa" | "aprovadoPor" | "elaboradoPor" | "revisadoPor";
-export const PAPEIS_PESSOA: PapelPessoa[] = ["preparadoPor", "checadoPor", "revisadoPorCapa", "aprovadoPor", "elaboradoPor", "revisadoPor"];
+export type PapelPessoa = "preparadoPor" | "checadoPor" | "revisadoPorCapa" | "aprovadoPor" | "elaboradoPor" | "elaboradoPor2" | "revisadoPor";
+export const PAPEIS_PESSOA: PapelPessoa[] = ["preparadoPor", "checadoPor", "revisadoPorCapa", "aprovadoPor", "elaboradoPor", "elaboradoPor2", "revisadoPor"];
 
 /** Tudo que o formulário "Gerar relatório" precisa para ser reconstruído. */
 export interface SnapshotRelatorio {
@@ -289,7 +289,7 @@ export interface SnapshotRelatorio {
 /** Campos que só chegam ao documento se o modelo tiver o rótulo/marcador
  *  deles (lib/asp/relatorio.ts → MARCAS_DOS_CAMPOS). Só estes podem ser
  *  dispensados por `camposForaDoModelo` — qualquer outro campo vale sempre. */
-export const CAMPOS_DO_MODELO = ["titulo", "historico", "comprimento", "largura", "equipamentoTanque", "dataOperacao", "horarios", "alturaSedimento"] as const;
+export const CAMPOS_DO_MODELO = ["titulo", "historico", "comprimento", "largura", "equipamentoTanque", "dataOperacao", "horarios", "alturaSedimento", "notaOcorrencia"] as const;
 
 /** Tira as mensagens dos campos que o modelo em uso não tem. */
 export function semCamposForaDoModelo(r: ResultadoValidacao, s: Pick<SnapshotRelatorio, "camposForaDoModelo">): ResultadoValidacao {
@@ -312,7 +312,7 @@ export const ROTULOS_RELATORIO: Record<string, string> = {
   dataOperacao: "Data da operação", horarios: "Horários da operação",
   revisao: "Revisão", relatorioCodigo: "Relatório (código)", statusRevisao: "Status da revisão",
   preparadoPor: "Preparado por", checadoPor: "Checado por", revisadoPorCapa: "Revisado por (capa)",
-  aprovadoPor: "Aprovado por", elaboradoPor: "Elaborado por", revisadoPor: "Revisado por",
+  aprovadoPor: "Aprovado por", elaboradoPor: "Elaborado por", elaboradoPor2: "Elaborado por (2ª pessoa)", revisadoPor: "Revisado por",
   alturaTanque: "Altura do tanque", diametro: "Diâmetro", comprimento: "Comprimento", largura: "Largura",
   capacidadeTanque: "Capacidade", volumeSedimento: "Volume de sedimento",
   fotos: "Fotos",

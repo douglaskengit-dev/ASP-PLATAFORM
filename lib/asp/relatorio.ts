@@ -186,7 +186,10 @@ export interface DadosRelatorio {
   conclusao?: string;       // tópico 9
   recomendacoes?: string;   // tópico 10
   // Bloco de assinaturas (fim do documento)
-  elaboradoPor?: string;   // usuário de Operações
+  elaboradoPor?: string;   // usuário de Operações (duas pessoas: uma por linha)
+  elaboradoPor2?: string;
+  /** Ocorrência da limpeza (resíduo, objeto…): sai como "Nota:" na Análise. */
+  notaOcorrencia?: string;
   revisadoPor?: string;    // usuário da Gerência
   /** Tópicos próprios do procedimento: título + texto + fotos. Podem ficar em
    *  qualquer posição — `apos` é o número do tópico padrão depois do qual ele
@@ -1657,6 +1660,7 @@ export const MARCAS_DOS_CAMPOS: Record<(typeof CAMPOS_DO_MODELO)[number], string
   dataOperacao: ["[data]"],
   horarios: ["[horario]"],
   alturaSedimento: ["[altura de sedimento]"],
+  notaOcorrencia: ["[nota de ocorrência]"],
 };
 
 /** Bytes do modelo .docx, baixados UMA vez por endereço enquanto a página
@@ -1851,6 +1855,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = substituirParagrafoMarcador(xml, "[conclusão das análises]",
     dados.conclusaoAnalises?.trim() ? htmlParaParagrafos(dados.conclusaoAnalises) : "",
     /^conclus[ãa]o das an[áa]lises/i);
+  xml = substituirParagrafoMarcador(xml, "[nota de ocorrência]", dados.notaOcorrencia?.trim()
+    ? htmlParaParagrafos(`<p><strong>Nota:</strong> ${esc(dados.notaOcorrencia.trim())}</p>`) : "");
   xml = limparDadoColetado(xml);
 
   // A unidade/cliente aparece no texto padrão; aceita marcador e também o nome
