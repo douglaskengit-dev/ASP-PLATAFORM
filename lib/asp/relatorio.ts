@@ -17,6 +17,7 @@
  * evita depender do sistema de arquivos da função serverless.
  */
 
+import { normalizarTexto } from "@/lib/validacao/texto";
 import type { CAMPOS_DO_MODELO } from "../validacao/relatorio";
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -1105,6 +1106,24 @@ function preencherRotulo(xml: string, rotuloBruto: string, valor?: string, varia
   return saida.slice(0, fimP + 6) + extras + saida.slice(fimP + 6);
 }
 
+/**
+ * "Relatório aprovado por:" sai com a pessoa escolhida no formulário, a mesma
+ * da capa. O modelo pode trazer alguém escrito com cargo e registro ("Fulana /
+ * Química responsável CRQ …"): sendo essa a pessoa escolhida, o texto do modelo
+ * fica; sendo outra, entra só o nome; sem escolha, o campo sai vazio.
+ */
+function preencherAprovacao(xml: string, nome?: string): string {
+  const rotulo = "Relatório aprovado por:";
+  const par = (xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || []).find((p) => textoDe(p).includes(rotulo));
+  if (!par) return xml;
+  const texto = textoDe(par);
+  const doModelo = texto.slice(texto.indexOf(rotulo) + rotulo.length).trim();
+  const escolhido = (nome || "").trim();
+  if (escolhido && normalizarTexto(doModelo).startsWith(normalizarTexto(escolhido))) return xml;
+  if (escolhido) return preencherRotulo(xml, rotulo, " " + escolhido);
+  return doModelo ? trocarTexto(xml, doModelo, "") : xml;
+}
+
 /** Preenche a célula ao lado de um rótulo de linha (tabela "Dados do Tanque":
  *  Altura | ___ ). A célula-alvo está vazia, então injetamos um run novo. */
 function preencherCelulaVizinha(xml: string, rotuloLinha: string, valor?: string): string {
@@ -1955,6 +1974,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // Bloco de assinaturas
   xml = preencherRotulo(xml, "Relatório elaborado por:", dados.elaboradoPor ? " " + dados.elaboradoPor : undefined, true);
   xml = preencherRotulo(xml, "Relatório revisado por:", dados.revisadoPor ? " " + dados.revisadoPor : undefined);
+  xml = preencherAprovacao(xml, dados.aprovadoPor);
   // Tópico 6 — quadro "Dados do Tanque": células vazias ao lado dos rótulos.
   xml = preencherCelulaVizinha(xml, "Altura", dados.alturaTanque);
   xml = preencherCelulaVizinha(xml, "Diâmetro", dados.diametro);
