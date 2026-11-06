@@ -735,7 +735,8 @@ export default function GerarRelatorio({
     if (t.numero === nLimpeza) cheio ||= !!d.volumeSedimento?.trim();
     if (!cheio) secoesVazias.add(t.numero);
   }
-  // Anexos: os PDFs dos laudos entram ali ("Laudo anexo: …") mesmo sem texto.
+  // Anexos: com laudo anexado o tópico fica, mesmo sem texto — a caixa do
+  // modelo já cita os laudos analíticos.
   const temLaudoAnexo = !!execucao && !!(laudoPdf || laudoPdfDepois);
   if (N.anexos !== undefined && !temTexto(d.anexos) && !temLaudoAnexo) secoesVazias.add(N.anexos);
   if (N.fotosInternas !== undefined && !temTexto(d.fotosInternas) && !temFoto(N.fotosInternas)) secoesVazias.add(N.fotosInternas);
@@ -1276,15 +1277,6 @@ export default function GerarRelatorio({
           });
         }
       }
-      // O PDF do laudo é um arquivo à parte; o tópico Anexos (se o modelo
-      // tiver) só o cita.
-      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-      const anexosDoc = execucao
-        ? [[laudoPdf, "antes da"], [laudoPdfDepois, "após a"]].reduce((txt, [l, q]) => {
-            const lp = l as LaudoPdf | null;
-            return lp && !(txt || "").includes(esc(lp.nome)) ? `${txt || ""}<p>Laudo anexo (${q} limpeza): ${esc(lp.nome)}</p>` : txt;
-          }, d.anexos)
-        : d.anexos;
       // Pessoas: o documento leva o NOME do usuário escolhido (por id).
       const nomeDe = (k: PapelPessoa) => (pessoas[k] ? usuarios.find((u) => u.id === pessoas[k])?.nome : "") || d[k] || "";
       return gerarRelatorioDocx({
@@ -1305,7 +1297,7 @@ export default function GerarRelatorio({
         historico: d.historico, nivelAgua: d.nivelAgua,
         comprimento: d.comprimento, largura: d.largura,
         dataOperacao: isoParaBr(d.dataOperacao), horarios: d.horarios,
-        anexos: anexosDoc,
+        anexos: d.anexos,
         // pH/cloro são números; o cloro sai com a unidade do procedimento.
         cloroAntes: textoPhCloroDoc("cloroAntes", d.cloroAntes, unidadeCloro),
         cloroDepois: textoPhCloroDoc("cloroDepois", d.cloroDepois, unidadeCloro),
