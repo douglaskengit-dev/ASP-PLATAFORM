@@ -57,11 +57,12 @@ const campo: React.CSSProperties = {
   background: "var(--bg-card)", color: "var(--texto)", fontSize: 13,
 };
 
-function Selo({ ok, texto }: { ok: boolean; texto: string }) {
+function Selo({ ok, texto, neutro }: { ok: boolean; texto: string; neutro?: boolean }) {
   return (
     <span style={{
       fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999, whiteSpace: "nowrap",
-      background: ok ? "#dcfce7" : "#fef3c7", color: ok ? "#166534" : "#92400e",
+      background: neutro ? "var(--bg-suave)" : ok ? "#dcfce7" : "#fef3c7",
+      color: neutro ? "var(--texto-suave)" : ok ? "#166534" : "#92400e",
     }}>{texto}</span>
   );
 }
@@ -374,11 +375,13 @@ export default function ColetaFotosExecucao({
     const foto = fotosDoSlot(registro, slot.id)[0];
     const local = locais.filter((l) => l.slot === slot.id).pop();
     const valor = valorDoSlot(registro, slot.id);
+    // Vaga opcional não está em situacaoDosItens: a foto é que diz se foi feita.
+    const feito = completo || (!!slot.opcional && !!foto);
     return (
       <div key={slot.id} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <strong style={{ fontSize: 13, minWidth: 0, overflowWrap: "anywhere" }}>{slot.rotulo}</strong>
-          <Selo ok={completo} texto={completo ? "✓" : "pendente"} />
+          <Selo ok={feito} neutro={!feito && slot.opcional} texto={feito ? "✓" : slot.opcional ? "opcional" : "pendente"} />
         </div>
         {local ? <Miniatura src={local.url} tamanho="100%" naFila legenda={slot.rotulo} />
           : foto ? <Miniatura src={urlMini(foto)} grande={urlFoto(foto.caminho)} tamanho="100%" legenda={slot.rotulo} onRemover={podeEditar ? () => remover(foto.caminho) : undefined} />
