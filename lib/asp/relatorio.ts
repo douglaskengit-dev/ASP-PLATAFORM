@@ -621,6 +621,37 @@ function trocarMarcador(xml: string, marcador: string, valor: string): string {
 
 /** NBR 14724: 3 cm superior/esquerda, 2 cm inferior/direita. Em twips (1 cm = 567). */
 const ABNT = { sup: 1701, inf: 1134, esq: 1701, dir: 1134 };
+/** Área de texto de uma folha A4 com as margens acima. */
+const LARGURA_TEXTO = 11906 - ABNT.esq - ABNT.dir;
+
+/**
+ * Tabela mais larga que a área de texto encolhe na proporção. Os modelos vêm
+ * com margem de 2 cm à esquerda; com os 3 cm da ABNT, a tabela passava da
+ * margem direita. Ficam de fora a tabela flutuante (posição própria, como a da
+ * capa) e a que tem imagem (a figura não encolhe com a célula).
+ */
+function ajustarTabelasAoTexto(corpo: string): string {
+  let saida = "", ult = 0;
+  for (const b of separarBlocos(corpo)) {
+    if (!b.xml.startsWith("<w:tbl") || b.xml.includes("<w:tblpPr") || b.xml.includes("<w:drawing")) continue;
+    const grade = b.xml.match(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/)?.[0] || "";
+    const soma = Array.from(grade.matchAll(/<w:gridCol w:w="(\d+)"/g)).reduce((t, m) => t + Number(m[1]), 0);
+    const tblW = Number(b.xml.match(/<w:tblW w:w="(\d+)" w:type="dxa"/)?.[1] || 0);
+    const recuo = Math.max(0, Number(b.xml.match(/<w:tblInd w:w="(-?\d+)"/)?.[1] || 0));
+    const largura = Math.max(soma, tblW);
+    if (largura + recuo <= LARGURA_TEXTO) continue;
+    const f = (LARGURA_TEXTO - recuo) / largura;
+    const novo = b.xml.replace(
+      /(<w:(?:gridCol|tcW|tblW) w:w=")(\d+)"/g,
+      (m, ini: string, n: string, pos: number, todo: string) =>
+        ini.startsWith("<w:gridCol") || todo.startsWith(' w:type="dxa"', pos + m.length)
+          ? `${ini}${Math.round(Number(n) * f)}"` : m,
+    );
+    saida += corpo.slice(ult, b.ini) + novo;
+    ult = b.fim;
+  }
+  return saida + corpo.slice(ult);
+}
 
 function aplicarMargensAbnt(xml: string): string {
   return xml.replace(/<w:pgMar\b[^/]*\/>/g, (tag) => {
@@ -957,7 +988,7 @@ function procedimentoEmLinhaPropria(xml: string): string {
   return xml.slice(0, par.ini) + novo + xml.slice(par.fim);
 }
 
-function preencherRotulo(xml: string, rotuloBruto: string, valor?: string): string {
+function preencherRotulo(xml: string, rotuloBruto: string, valor?: string, variasAbaixo = false): string {
   if (!valor) return xml;
   // Os modelos variam nos espaços depois dos dois-pontos ("Unidade.: " vs
   // "Unidade.:  "), então casamos o rótulo sem o espaço final.
@@ -1049,12 +1080,15 @@ function preencherRotulo(xml: string, rotuloBruto: string, valor?: string): stri
     posInsercao = runs[alvo].ini + novoRun.length;
   }
 
-  let saida = base.slice(0, posInsercao) + runDe(" " + linhas[0]) + base.slice(posInsercao);
+  // Com `variasAbaixo`, duas ou mais linhas ficam todas sob o rótulo.
+  const abaixo = variasAbaixo && linhas.length > 1;
+  const noRotulo = runDe(abaixo ? "" : " " + linhas[0]);
+  let saida = base.slice(0, posInsercao) + noRotulo + base.slice(posInsercao);
   if (linhas.length === 1) return saida;
 
   // Parágrafo que contém o rótulo: os demais trechos entram como irmãos dele,
   // herdando o mesmo <w:pPr> (alinhamento, espaçamento).
-  const posRun = posInsercao + runDe(" " + linhas[0]).length;
+  const posRun = posInsercao + noRotulo.length;
   const iniP = saida.lastIndexOf("<w:p", saida.lastIndexOf("<w:p", posRun) + 1) >= 0
     ? saida.lastIndexOf("<w:p", posRun) : -1;
   const fimP = saida.indexOf("</w:p>", posRun);
@@ -1067,7 +1101,7 @@ function preencherRotulo(xml: string, rotuloBruto: string, valor?: string): stri
   }
   const mPPr = saida.slice(iniP, fimP).match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
   const pPr = mPPr ? mPPr[0] : "";
-  const extras = linhas.slice(1).map((l) => `<w:p>${pPr}${runDe(l)}</w:p>`).join("");
+  const extras = (abaixo ? linhas : linhas.slice(1)).map((l) => `<w:p>${pPr}${runDe(l.trim())}</w:p>`).join("");
   return saida.slice(0, fimP + 6) + extras + saida.slice(fimP + 6);
 }
 
@@ -1143,7 +1177,7 @@ function fichaEquipamentoXml(
   idImg = 1,
 ): string {
   const cab =
-    '<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" w:before="120" w:after="60"/>' +
+    '<w:p><w:pPr><w:keepNext/><w:spacing w:line="240" w:lineRule="auto" w:before="120" w:after="60"/>' +
     '<w:ind w:left="709"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr></w:pPr>' +
     '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr>' +
     `<w:t xml:space="preserve">${esc(f.nome)}</w:t></w:r></w:p>`;
@@ -1164,9 +1198,10 @@ function fichaEquipamentoXml(
     `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>${negrito ? "<w:b/>" : ""}<w:sz w:val="20"/></w:rPr>` +
     `<w:t xml:space="preserve">${esc(txt)}</w:t></w:r></w:p></w:tc>`;
 
-  // Larguras: com foto, a ficha ocupa ~60% e a imagem ~40%.
-  const larguraFotoCm = 6.2;
-  const colEspec = temFoto ? [2600, 2900] : [3260, 5670];
+  // Larguras: com foto, a ficha ocupa ~60% e a imagem ~40%. Somadas ao recuo
+  // de 709, cabem em LARGURA_TEXTO.
+  const larguraFotoCm = 5.2;
+  const colEspec = temFoto ? [2400, 2600] : [2900, 5400];
   const larguraFicha = colEspec[0] + colEspec[1];
 
   const linhas = especs
@@ -1228,9 +1263,19 @@ function espaco(): string {
 /** Injeta parágrafos dentro da primeira célula de uma tabela vazia
  *  (as "caixas" do template, como a de Métodos). */
 function injetarNaCaixa(tblXml: string, paragrafos: string): string {
+  // Na caixa o texto é compacto (Arial 11, sem recuo nem entrelinha 1,5), como
+  // no relatório de referência; o parágrafo vazio do modelo dá lugar a ele.
+  const compacto = paragrafos
+    .replace(/<w:ind w:firstLine="\d+"\/>/g, "")
+    .replace(/<w:spacing w:line="360" w:lineRule="auto" w:after="0"\/>/g, '<w:spacing w:before="60" w:after="60"/>')
+    .replace(/<w:sz w:val="24"\/>/g, '<w:sz w:val="22"/>');
   const pos = tblXml.lastIndexOf("</w:p>");
-  if (pos !== -1) return tblXml.slice(0, pos + 6) + paragrafos + tblXml.slice(pos + 6);
-  return tblXml.replace("</w:tc>", `${paragrafos}</w:tc>`);
+  if (pos === -1) return tblXml.replace("</w:tc>", `${compacto}</w:tc>`);
+  const ini = Math.max(tblXml.lastIndexOf("<w:p>", pos), tblXml.lastIndexOf("<w:p ", pos));
+  if (ini !== -1 && textoDe(tblXml.slice(ini, pos + 6)) === "") {
+    return tblXml.slice(0, ini) + compacto + tblXml.slice(pos + 6);
+  }
+  return tblXml.slice(0, pos + 6) + compacto + tblXml.slice(pos + 6);
 }
 
 // ── Geração ──────────────────────────────────────────────────────────────────
@@ -1328,6 +1373,8 @@ function preencherAmostras(xml: string, antes?: string, depois?: string): string
     else {
       xml = trocarMarcador(xml, ` (Amostra ${marcador})`, "");
       xml = trocarMarcador(xml, `(Amostra ${marcador})`, "");
+      xml = trocarMarcador(xml, ` (${marcador})`, "");
+      xml = trocarMarcador(xml, `(${marcador})`, "");
       xml = trocarMarcador(xml, marcador, "");
     }
   }
@@ -1906,7 +1953,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   const equipeTxt = htmlParaTexto(dados.equipe);
   xml = preencherRotulo(xml, "Envolvidos:", equipeTxt ? "\n" + equipeTxt : undefined);
   // Bloco de assinaturas
-  xml = preencherRotulo(xml, "Relatório elaborado por:", dados.elaboradoPor ? " " + dados.elaboradoPor : undefined);
+  xml = preencherRotulo(xml, "Relatório elaborado por:", dados.elaboradoPor ? " " + dados.elaboradoPor : undefined, true);
   xml = preencherRotulo(xml, "Relatório revisado por:", dados.revisadoPor ? " " + dados.revisadoPor : undefined);
   // Tópico 6 — quadro "Dados do Tanque": células vazias ao lado dos rótulos.
   xml = preencherCelulaVizinha(xml, "Altura", dados.alturaTanque);
@@ -2387,7 +2434,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   let nFig = 0;
   saida = saida.split(MARCA_FIG).reduce((acc, parte, i) =>
     i === 0 ? parte : acc + String(++nFig) + parte, "");
-  saida = acabamentoDoCorpo(removerSubtopicosVazios(saida));
+  saida = ajustarTabelasAoTexto(acabamentoDoCorpo(removerSubtopicosVazios(saida)));
 
   xml = xml.slice(0, iniBody) + saida + xml.slice(fimBody);
   zip.file("word/document.xml", xml);
