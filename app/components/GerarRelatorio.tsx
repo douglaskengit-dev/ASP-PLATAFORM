@@ -46,6 +46,8 @@ import {
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   sugestaoTextoConclusao, sugestaoTextoRecomendacoes, type DadosSugestao,
+  alternarBloco, ativoNoCatalogo, BLOCOS_RECOMENDACAO, blocoNoTexto, CONCLUSAO_ROTEIRO, conclusaoComRoteiro, novoResultado, addErro,
+  recomendacoesIniciais, SUBTOPICOS_INSPECAO,
   CAMPOS_DO_MODELO, semCamposForaDoModelo, infoParametro,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
@@ -467,6 +469,13 @@ export default function GerarRelatorio({
     [d.procedimento, PROCEDIMENTOS]
   );
   /** Unidade do cloro do procedimento (Catálogo, Fase 7): legendas e valores. */
+  /** 2º procedimento do relatório (opcional). O modelo é sempre o da OS. */
+  const proc2 = useMemo(
+    () => PROCEDIMENTOS.find((p) => p.codigo === d.procedimento2) || null,
+    [d.procedimento2, PROCEDIMENTOS]
+  );
+  /** "P011 e POP 001", como sai na capa. */
+  const procedimentosTexto = [d.procedimento, d.procedimento2].filter(Boolean).join(" e ");
   const unidadeCloro = cloroDoProcedimento(proc).unidade;
 
   // Cada procedimento pode ter o seu modelo, com outras seções. A lista de
@@ -514,9 +523,9 @@ export default function GerarRelatorio({
   /** Seções que já possuem campos próprios no formulário, reconhecidas pelo
    *  TÍTULO — o número muda de um modelo para outro. */
   const TEM_CAMPOS = [
-    /identifica[çc][ãa]o do local/i, /identifica[çc][ãa]o do tanque/i,
+    /identifica[çc][ãa]o do local/i, /identifica[çc][ãa]o do (tanque|reservat[óo]rio)/i,
     /^m[ée]todos?$/i, /equipamentos?\s+utilizados?/i, /equipe de trabalho/i,
-    /dados\s+(do\s+)?reservat[óo]rio/i, /^batimetria$/i,
+    /dados\s+(do\s+)?(reservat[óo]rio|tanque)/i, /^batimetria$/i,
     /inspe[çc][ãa]o visual interna/i, /^conclus[ãa]o$/i, /^recomenda[çc][õo]es$/i,
     /^anexos$/i,
   ];
@@ -665,6 +674,22 @@ export default function GerarRelatorio({
   // de o procedimento da OS chegar — com caminhoModelo ainda vazio, "" === ""
   // parecia pronto e a 7 (Dados do reservatório no POP 001) era desmarcada.
   const modeloPronto = catalogoPronto && modeloLido !== null && modeloLido === (caminhoModelo || "");
+  /** Modelo que junta inspeção visual e limpeza (referência: Syngenta): tem as
+   *  duas seções. Só ele nasce com o roteiro da Conclusão, os subtópicos da
+   *  inspeção e as recomendações por origem da água. */
+  const modeloCombinado = modeloPronto && !!caminhoModelo && topicosBase.length > 0
+    && numeroDaSecao(topicosBase, "limpeza") !== undefined && numeroDaSecao(topicosBase, "fotos-internas") !== undefined;
+  const combinadoPreenchido = useRef(false);
+  useEffect(() => {
+    if (!modeloCombinado || combinadoPreenchido.current || estadoSalvo?.d) return;
+    combinadoPreenchido.current = true;
+    setD((v) => ({
+      ...v,
+      conclusao: temTexto(v.conclusao) ? v.conclusao : CONCLUSAO_ROTEIRO,
+      recomendacoes: temTexto(v.recomendacoes) ? v.recomendacoes : recomendacoesIniciais(inicial.origemAgua),
+    }));
+    setSubs8((p) => (p.length ? p : SUBTOPICOS_INSPECAO.map((titulo) => ({ titulo }))));
+  }, [modeloCombinado]);   // eslint-disable-line react-hooks/exhaustive-deps
   const comBatimetriaPadrao = (sel: Record<number, boolean>) =>
     modeloPronto && semMedicao && N.batimetria !== undefined ? { ...sel, [N.batimetria]: false } : sel;
   const batimetriaAplicada = useRef(false);
@@ -742,11 +767,13 @@ export default function GerarRelatorio({
    *  não estão lá; o texto já escrito fica como está. */
   function sugerirTexto(campo: "conclusao" | "recomendacoes") {
     const dados: DadosSugestao = {
-      execucao: !!execucao, limpeza, tag: d.tag, cliente: d.cliente, procedimento: d.procedimento, dataExecucao: d.dataExecucao,
+      execucao: !!execucao, limpeza, tag: d.tag, cliente: d.cliente, procedimento: procedimentosTexto, dataExecucao: d.dataExecucao,
       volumeSedimento: d.volumeSedimento, volumeMin: d.volumeMin, volumeMax: d.volumeMax, alturaSedimento: d.alturaSedimento,
       capacidadeTanque: d.capacidadeTanque, phDepois: d.phDepois, cloroDepois: d.cloroDepois,
       laudoAntes: d.laudoAntes, laudoDepois: d.laudoDepois, amostraAntes: d.amostraAntes, amostraDepois: d.amostraDepois, unidadeCloro,
-      achados: N.fotosInternas !== undefined && ativo(N.fotosInternas) ? subs8.map((x) => x.titulo.trim()).filter(Boolean) : [],
+      // Os subtópicos padrão são regiões do tanque, não ocorrências.
+      achados: N.fotosInternas !== undefined && ativo(N.fotosInternas)
+        ? subs8.map((x) => x.titulo.trim()).filter((t) => t && !SUBTOPICOS_INSPECAO.includes(t)) : [],
     };
     const add = campo === "conclusao" ? sugestaoTextoConclusao(dados, d.conclusao) : sugestaoTextoRecomendacoes(dados, d.recomendacoes);
     if (!add) {
@@ -1077,9 +1104,12 @@ export default function GerarRelatorio({
    *  equipamentos previstos (o usuário ajusta depois). */
   function aplicarSugestao() {
     if (!proc) return;
-    setD((v) => ({ ...v, metodos: proc.metodos || "" }));
+    setD((v) => ({
+      ...v,
+      metodos: proc2?.metodos ? `<p>${proc.metodos || ""}</p><p>${proc2.metodos}</p>` : proc.metodos || "",
+    }));
     // Só os previstos que continuam ativos no Catálogo.
-    setEquipIds((proc.equipamentos || []).filter((s: string) =>
+    setEquipIds(Array.from(new Set([...(proc.equipamentos || []), ...(proc2?.equipamentos || [])])).filter((s: string) =>
       EQUIPAMENTOS.some((e: any) => e.slug === s && e.ativo !== false)));
     // O procedimento define o FORMATO do relatório: quais tópicos entram.
     // Sem configuração, mantém o que estiver marcado hoje.
@@ -1272,6 +1302,8 @@ export default function GerarRelatorio({
         revisao: d.revisao, statusRevisao: d.statusRevisao, dataRevisao: isoParaBr(d.dataRevisao),
         preparadoPor: nomeDe("preparadoPor"), checadoPor: nomeDe("checadoPor"), aprovadoPor: nomeDe("aprovadoPor"),
         relatorioCodigo: d.relatorioCodigo, procedimento: d.procedimento,
+        procedimento2: d.procedimento2 || undefined,
+        relatorioCodigo2: d.procedimento2 ? d.relatorioCodigo2 : undefined,
         unidade: d.unidade, contato: d.contato,
         dataExecucao: isoParaBr(d.dataExecucao), dataRelatorio: isoParaBr(d.dataRelatorio),
         tag: d.tag, area: d.area, material: d.material,
@@ -1384,7 +1416,9 @@ export default function GerarRelatorio({
     equipeRelatorio: execucao ? usuarios.filter((u) => equipeIds.includes(u.id)).map((u) => u.nome) : undefined,
   });
   // campo que o modelo não tem fica escondido: a mensagem dele não vale
-  const r = semCamposForaDoModelo(mesclar(rBase, rExec), snapAtual);
+  const rRoteiro = novoResultado();
+  if (conclusaoComRoteiro(d.conclusao)) addErro(rRoteiro, "conclusao", "Troque as instruções entre parênteses pelo texto da conclusão.");
+  const r = semCamposForaDoModelo(mesclar(rBase, rExec, rRoteiro), snapAtual);
   const rotulosResumo = { ...ROTULOS_RELATORIO, ...ROTULOS_RELATORIO_EXECUCAO };
   const [tentou, setTentou] = useState(false);
 
@@ -2343,6 +2377,25 @@ export default function GerarRelatorio({
               </span>
             </div>
           </div>
+          <div style={grade}>
+            <div>
+              <label style={rotulo}>2º procedimento <span className="detalhe">(opcional — sai na capa ao lado do primeiro)</span></label>
+              <select style={campo} value={d.procedimento2 || ""}
+                onChange={(e) => setD((v) => ({ ...v, procedimento2: e.target.value }))}>
+                <option value="">Nenhum</option>
+                {PROCEDIMENTOS.filter((p) => p.codigo !== d.procedimento && (ativoNoCatalogo(p) || p.codigo === d.procedimento2)).map((p) => (
+                  <option key={p.codigo} value={p.codigo}>{p.codigo} — {p.nome}</option>
+                ))}
+              </select>
+            </div>
+            {d.procedimento2 && (
+              <div>
+                <label style={rotulo}>Relatório do 2º procedimento</label>
+                <input style={campo} value={d.relatorioCodigo2 || ""} placeholder="ex.: 14/MG/26"
+                  onChange={(e) => setD((v) => ({ ...v, relatorioCodigo2: e.target.value }))} />
+              </div>
+            )}
+          </div>
           {operacoes.length === 0 && (
             <p className="detalhe" style={{ margin: 0 }}>
               Nenhum usuário de Operações cadastrado — as listas de preparado/checado/aprovado ficam vazias.
@@ -2651,6 +2704,23 @@ export default function GerarRelatorio({
 
         N.recomendacoes !== undefined && Topico({ numero: N.recomendacoes, titulo: "Recomendações", maxFotos: 5, legendaFoto: "Recomendação", children: <>
           {BotaoSugerir("recomendacoes")}
+          {modeloCombinado && (
+            <div style={{ margin: "6px 0 8px" }}>
+              <strong style={{ fontSize: 12.5 }}>Textos padrão</strong>
+              <span className="detalhe" style={{ display: "block" }}>
+                {inicial.origemAgua
+                  ? "Os de origem da água já vêm conforme o cadastro do tanque."
+                  : "Informe a origem da água no cadastro do tanque para já vir marcado."} Marque ou desmarque; o texto é editável abaixo.
+              </span>
+              {BLOCOS_RECOMENDACAO.map((b) => (
+                <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginTop: 3 }}>
+                  <input type="checkbox" checked={blocoNoTexto(d.recomendacoes, b)}
+                    onChange={(e) => { const ligar = e.target.checked; setD((x) => ({ ...x, recomendacoes: alternarBloco(x.recomendacoes, b, ligar) })); }} />
+                  {b.titulo}
+                </label>
+              ))}
+            </div>
+          )}
           <EditorTexto valor={d.recomendacoes || ""} onChange={(v) => setD((x) => ({ ...x, recomendacoes: v }))} altura={110} />
         </> }),
 
