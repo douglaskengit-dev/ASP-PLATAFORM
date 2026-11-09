@@ -91,6 +91,10 @@ export interface DadosRelatorio {
    *  Não confundir com `revisadoPor`, que é o bloco de assinaturas do fim. */
   revisadoPorCapa?: string;
   aprovadoPor?: string;
+  /** Texto de "Relatório aprovado por:" quando a pessoa tem cargo e registro. */
+  aprovadoPorAssinatura?: string;
+  /** Linhas "Laudo anexo (…): arquivo" — entram dentro da caixa de Anexos. */
+  laudosAnexos?: string[];
   relatorioCodigo?: string;  // automático: "<código do projeto> Rev<revisão>"
   codigoProjeto?: string;    // só para compor o campo acima (não vai ao doc)
   procedimento?: string;     // manual por enquanto
@@ -654,6 +658,15 @@ function ajustarTabelasAoTexto(corpo: string): string {
   return saida + corpo.slice(ult);
 }
 
+const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+/** "09/11/2026" → "09 de Novembro de 2026". Outro formato volta como veio. */
+function dataPorExtenso(data?: string): string {
+  const m = (data || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const mes = m ? MESES[Number(m[2]) - 1] : undefined;
+  return m && mes ? `${m[1]} de ${mes} de ${m[3]}` : data || "";
+}
+
 function aplicarMargensAbnt(xml: string): string {
   return xml.replace(/<w:pgMar\b[^/]*\/>/g, (tag) => {
     let t = tag;
@@ -989,7 +1002,7 @@ function procedimentoEmLinhaPropria(xml: string): string {
   return xml.slice(0, par.ini) + novo + xml.slice(par.fim);
 }
 
-function preencherRotulo(xml: string, rotuloBruto: string, valor?: string, variasAbaixo = false): string {
+function preencherRotulo(xml: string, rotuloBruto: string, valor?: string, abaixoDoRotulo: boolean | "sempre" = false): string {
   if (!valor) return xml;
   // Os modelos variam nos espaços depois dos dois-pontos ("Unidade.: " vs
   // "Unidade.:  "), então casamos o rótulo sem o espaço final.
@@ -1081,11 +1094,11 @@ function preencherRotulo(xml: string, rotuloBruto: string, valor?: string, varia
     posInsercao = runs[alvo].ini + novoRun.length;
   }
 
-  // Com `variasAbaixo`, duas ou mais linhas ficam todas sob o rótulo.
-  const abaixo = variasAbaixo && linhas.length > 1;
+  // `true`: duas ou mais linhas ficam todas sob o rótulo; "sempre": até uma só.
+  const abaixo = abaixoDoRotulo === "sempre" || (abaixoDoRotulo && linhas.length > 1);
   const noRotulo = runDe(abaixo ? "" : " " + linhas[0]);
   let saida = base.slice(0, posInsercao) + noRotulo + base.slice(posInsercao);
-  if (linhas.length === 1) return saida;
+  if (linhas.length === 1 && !abaixo) return saida;
 
   // Parágrafo que contém o rótulo: os demais trechos entram como irmãos dele,
   // herdando o mesmo <w:pPr> (alinhamento, espaçamento).
@@ -1112,15 +1125,17 @@ function preencherRotulo(xml: string, rotuloBruto: string, valor?: string, varia
  * Química responsável CRQ …"): sendo essa a pessoa escolhida, o texto do modelo
  * fica; sendo outra, entra só o nome; sem escolha, o campo sai vazio.
  */
-function preencherAprovacao(xml: string, nome?: string): string {
+function preencherAprovacao(xml: string, nome?: string, assinatura?: string): string {
   const rotulo = "Relatório aprovado por:";
   const par = (xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || []).find((p) => textoDe(p).includes(rotulo));
   if (!par) return xml;
   const texto = textoDe(par);
   const doModelo = texto.slice(texto.indexOf(rotulo) + rotulo.length).trim();
   const escolhido = (nome || "").trim();
-  if (escolhido && normalizarTexto(doModelo).startsWith(normalizarTexto(escolhido))) return xml;
-  if (escolhido) return preencherRotulo(xml, rotulo, " " + escolhido);
+  const comRegistro = (assinatura || "").trim();
+  const temRegistro = !!comRegistro && comRegistro !== escolhido;
+  if (escolhido && !temRegistro && normalizarTexto(doModelo).startsWith(normalizarTexto(escolhido))) return xml;
+  if (escolhido) return preencherRotulo(xml, rotulo, " " + (comRegistro || escolhido));
   return doModelo ? trocarTexto(xml, doModelo, "") : xml;
 }
 
@@ -1281,6 +1296,18 @@ function espaco(): string {
 
 /** Injeta parágrafos dentro da primeira célula de uma tabela vazia
  *  (as "caixas" do template, como a de Métodos). */
+/** Linhas novas dentro de uma caixa com texto, no formato do último parágrafo dela. */
+function acrescentarNaCaixa(tblXml: string, linhas: string[]): string {
+  const pars = tblXml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || [];
+  const modelo = pars.filter((p) => textoDe(p).trim()).pop();
+  const pos = tblXml.lastIndexOf("</w:p>");
+  if (!modelo || pos === -1) return tblXml;
+  const pPr = modelo.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] || "";
+  const rPr = (modelo.match(/<w:r[ >][\s\S]*?<\/w:r>/g) || [""]).pop()!.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] || "";
+  const novos = linhas.map((l) => `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${esc(l)}</w:t></w:r></w:p>`).join("");
+  return tblXml.slice(0, pos + 6) + novos + tblXml.slice(pos + 6);
+}
+
 function injetarNaCaixa(tblXml: string, paragrafos: string): string {
   // Na caixa o texto é compacto (Arial 11, sem recuo nem entrelinha 1,5), como
   // no relatório de referência; o parágrafo vazio do modelo dá lugar a ele.
@@ -1878,7 +1905,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
     xml = trocarMarcador(xml, m, dados.endereco);
   }
   xml = trocarMarcador(xml, "[Volume de sedimento]", dados.volumeSedimento || "—");
-  xml = trocarMarcador(xml, "[data de realização do relatorio]", dados.dataRelatorio || "");
+  xml = trocarMarcador(xml, "[data de realização do relatorio]", dataPorExtenso(dados.dataRelatorio));
   // Texto padrão do POP 001: data da operação e os quatro horários, na ordem
   // em que aparecem (chegada, início, fim, saída).
   if (dados.dataOperacao) xml = trocarMarcador(xml, "[data]", dados.dataOperacao);
@@ -1910,8 +1937,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   };
   valorNaLegenda("cloro livre antes", dados.cloroAntes);
   valorNaLegenda("cloro livre depois", dados.cloroDepois);
+  valorNaLegenda("cloro livre após", dados.cloroDepois);
   valorNaLegenda("pH antes", dados.phAntes);
   valorNaLegenda("pH depois", dados.phDepois);
+  valorNaLegenda("pH após", dados.phDepois);
 
   xml = preencherLaudo(xml, "Antes da Limpeza", dados.laudoAntes);
   xml = preencherLaudo(xml, "Após a Limpeza", dados.laudoDepois);
@@ -1973,8 +2002,8 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   xml = preencherRotulo(xml, "Envolvidos:", equipeTxt ? "\n" + equipeTxt : undefined);
   // Bloco de assinaturas
   xml = preencherRotulo(xml, "Relatório elaborado por:", dados.elaboradoPor ? " " + dados.elaboradoPor : undefined, true);
-  xml = preencherRotulo(xml, "Relatório revisado por:", dados.revisadoPor ? " " + dados.revisadoPor : undefined);
-  xml = preencherAprovacao(xml, dados.aprovadoPor);
+  xml = preencherRotulo(xml, "Relatório revisado por:", dados.revisadoPor ? " " + dados.revisadoPor : undefined, "sempre");
+  xml = preencherAprovacao(xml, dados.aprovadoPor, dados.aprovadoPorAssinatura);
   // Tópico 6 — quadro "Dados do Tanque": células vazias ao lado dos rótulos.
   xml = preencherCelulaVizinha(xml, "Altura", dados.alturaTanque);
   xml = preencherCelulaVizinha(xml, "Diâmetro", dados.diametro);
@@ -2127,6 +2156,7 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // esse tópico, o conteúdo simplesmente não é usado.
   /** Envia conteúdo para a seção com aquela CHAVE, seja qual for o número
    *  que ela tenha neste modelo. Seção inexistente = conteúdo ignorado. */
+  const laudosPendentes = [...(dados.laudosAnexos || [])];
   const addPorChave = (chave: string, conteudo: string) => {
     const n = numeroDaChave.get(chave);
     if (n !== undefined && conteudo) addTexto(n, conteudo);
@@ -2384,6 +2414,12 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
           }
           continue;
         }
+        // Laudos anexados: dentro da caixa com texto logo após o título de Anexos.
+        if (laudosPendentes.length && nTop === numeroDaChave.get("anexos")
+          && k === idx + 1 && bx.startsWith("<w:tbl>") && t !== "") {
+          saida += acrescentarNaCaixa(bx, laudosPendentes.splice(0));
+          continue;
+        }
         // Caixa vazia logo após o título (ex.: Métodos): o texto entra DENTRO
         // dela, que é para isso que existe no modelo.
         const txtTopico = textoDoTopico.get(nTop);
@@ -2403,6 +2439,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
           saida += txtTopico;
           textoDoTopico.delete(nTop);
         }
+      }
+      // modelo sem caixa em Anexos: os laudos saem como texto do tópico
+      if (laudosPendentes.length && nTop === numeroDaChave.get("anexos")) {
+        saida += laudosPendentes.splice(0).map(paragrafoAbnt).join("");
       }
       // figuras de tópicos sem marcador próprio entram ao final da seção
       if (figuras && !figurasUsadas) saida += figuras;

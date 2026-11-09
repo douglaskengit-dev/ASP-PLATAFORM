@@ -37,6 +37,7 @@ interface Profile {
   /** admin/comercial/operacoes/gerencia (novos) ou editor/visualizador (legado). */
   perfil: string;
   funcao: string | null;
+  registro_profissional?: string | null;
   ativo: boolean;
   /** Versão para a checagem de "outro administrador alterou". */
   updated_at: string | null;
@@ -402,6 +403,11 @@ export default function AdminUsuariosConteudo() {
     marcarLinha(u.id, { r: rOk, ok: "Nome atualizado." });
   }
 
+  async function salvarRegistro(u: Profile, valor: string) {
+    const dados = await patchUsuario(u, { registroProfissional: valor || null }, "registroProfissional");
+    if (dados) marcarLinha(u.id, { r: novoResultado(), ok: "Cargo e registro atualizados." });
+  }
+
   async function atualizarUsuario(u: Profile, campos: { perfil?: string; funcao?: string | null; ativo?: boolean }, campoPadrao: string) {
     const dados = await patchUsuario(u, campos, campoPadrao);
     if (!dados) return;
@@ -749,6 +755,16 @@ export default function AdminUsuariosConteudo() {
                   </select>
                   <MensagensCampo r={rLinha} campo="funcao" />
                 </div>
+                <div className="field">
+                  <label>Cargo e registro <span className="detalhe">(sai nas assinaturas do relatório)</span></label>
+                  <input key={u.registro_profissional || ""} defaultValue={u.registro_profissional || ""} maxLength={160}
+                    placeholder="Ex.: Engenheiro responsável CREA 0000000000 / SP"
+                    onBlur={(e) => {
+                      const valor = e.target.value.trim();
+                      if (valor !== (u.registro_profissional || "")) salvarRegistro(u, valor);
+                    }} />
+                  <MensagensCampo r={rLinha} campo="registroProfissional" />
+                </div>
               </div>
               <div style={{ display: "flex", gap: 20, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }} title={travaAtivo?.erro}>
@@ -781,7 +797,7 @@ export default function AdminUsuariosConteudo() {
               <MensagensCampo r={rLinha} campo="excluir" />
               <MensagensCampo r={rLinha} campo="senha" />
               {/* Erros sem campo próprio (ex.: conexão) */}
-              {Object.keys(rLinha.erros).filter((c) => !["nomeCompleto", "perfil", "funcao", "ativo", "excluir", "senha"].includes(c))
+              {Object.keys(rLinha.erros).filter((c) => !["nomeCompleto", "perfil", "funcao", "registroProfissional", "ativo", "excluir", "senha"].includes(c))
                 .map((c) => <MensagensCampo key={c} r={rLinha} campo={c} />)}
               {estado?.conflito && (
                 <div className="actions" style={{ marginTop: 6 }}>

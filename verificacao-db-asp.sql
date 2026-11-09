@@ -2323,6 +2323,9 @@ insert into public.gp_config_interna (chave, valor)
   values ('cron_token', md5(random()::text || clock_timestamp()::text) || md5(random()::text || clock_timestamp()::text))
   on conflict (chave) do nothing;
 
+-- Cargo e registro profissional (assinaturas do relatório)
+alter table public.gp_profiles add column if not exists registro_profissional text;
+
 -- 1) Equipamento exige calibração ---------------------------------------------
 alter table public.gp_equipamentos add column if not exists exige_calibracao boolean not null default false;
 
@@ -2422,6 +2425,7 @@ with esperado(tabela, coluna) as (values
   ('gp_relatorios','dados'), ('gp_relatorios','excluido_em'),
   ('gp_equipamentos','especificacoes'), ('gp_equipamentos','fotos'),
   ('gp_equipamentos','exige_calibracao'),
+  ('gp_profiles','registro_profissional'),
   ('gp_equipamento_unidades','vence_em'), ('gp_calibracoes','vence_em'), ('gp_calibracao_avisos','etapa'),
   ('gp_procedimentos','metodos'), ('gp_procedimentos','equipamentos'),
   ('gp_checklist_equipamentos','itens'),

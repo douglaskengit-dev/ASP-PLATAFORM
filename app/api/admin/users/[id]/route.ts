@@ -40,7 +40,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 /** Só estes campos são aceitos ao editar. `versao` = updated_at lido. */
-const CAMPOS_EDITAR = new Set(["nomeCompleto", "perfil", "ativo", "funcao", "senha", "versao"]);
+const CAMPOS_EDITAR = new Set(["nomeCompleto", "perfil", "ativo", "funcao", "senha", "versao", "registroProfissional"]);
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   if (!mesmaOrigem(req)) return NextResponse.json({ erro: "Origem não permitida." }, { status: 403 });
@@ -59,7 +59,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const extras = Object.keys(body).filter((k) => !CAMPOS_EDITAR.has(k));
   if (extras.length) return NextResponse.json({ erro: `Campo não permitido: ${extras.join(", ")}.` }, { status: 400 });
 
-  const { nomeCompleto, perfil, ativo, funcao, senha, versao } = body;
+  const { nomeCompleto, perfil, ativo, funcao, senha, versao, registroProfissional } = body;
+  if (registroProfissional !== undefined) {
+    if (registroProfissional !== null && typeof registroProfissional !== "string") return erroCampo("Cargo e registro: valor inválido.", "registroProfissional", 400);
+    const valor = normalizarEspacos(registroProfissional || "");
+    if (valor.length > 160) return erroCampo("Cargo e registro: use no máximo 160 caracteres.", "registroProfissional", 400);
+    const { error } = await getSupabaseAdmin().from("gp_profiles").update({ registro_profissional: valor || null }).eq("id", params.id);
+    if (error) {
+      console.error("[admin/users] registro:", error.message);
+      return erroCampo("Não foi possível salvar. Confira se a migração 20261113100000_asp_registro_profissional.sql já rodou.", "registroProfissional", 500);
+    }
+    return NextResponse.json({ ok: true, usuario: { registro_profissional: valor || null } });
+  }
   if (nomeCompleto !== undefined && nomeCompleto !== null && typeof nomeCompleto !== "string") return erroCampo("Nome completo: valor inválido.", "nomeCompleto", 400);
   if (perfil !== undefined && typeof perfil !== "string") return erroCampo("Área / Acesso: valor inválido.", "perfil", 400);
   if (ativo !== undefined && typeof ativo !== "boolean") return erroCampo("Ativo: valor inválido.", "ativo", 400);

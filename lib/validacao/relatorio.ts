@@ -251,6 +251,20 @@ export function caminhoFotoValido(caminho: string | null | undefined, inspecaoId
 
 // ── Snapshot do formulário ───────────────────────────────────────────────────
 
+/** "Eng. Fulano / Engenheiro responsável CREA 000 / SP"; sem registro, só o nome. */
+export function assinaturaDe(nome: string | null | undefined, registro: string | null | undefined): string {
+  const n = (nome || "").trim();
+  const r = (registro || "").trim();
+  if (!n || !r) return n;
+  return `${/^engenh/i.test(r) && !/^eng\b/i.test(n) ? "Eng. " : ""}${n} / ${r}`;
+}
+
+/** Aprovador oferecido em "Aprovado por" mesmo sem cadastro no sistema. */
+export const APROVADOR_SUGERIDO = {
+  id: "sugestao-aprovador", nome: "Ariane Skif", perfil: "operacoes", funcao: "sugestão",
+  registro: "Química responsável CRQ 04300559 / SP",
+};
+
 export type PapelPessoa = "preparadoPor" | "checadoPor" | "revisadoPorCapa" | "aprovadoPor" | "elaboradoPor" | "elaboradoPor2" | "revisadoPor";
 export const PAPEIS_PESSOA: PapelPessoa[] = ["preparadoPor", "checadoPor", "revisadoPorCapa", "aprovadoPor", "elaboradoPor", "elaboradoPor2", "revisadoPor"];
 

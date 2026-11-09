@@ -108,7 +108,7 @@ interface Projeto {
   endereco: string | null;
   data_abertura?: string | null;
   atualizado_em?: string | null;
-  cliente: { id?: string; razao_social: string; updated_at?: string | null } | null;
+  cliente: { id?: string; razao_social: string; cidade?: string | null; uf?: string | null; updated_at?: string | null } | null;
 }
 interface Inspecao {
   id: string;
@@ -179,7 +179,7 @@ interface Agendamento {
   /** Remarcado: saiu de cena (histórico); substituido_por = o que ficou no lugar. */
   substituido_em?: string | null; substituido_por?: string | null;
 }
-interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null }
+interface UsuarioOpcao { id: string; nome: string; perfil: string; funcao: string | null; registro?: string | null }
 /** Arquivo do projeto, classificado para exibição agrupada. */
 interface ArquivoProjeto {
   grupo: "inspecao" | "execucao" | "laudo" | "medicao" | "rdo";
@@ -640,6 +640,7 @@ export default function InspecaoDetalhePage() {
       // O título nasce do procedimento da OS (não é sempre "Batimetria").
       titulo: insp ? `${nomeProc || "Relatório técnico"} — ${insp.identificacao}` : "",
       cliente: proj?.cliente?.razao_social || "",
+      unidade: proj?.cliente?.cidade ? `${proj.cliente.cidade}${proj.cliente.uf ? ` - ${proj.cliente.uf}` : ""}` : "",
       endereco: proj?.endereco || "",
       revisao: String(revisaoRelatorio),
       dataRevisao: hoje,
