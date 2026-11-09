@@ -163,7 +163,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const supabase = getSupabaseRouteClient();
   const { data: inspecao, error } = await supabase
     .from("gp_inspecoes")
-    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, atualizado_em, cliente:gp_orgaos(id, razao_social, updated_at))")
+    .select("*, projeto:gp_projetos(id, codigo_projeto, pedido_compra, endereco, data_abertura, atualizado_em, cliente:gp_orgaos(id, razao_social, cidade, uf, updated_at))")
     .eq("id", params.id)
     .single();
 

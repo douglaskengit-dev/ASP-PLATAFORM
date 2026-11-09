@@ -42,6 +42,10 @@ export const BLOCOS_RECOMENDACAO: BlocoRecomendacao[] = [
     ],
   },
   {
+    id: "calafetacao", titulo: "Calafetação das aberturas no teto",
+    paragrafos: ["Além disso, é recomendada a calafetação nos pontos de abertura no teto em volta dos tubos de saída da água, visando evitar a entrada de elementos estranhos e contaminação."],
+  },
+  {
     id: "placa", titulo: "Instalação de placa de identificação do tanque",
     paragrafos: ["Não foi identificada placa de identificação no reservatório. Recomenda-se a instalação de placa com os dados do tanque (identificação, capacidade e ano de fabricação), para facilitar a rastreabilidade e a manutenção."],
   },
@@ -52,13 +56,22 @@ export const BLOCOS_RECOMENDACAO: BlocoRecomendacao[] = [
   {
     id: "poco", titulo: "Monitoramento de cloro e análises mensais (poço artesiano)", origem: "poco",
     paragrafos: [
-      "Como boa prática, recomenda-se também o monitoramento regular dos níveis de desinfetante residual nos pontos que a água será distribuída para consumo humano. De acordo com a Portaria GM/MS nº 888/2021, os valores mínimos recomendados são:",
-      "0,2 mg/L para cloro livre;",
-      "até 2,0 mg/L para cloro residual combinado;",
-      "0,2 mg/L para dióxido de cloro (quando este for utilizado como desinfetante).",
-      "De acordo com a Resolução Estadual nº SS 65/2005 e a Portaria GM/MS nº 05/2017, o monitoramento regular da qualidade da água é obrigatório nos pontos onde ela será utilizada para consumo humano, especialmente para sistemas de Soluções Alternativas Coletivas (SAC) de abastecimento, como é o caso de água proveniente de poço artesiano. Além do monitoramento diário dos níveis de cloro residual, também devem ser realizadas análises mensais dos seguintes parâmetros para assegurar a potabilidade da água: Cor, Turbidez, pH, Cloro Residual Livre e Análises Microbiológicas (coliformes totais e Escherichia coli).",
+      "Como boa prática, também recomendamos o monitoramento regular dos níveis de cloro residual livre, que devem ser mantidos no mínimo em 0,2 mg/L (para cloro livre) ou entre 2 mg/L para cloro residual combinado, ou 0,2 mg/L de dióxido de cloro, conforme aplicável, em todo o sistema de distribuição (incluindo o reservatório e a rede de distribuição) e nos pontos de consumo. Essa medida é fundamental para garantir a manutenção da potabilidade da água e a segurança dos usuários.",
+      "De acordo com a Resolução Estadual n°SS 65/2005 e a Portaria GM/MS nº 05/2017, o monitoramento regular da qualidade da água é obrigatório, especialmente para sistemas de Soluções Alternativas Coletivas (SAC) de abastecimento, como é o caso de água proveniente de poço artesiano. Além do monitoramento diário dos níveis de cloro residual, também devem ser realizadas análises mensais dos seguintes parâmetros para assegurar a potabilidade da água: Cor, Turbidez, pH, Cloro Residual Livre e Análises Microbiológicas (coliformes totais e Escherichia coli).",
       "Essas análises são essenciais para garantir que a água continue em conformidade com os padrões de potabilidade estabelecidos pelas legislações, assegurando a qualidade da água para consumo humano e a proteção da saúde pública.",
     ],
+  },
+];
+
+/** Parágrafos padrão da Conclusão: nenhum nasce marcado, o técnico escolhe. */
+export const BLOCOS_CONCLUSAO: BlocoRecomendacao[] = [
+  {
+    id: "sucesso", titulo: "Limpeza realizada com sucesso",
+    paragrafos: ["A limpeza foi realizada com sucesso, atendendo todas as expectativas, removendo eficientemente os sedimentos e expondo o fundo do tanque."],
+  },
+  {
+    id: "reparos", titulo: "Revestimento exige reparos",
+    paragrafos: ["No entanto, é importante ressaltar que, apesar de a limpeza ter sido bem-sucedida, a condição do revestimento do piso e das paredes do reservatório exigem reparos para garantir que a integridade estrutural e sanitária seja mantida, conforme detalhado nas recomendações a seguir."],
   },
 ];
 

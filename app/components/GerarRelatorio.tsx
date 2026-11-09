@@ -40,13 +40,13 @@ import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
-  atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
+  APROVADOR_SUGERIDO, assinaturaDe, atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
   CAMPOS_PH_CLORO, CLORO_MAXIMO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
   dadosDasRdos, mesmaPessoa, sugestaoConclusaoAnalises, textoNumeroBr, textoPhCloroDoc, validarRelatorioExecucao, FONTE_PORTARIA_888,
   sugestaoTextoConclusao, sugestaoTextoRecomendacoes, type DadosSugestao,
-  addAviso, alternarBloco, ativoNoCatalogo, BLOCOS_RECOMENDACAO, blocoNoTexto, novoResultado, recomendacoesIniciais,
+  addAviso, alternarBloco, ativoNoCatalogo, BLOCOS_CONCLUSAO, BLOCOS_RECOMENDACAO, blocoNoTexto, novoResultado, recomendacoesIniciais,
   CAMPOS_DO_MODELO, semCamposForaDoModelo, infoParametro,
   type ChaveLaudo, type LaudoPdf, type Periodo, type RdoResumo, type ResultadoValidacao,
 } from "@/lib/validacao";
@@ -59,7 +59,7 @@ export interface ColetaOpcao {
   data_coleta?: string | null;
 }
 
-export interface UsuarioRelatorio { id: string; nome: string; perfil: string; funcao: string | null }
+export interface UsuarioRelatorio { id: string; nome: string; perfil: string; funcao: string | null; registro?: string | null }
 
 interface Props {
   onFechar: () => void;
@@ -705,6 +705,12 @@ export default function GerarRelatorio({
   /** Preparado / Checado / Aprovado saem dos usuários de Operações. */
   const operacoes = useMemo(() => usuarios.filter((u) => u.perfil === "operacoes"), [usuarios]);
   const gerencia = useMemo(() => usuarios.filter((u) => u.perfil === "gerencia"), [usuarios]);
+  // Aprovador sugerido: escolhível enquanto não estiver cadastrado.
+  const sugerido = useMemo(
+    () => (usuarios.some((u) => u.nome.trim().toLowerCase() === APROVADOR_SUGERIDO.nome.toLowerCase()) ? [] : [APROVADOR_SUGERIDO as UsuarioRelatorio]),
+    [usuarios],
+  );
+  const pessoasTodas = useMemo(() => [...usuarios, ...sugerido], [usuarios, sugerido]);
 
   /** Procedimento escolhido na capa — dele saem as sugestões de método e
    *  de equipamentos (itens 3 e 4). */
@@ -1278,11 +1284,20 @@ export default function GerarRelatorio({
         }
       }
       // Pessoas: o documento leva o NOME do usuário escolhido (por id).
-      const nomeDe = (k: PapelPessoa) => (pessoas[k] ? usuarios.find((u) => u.id === pessoas[k])?.nome : "") || d[k] || "";
+      const usuarioDe = (k: PapelPessoa) => (pessoas[k] ? pessoasTodas.find((u) => u.id === pessoas[k]) : undefined);
+      const nomeDe = (k: PapelPessoa) => usuarioDe(k)?.nome || d[k] || "";
+      const assinatura = (k: PapelPessoa) => assinaturaDe(nomeDe(k), usuarioDe(k)?.registro);
+      // O PDF do laudo é um arquivo à parte; o tópico Anexos (se o modelo tiver) só o cita.
+      const laudosAnexos = execucao
+        ? ([[laudoPdf, "antes da"], [laudoPdfDepois, "após a"]] as const)
+            .filter(([l]) => l && !(d.anexos || "").includes(l.nome))
+            .map(([l, q]) => `Laudo anexo (${q} limpeza): ${l!.nome}`)
+        : [];
       return gerarRelatorioDocx({
         titulo: d.titulo || "", cliente: d.cliente || "", endereco: d.endereco || "",
         revisao: d.revisao, statusRevisao: d.statusRevisao, dataRevisao: isoParaBr(d.dataRevisao),
         preparadoPor: nomeDe("preparadoPor"), checadoPor: nomeDe("checadoPor"), aprovadoPor: nomeDe("aprovadoPor"),
+        aprovadoPorAssinatura: assinatura("aprovadoPor"),
         relatorioCodigo: d.relatorioCodigo, procedimento: d.procedimento,
         procedimento2: d.procedimento2 || undefined,
         relatorioCodigo2: d.procedimento2 ? d.relatorioCodigo2 : undefined,
@@ -1297,7 +1312,7 @@ export default function GerarRelatorio({
         historico: d.historico, nivelAgua: d.nivelAgua,
         comprimento: d.comprimento, largura: d.largura,
         dataOperacao: isoParaBr(d.dataOperacao), horarios: d.horarios,
-        anexos: d.anexos,
+        anexos: d.anexos, laudosAnexos,
         // pH/cloro são números; o cloro sai com a unidade do procedimento.
         cloroAntes: textoPhCloroDoc("cloroAntes", d.cloroAntes, unidadeCloro),
         cloroDepois: textoPhCloroDoc("cloroDepois", d.cloroDepois, unidadeCloro),
@@ -1339,7 +1354,7 @@ export default function GerarRelatorio({
           ? `/api/catalogo/template?caminho=${encodeURIComponent(proc.template_path)}`
           : undefined,
         elaboradoPor: [nomeDe("elaboradoPor"), nomeDe("elaboradoPor2")].filter(Boolean).join("\n"),
-        revisadoPor: nomeDe("revisadoPor"),
+        revisadoPor: assinatura("revisadoPor"),
         notaOcorrencia: d.notaOcorrencia,
         topicos: TOPICOS_EM_USO.map((t) => ({ ...t, visivel: ativo(t.numero) && !secoesVazias.has(t.numero) })),
         imagens: imgs,
@@ -1355,7 +1370,7 @@ export default function GerarRelatorio({
     }));
     const nomes: Partial<DadosRelatorio> = {};
     for (const k of PAPEIS_PESSOA) {
-      const u = pessoas[k] ? usuarios.find((x) => x.id === pessoas[k]) : null;
+      const u = pessoas[k] ? pessoasTodas.find((x) => x.id === pessoas[k]) : null;
       (nomes as any)[k] = u?.nome || "";
     }
     return {
@@ -1645,7 +1660,7 @@ export default function GerarRelatorio({
    *  estava escolhido continua na lista mesmo se mudou de área. */
   function SelectPessoa(chave: PapelPessoa, label: string, lista: UsuarioRelatorio[]) {
     const atual = pessoas[chave];
-    const opcoes = atual && !lista.some((u) => u.id === atual) ? [...lista, ...usuarios.filter((u) => u.id === atual)] : lista;
+    const opcoes = atual && !lista.some((u) => u.id === atual) ? [...lista, ...pessoasTodas.filter((u) => u.id === atual)] : lista;
     const nomeAntigo = !atual ? (salvo?.d as any)?.[chave] : "";
     return (
       <div key={chave}>
@@ -2352,7 +2367,7 @@ export default function GerarRelatorio({
             {/* Coluna do quadro da capa que existe no modelo do POP 001. Sai
                 do documento quando o modelo não tem essa coluna. */}
             {SelectPessoa("revisadoPorCapa", "Revisado por", operacoes)}
-            {SelectPessoa("aprovadoPor", "Aprovado por", operacoes)}
+            {SelectPessoa("aprovadoPor", "Aprovado por", [...operacoes, ...sugerido])}
           </div>
           <div style={grade}>
             <div><label style={rotulo}>Relatório <span className="detalhe">(automático — código do projeto + revisão)</span></label>
@@ -2688,6 +2703,18 @@ export default function GerarRelatorio({
 
         N.conclusao !== undefined && Topico({ numero: N.conclusao, titulo: "Conclusão", maxFotos: 5, legendaFoto: "Conclusão", children: <>
           {BotaoSugerir("conclusao")}
+          {modeloComBlocos && (
+            <div style={{ margin: "6px 0 8px" }}>
+              <strong style={{ fontSize: 12.5 }}>Textos padrão</strong>
+              {BLOCOS_CONCLUSAO.map((b) => (
+                <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginTop: 3 }}>
+                  <input type="checkbox" checked={blocoNoTexto(d.conclusao, b)}
+                    onChange={(e) => { const ligar = e.target.checked; setD((x) => ({ ...x, conclusao: alternarBloco(x.conclusao, b, ligar) })); }} />
+                  {b.titulo}
+                </label>
+              ))}
+            </div>
+          )}
           <EditorTexto valor={d.conclusao || ""} onChange={(v) => setD((x) => ({ ...x, conclusao: v }))} altura={110} />
           <MensagensCampo r={r} campo="conclusao">
             {foraLimite.length > 0 && (
@@ -2752,6 +2779,13 @@ export default function GerarRelatorio({
                   onChange={(v) => setTextosTopico((p) => ({ ...p, [t.numero]: v }))} />
                 {ehAnalise && ConteudoAnalise()}
                 {temVagas && BlocoVagasDoTopico(t.numero)}
+                {modeloComBlocos && t.numero === nLimpeza && (
+                  <div style={{ marginTop: 10 }}>
+                    <strong style={{ fontSize: 12.5 }}>Teto</strong>
+                    <span className="detalhe" style={{ display: "block" }}>Opcional. Sem foto, o subtópico não sai no relatório. A legenda é editável em cada foto.</span>
+                    {BlocoFotosAncora({ ancora: "sub:Teto", legendaPadrao: "Teto do reservatório", max: 15, topico: t.numero })}
+                  </div>
+                )}
               </>
             ),
           });

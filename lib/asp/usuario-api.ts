@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 /** Lado servidor da Administração de usuários: contexto do banco para
  *  lib/validacao/usuario.ts, tradução dos erros do Supabase Auth, versão
  *  (concorrência) e a saída da pessoa das equipes futuras ao ser desativada.
@@ -13,6 +14,8 @@ export const CAMPOS_USUARIO = "id, email, nome_completo, perfil, funcao, ativo, 
 
 export interface UsuarioLinha extends UsuarioRef {
   funcao: string | null;
+  /** Cargo e registro profissional, como sai nas assinaturas do relatório. */
+  registro_profissional?: string | null;
   created_at?: string;
   updated_at: string | null;
 }
@@ -23,7 +26,19 @@ export async function carregarUsuarios(): Promise<{ usuarios: UsuarioLinha[]; er
     console.error("[admin/users] carregar:", error.message);
     return { usuarios: [], erro: "Não foi possível carregar os usuários. Tente de novo em instantes." };
   }
-  return { usuarios: (data || []) as UsuarioLinha[], erro: null };
+  const registros = await carregarRegistros(getSupabaseAdmin());
+  return {
+    usuarios: ((data || []) as UsuarioLinha[]).map((u) => ({ ...u, registro_profissional: registros.get(u.id) || null })),
+    erro: null,
+  };
+}
+
+/** Cargo e registro por usuário. Vazio enquanto a migração
+ *  20261113100000_asp_registro_profissional.sql não tiver rodado. */
+export async function carregarRegistros(admin: SupabaseClient): Promise<Map<string, string>> {
+  const { data, error } = await admin.from("gp_profiles").select("id, registro_profissional").not("registro_profissional", "is", null);
+  if (error) return new Map();
+  return new Map((data || []).map((u: any) => [u.id as string, u.registro_profissional as string]));
 }
 
 /** Mesma versão (updated_at) — tolera formatos diferentes do mesmo instante. */

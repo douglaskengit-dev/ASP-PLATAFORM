@@ -60,6 +60,8 @@ const dataBr = (iso?: string | null) =>
   iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "";
 const lista = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} e ${xs[xs.length - 1]}` : xs[0]);
 const m3 = (n: number) => `${textoNumeroBr(n)} m³`;
+/** Início de um item de lista em `paragrafosConclusao`. */
+const MARCA_ITEM = "• ";
 const maiuscula = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** "Corrosão no costado" → "corrosão no costado" no meio da frase (sigla como "TQ-01" fica). */
 const minuscula = (s: string) => (/^[A-ZÀ-Ú][a-zà-ú]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
@@ -165,7 +167,14 @@ function paragrafosConclusao(d: DadosSugestao): string[] {
   if (temLaudo(d.laudoAntes) || temLaudo(d.laudoDepois)) {
     const amostras = [d.amostraAntes?.trim() && `${d.amostraAntes.trim()}, antes da limpeza`, d.amostraDepois?.trim() && `${d.amostraDepois.trim()}, após a limpeza`]
       .filter(Boolean) as string[];
-    ps.push(`Para a avaliação da qualidade da água, foram coletadas amostras antes e após a limpeza e encaminhadas para análise físico-química e microbiológica em laboratório${amostras.length ? ` — ${amostras.length > 1 ? "amostras" : "amostra"} nº ${amostras.join("; ")} —` : ""}, com os resultados comparados aos padrões de potabilidade da ${FONTE_PORTARIA_888}.`);
+    const intro = "Para a avaliação da qualidade da água, foram coletadas amostras antes e após a limpeza e encaminhadas para análise físico-química e microbiológica em laboratório";
+    if (amostras.length) {
+      ps.push(`${intro}:`);
+      amostras.forEach((a, i) => ps.push(`${MARCA_ITEM}nº ${a}${i < amostras.length - 1 ? ";" : "."}`));
+      ps.push(`Com os resultados comparados aos padrões de potabilidade da ${FONTE_PORTARIA_888}.`);
+    } else {
+      ps.push(`${intro}, com os resultados comparados aos padrões de potabilidade da ${FONTE_PORTARIA_888}.`);
+    }
   }
   const fora = [...foraDoLimite("laudoAntes", d.laudoAntes), ...q.foraApos];
   if (fora.length) ps.push(fora.map(fraseForaDoLimite).join(" "));
@@ -241,9 +250,12 @@ function paragrafosRecomendacoes(d: DadosSugestao): string[] {
 /** Parágrafos novos (HTML), sem repetir o que já está escrito. */
 function paragrafosNovos(ps: string[], atual: string | null | undefined): string {
   const ja = normalizarTexto((atual || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " "));
+  const esc = (f: string) => f.replace(/&/g, "&amp;").replace(/</g, "&lt;");
   return ps
-    .filter((f) => f && !ja.includes(normalizarTexto(f)))
-    .map((f) => `<p>${maiuscula(f).replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`).join("");
+    .filter((f) => f && !ja.includes(normalizarTexto(f.startsWith(MARCA_ITEM) ? f.slice(MARCA_ITEM.length) : f)))
+    .map((f) => (f.startsWith(MARCA_ITEM) ? `<ul><li>${esc(f.slice(MARCA_ITEM.length))}</li></ul>` : `<p>${esc(maiuscula(f))}</p>`))
+    .join("")
+    .replace(/<\/ul><ul>/g, "");
 }
 
 export function sugestaoTextoConclusao(d: DadosSugestao, atual?: string | null): string {

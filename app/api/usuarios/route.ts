@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProfileAtual } from "@/lib/supabase/route";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { carregarFuncoes } from "@/lib/asp/funcoes";
+import { carregarRegistros } from "@/lib/asp/usuario-api";
 
 export const runtime = "nodejs";
 
@@ -24,12 +25,15 @@ export async function GET() {
     .order("nome_completo", { ascending: true }), carregarFuncoes(admin)]);
 
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  // Em consulta separada: sem a migração da coluna, o resto segue funcionando.
+  const registros = await carregarRegistros(admin);
   const usuarios = (data || []).map((u: any) => ({
     id: u.id,
     nome: u.nome_completo || u.email || "usuário",
     email: u.email,
     perfil: u.perfil,
     funcao: u.funcao,
+    registro: registros.get(u.id) || null,
   }));
   const funcoes = cad.erro ? undefined : cad.funcoes.map((f) => ({
     nome: f.nome, nome_rdo: f.nome_rdo, ordem: f.ordem, ativo: f.ativo, lideranca_equipe: f.lideranca_equipe,

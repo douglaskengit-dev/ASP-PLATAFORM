@@ -88,7 +88,7 @@ function slotsAgua(pref: "agua_antes" | "agua_depois"): SlotFoto[] {
   return [
     { id: `${pref}_local`, rotulo: "Limpeza do local de extração", fase, grupo: local,
       legenda: `Limpeza do local de extração (${quando})`,
-      palavras: ["higieniz", "local de extra", "limpeza do local"] },
+      palavras: ["higieniz", "local de extra", "limpeza do local", "higienizado com alcool"] },
     { id: `${pref}_ponto`, rotulo: "Ponto de coleta", fase, grupo: local,
       legenda: `Ponto de coleta (${quando})`, palavras: ["ponto de coleta"] },
     { id: `${pref}_ph`, rotulo: "pH", fase, valor: { nome: "pH" }, grupo: phCloro,
@@ -113,7 +113,7 @@ export const SECOES_FOTOS: SecaoFotos[] = [
     slots: [
       { id: "tanque_geral", rotulo: "Geral", legenda: "Vista geral do tanque", palavras: ["geral"] },
       { id: "tanque_abastecimento", rotulo: "Ponto de abastecimento", legenda: "Ponto de abastecimento do tanque", palavras: ["abastecimento"] },
-      { id: "tanque_bomba", rotulo: "Saída da bomba", legenda: "Saída da bomba", palavras: ["bomba"] },
+      { id: "tanque_bomba", rotulo: "Saída da bomba", legenda: "Saída da bomba", palavras: ["bomba", "mangote"] },
       { id: "tanque_placa", rotulo: "Placa de identificação (se houver)", opcional: true,
         legenda: "Placa de identificação do tanque", palavras: ["placa"] },
     ],
@@ -129,9 +129,9 @@ export const SECOES_FOTOS: SecaoFotos[] = [
     descricao: "Exigida em reservatório de água potável.",
     slots: [
       { id: "robo_higienizacao_procedimento", rotulo: "Procedimento de higienização",
-        legenda: "Procedimento de higienização do robô", palavras: ["procedimento", "higieniz", "sanitiza"] },
+        legenda: "Procedimento de higienização do robô", palavras: ["procedimento", "higieniz", "sanitiza", "preparacao da solucao"] },
       { id: "robo_higienizado", rotulo: "Robô higienizado",
-        legenda: "Robô higienizado", palavras: ["higienizado", "sanitizado"] },
+        legenda: "Robô higienizado", palavras: ["higienizado", "sanitizado", "aplicacao da solucao"] },
     ],
   },
   {

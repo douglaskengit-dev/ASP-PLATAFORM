@@ -275,6 +275,8 @@ export const FRASES_RAPIDAS: FraseRapida[] = [
     texto: "Equipe ASP realiza coleta de amostra de água oriunda do tanque antes da operação de limpeza para análise microbiológica, cloro livre, pH e temperatura." },
   { rotulo: "Coleta de água (após)", momento: "depois",
     texto: "Equipe ASP realiza coleta de amostra de água oriunda do tanque após a operação de limpeza para análise microbiológica, cloro livre, pH e temperatura." },
+  { rotulo: "Início limpeza", texto: "Início da limpeza." },
+  { rotulo: "Fim limpeza", texto: "Fim da limpeza." },
   { rotulo: "Início desmobilização", texto: "Início da desmobilização dos equipamentos ASP." },
   { rotulo: "Fim desmobilização", texto: "Fim da desmobilização dos equipamentos ASP." },
   { rotulo: "Saída", texto: "Equipe ASP deixa o site da {cliente}." },
