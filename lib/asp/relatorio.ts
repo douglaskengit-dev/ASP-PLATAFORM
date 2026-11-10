@@ -1179,6 +1179,9 @@ function injetarNaCelula(tcXml: string, valor: string, tamanho = 18): string {
  *  altura reservada), a segunda traz os rótulos (REVISÃO, STATUS, DATA…) e a
  *  terceira o texto de confidencialidade. Preenchemos as 6 células da primeira
  *  linha, na ordem dos rótulos. */
+/** Posição de "REVISADO POR" em `valores`: coluna que só o modelo do POP 001 tem. */
+const COLUNA_REVISADO_CAPA = 5;
+
 function preencherQuadroRevisao(xml: string, valores: (string | undefined)[]): string {
   if (valores.every((v) => !v)) return xml;
   const reTbl = /<w:tbl>[\s\S]*?<\/w:tbl>/g;
@@ -1191,9 +1194,13 @@ function preencherQuadroRevisao(xml: string, valores: (string | undefined)[]): s
     const primeira = linhas[0];
     const celulas = primeira.match(/<w:tc\b[\s\S]*?<\/w:tc>/g);
     if (!celulas) continue;
+    // Valor em branco deixa a célula vazia: nunca adianta os nomes seguintes.
+    const porColuna = celulas.length < valores.length
+      ? valores.filter((_, i) => i !== COLUNA_REVISADO_CAPA)
+      : valores;
     let novaLinha = primeira;
     for (let i = celulas.length - 1; i >= 0; i--) {
-      const v = valores[i];
+      const v = porColuna[i];
       if (!v) continue;
       novaLinha = novaLinha.replace(celulas[i], injetarNaCelula(celulas[i], v));
     }
@@ -1965,12 +1972,10 @@ export async function gerarRelatorioDocx(dados: DadosRelatorio): Promise<Blob> {
   // 3) Quadro de controle de revisão (capa), na ordem dos rótulos
   // O quadro tem 6 colunas no modelo de batimetria e 7 no do POP 001, que
   // acrescenta "REVISADO POR" entre CHECADO e APROVADO. Passamos as 7 e a
-  // função ignora as que sobram quando a tabela é menor.
+  // função tira a do revisor quando a tabela é menor.
   xml = preencherQuadroRevisao(xml, [
     dados.revisao, dados.statusRevisao, dados.dataRevisao,
-    dados.preparadoPor, dados.checadoPor,
-    ...(dados.revisadoPorCapa ? [dados.revisadoPorCapa] : []),
-    dados.aprovadoPor,
+    dados.preparadoPor, dados.checadoPor, dados.revisadoPorCapa, dados.aprovadoPor,
   ]);
   // Dois procedimentos: os dois saem na capa, com os dois números de relatório.
   const relatorios = [dados.relatorioCodigo, dados.relatorioCodigo2].filter((x) => x?.trim()).join(" e ");

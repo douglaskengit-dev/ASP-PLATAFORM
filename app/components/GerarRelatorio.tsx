@@ -40,7 +40,7 @@ import { prepararImagemRelatorio } from "@/lib/asp/imagem-relatorio";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { MensagensCampo, ResumoValidacao } from "./MensagensCampo";
 import {
-  APROVADOR_SUGERIDO, assinaturaDe, atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
+  APROVADOR_SUGERIDO, REVISOR_SUGERIDO, assinaturaDe, atualizarRascunho, faixaVolume, hojeBrasil, isoParaBr, PAPEIS_PESSOA, ROTULOS_RELATORIO, temErros, TOPICO_EXTRAS,
   validarRelatorio, type FotoSalva, type PapelPessoa, type SnapshotRelatorio,
   CAMPOS_PH_CLORO, CLORO_MAXIMO, COL_LIMITE, COL_LQ, COL_VALOR, converterPhCloroLegado, lerCelulaLaudo, foraDoLimite, gradeLaudo, lerValorMedido, mesclar, normalizarCelulaLaudo,
   preencherLimitesPadrao, procedimentoUsaLaudo, ROTULOS_PH_CLORO, ROTULOS_RELATORIO_EXECUCAO, SLOT_PH_CLORO,
@@ -710,7 +710,17 @@ export default function GerarRelatorio({
     () => (usuarios.some((u) => u.nome.trim().toLowerCase() === APROVADOR_SUGERIDO.nome.toLowerCase()) ? [] : [APROVADOR_SUGERIDO as UsuarioRelatorio]),
     [usuarios],
   );
-  const pessoasTodas = useMemo(() => [...usuarios, ...sugerido], [usuarios, sugerido]);
+  // Revisor sugerido: entra nas listas da capa e das assinaturas, que filtram
+  // perfis diferentes. Depois de cadastrado, vale o usuário real.
+  const revisor = useMemo(
+    () => usuarios.find((u) => u.nome.trim().toLowerCase() === REVISOR_SUGERIDO.nome.toLowerCase()) ?? (REVISOR_SUGERIDO as UsuarioRelatorio),
+    [usuarios],
+  );
+  const comRevisor = (lista: UsuarioRelatorio[]) => (lista.some((u) => u.id === revisor.id) ? lista : [...lista, revisor]);
+  const pessoasTodas = useMemo(
+    () => [...usuarios, ...sugerido, ...(revisor.id === REVISOR_SUGERIDO.id ? [revisor] : [])],
+    [usuarios, sugerido, revisor],
+  );
 
   /** Procedimento escolhido na capa — dele saem as sugestões de método e
    *  de equipamentos (itens 3 e 4). */
@@ -2366,7 +2376,7 @@ export default function GerarRelatorio({
             {SelectPessoa("checadoPor", "Checado por", operacoes)}
             {/* Coluna do quadro da capa que existe no modelo do POP 001. Sai
                 do documento quando o modelo não tem essa coluna. */}
-            {SelectPessoa("revisadoPorCapa", "Revisado por", operacoes)}
+            {SelectPessoa("revisadoPorCapa", "Revisado por", comRevisor(operacoes))}
             {SelectPessoa("aprovadoPor", "Aprovado por", [...operacoes, ...sugerido])}
           </div>
           <div style={grade}>
@@ -2797,7 +2807,7 @@ export default function GerarRelatorio({
           <div style={{ ...grade, marginTop: 8 }}>
             {SelectPessoa("elaboradoPor", "Relatório elaborado por (Operações)", operacoes)}
             {SelectPessoa("elaboradoPor2", "2ª pessoa em “elaborado por” (opcional — sai na linha abaixo)", operacoes)}
-            {SelectPessoa("revisadoPor", "Relatório revisado por (Gerência)", gerencia)}
+            {SelectPessoa("revisadoPor", "Relatório revisado por (Gerência)", comRevisor(gerencia))}
           </div>
           {gerencia.length === 0 && (
             <p className="detalhe" style={{ margin: "6px 0 0" }}>Nenhum usuário de Gerência cadastrado.</p>
