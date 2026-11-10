@@ -265,6 +265,12 @@ export const APROVADOR_SUGERIDO = {
   registro: "Química responsável CRQ 04300559 / SP",
 };
 
+/** Revisor oferecido na capa e nas assinaturas mesmo sem cadastro no sistema. */
+export const REVISOR_SUGERIDO = {
+  id: "sugestao-revisor", nome: "Paulo Augusto Martinez", perfil: "gerencia", funcao: "sugestão",
+  registro: "Engenheiro responsável CREA 0685082149 / SP",
+};
+
 export type PapelPessoa = "preparadoPor" | "checadoPor" | "revisadoPorCapa" | "aprovadoPor" | "elaboradoPor" | "elaboradoPor2" | "revisadoPor";
 export const PAPEIS_PESSOA: PapelPessoa[] = ["preparadoPor", "checadoPor", "revisadoPorCapa", "aprovadoPor", "elaboradoPor", "elaboradoPor2", "revisadoPor"];
 
