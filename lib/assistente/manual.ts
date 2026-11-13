@@ -394,6 +394,7 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 
 **Follow-up (CRM do Comercial)**: as oportunidades de venda num quadro com uma coluna por etapa — Prospecção, Qualificação, Visita técnica, Proposta e Negociação — e as colunas Ganhas e Perdidas. Usado pelo Comercial, pela Gerência e pela Administração.
 
+- **Título**: escolha o Procedimento do Catálogo (o título fica com o nome dele) ou "Outros" para escrever outra descrição.
 - **Mover**: arraste o card para outra coluna e informe a data. Em Ganhas, informe a data do fechamento; em Perdidas, o motivo da perda. Arrastar uma oportunidade fechada para uma etapa a reabre.
 - **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades (ligação, e-mail, WhatsApp, reunião, visita, anotação), os documentos (TR → Proposta → Ofício e, na Visita técnica, o Medidor de Sedimento) e o histórico.
 - **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.

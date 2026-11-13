@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { removerArquivos } from "@/lib/processos/arquivos";
-import { faltaMigracaoCrm, MSG_MIGRACAO_CRM } from "@/lib/processos/crm-api";
+import { aplicarProcedimento, faltaColunaProcedimento, faltaMigracaoCrm, MSG_MIGRACAO_CRM } from "@/lib/processos/crm-api";
 import { hojeBrasil, podeUsarCrm, validarOportunidade } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-/** Edita a oportunidade: só os campos enviados (título, cliente, contato,
+/** Edita a oportunidade: só os campos enviados (título/procedimento, cliente, contato,
  * valor, origem, responsável, previsão de fechamento e próxima ação). */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
@@ -23,17 +23,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!Object.keys(v.colunas).length) return NextResponse.json({ erro: "Nada para salvar." }, { status: 400 });
 
   const supabase = getSupabaseRouteClient();
+  const erroProc = await aplicarProcedimento(supabase, v.colunas);
+  if (erroProc) return NextResponse.json({ erro: erroProc }, { status: 400 });
   // Trocou o cliente: o contato antigo não vale mais.
   if (v.colunas.orgao_id && !Object.prototype.hasOwnProperty.call(v.colunas, "contato_id")) {
     const { data: atual } = await supabase.from("gp_processos").select("orgao_id").eq("id", params.id).maybeSingle();
     if (atual && atual.orgao_id !== v.colunas.orgao_id) v.colunas.contato_id = null;
   }
-  const { data, error } = await supabase
+  const salvar = () => supabase
     .from("gp_processos")
     .update({ ...v.colunas, updated_at: new Date().toISOString() })
     .eq("id", params.id)
     .select("id")
     .maybeSingle();
+  let { data, error } = await salvar();
+  if (error && faltaColunaProcedimento(error)) {
+    delete v.colunas.procedimento_id;
+    ({ data, error } = await salvar());
+  }
   if (error && faltaMigracaoCrm(error)) return NextResponse.json({ erro: MSG_MIGRACAO_CRM }, { status: 409 });
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ erro: "Oportunidade não encontrada." }, { status: 404 });
