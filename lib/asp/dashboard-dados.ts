@@ -11,6 +11,7 @@
  * agendamento substituído por remarcação (substituido_em) já saem no banco.
  * As fotos da execução (jsonb maior) só vêm das OSs abertas da fase 7+. */
 import type { DadosDashboard } from "./dashboard";
+import type { ProcessoBruto } from "./dashboard-comercial";
 
 const PAGINA = 1000;
 
@@ -90,4 +91,16 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
       periodicidade_meses: o.periodicidade_meses ?? null, aviso_antecedencia_dias: o.aviso_antecedencia_dias ?? null,
     })),
   };
+}
+
+/** Processos do Follow-up (Dashboard Comercial). A policy de leitura libera
+ *  para qualquer perfil ativo — o mesmo que a tela do Follow-up mostra. */
+export async function carregarProcessosDashboard(supabase: any): Promise<ProcessoBruto[]> {
+  const linhas = await todas<any>(() => supabase.from("gp_processos")
+    .select("id, titulo, orgao_id, etapa, created_at, historico_etapas, orgao:gp_orgaos(razao_social)").order("id"));
+  return linhas.map((p: any) => ({
+    id: p.id, titulo: p.titulo || "Processo sem título", orgao_id: p.orgao_id || null, orgao_nome: p.orgao?.razao_social || null,
+    etapa: Number(p.etapa) || 0, created_at: p.created_at,
+    historico_etapas: Array.isArray(p.historico_etapas) ? p.historico_etapas : [],
+  }));
 }

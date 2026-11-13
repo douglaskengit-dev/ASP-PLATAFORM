@@ -2,13 +2,18 @@
  * botão (i) de cada cartão e no glossário do fim da página. Mudou a regra em
  * lib/asp/dashboard.ts? Mude o texto aqui. */
 import { JANELA_AGENDA_DIAS, LIMITE_PARADA_DIAS } from "@/lib/asp/dashboard";
+import type { PainelId } from "@/lib/asp/dashboard-acesso";
 
 export type ChaveDef =
   | "osAndamento" | "osEncerradas" | "leadTime" | "projetosConcluidos" | "reprovacao" | "aguardandoAprovacao"
   | "aguardandoAssinatura" | "encerramento" | "funil" | "duracao" | "motivos" | "filas" | "agenda" | "ocupacao"
-  | "aDefinir" | "conflitos" | "rdo" | "fotos" | "medicoes" | "laudos" | "clientes" | "recorrencia";
+  | "aDefinir" | "conflitos" | "rdo" | "fotos" | "medicoes" | "laudos" | "clientes" | "recorrencia"
+  | "gConcluidas" | "gPrazoTotal" | "gCarteira" | "gRetrabalho" | "gPendencias" | "gOcupacao" | "gCalibracao" | "gAgua"
+  | "gDiasCampo" | "gMaisAntigas"
+  | "cRenovacoes" | "cInativos" | "cPrazoEntrega" | "cAndamento" | "cFunil" | "cConversao" | "cParados" | "cProjetosNovos" | "cRecompra";
 
-export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string }> = {
+/** `painel` = o Dashboard em cujo glossário a definição aparece (sem ele, Operações). */
+export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; painel?: PainelId }> = {
   osAndamento: {
     titulo: "OSs em andamento",
     texto: "OSs sem data de encerramento, em qualquer fase de 2 a 10 (inclui as da fase 10 que aguardam o encerramento). Não conta OS nem projeto na lixeira. Estado atual: não depende do período. “Abertas no período” = OSs criadas dentro do período. “Sem inspeção” = OSs que começam na fase 6 (não passam pelas fases 2 a 5).",
@@ -97,4 +102,104 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string }> = {
     titulo: "Clientes",
     texto: "Por cliente: projetos do recorte, OSs não encerradas agora, OSs criadas e encerradas no período e entregas registradas no período (pela data da entrega).",
   },
+  // ── Dashboard de Gerência ─────────────────────────────────────────────────
+  gConcluidas: {
+    painel: "gerencia",
+    titulo: "Serviços concluídos",
+    texto: "OSs cuja data de encerramento está no período, comparadas ao período anterior de mesmo tamanho (ex.: últimos 30 dias × os 30 dias antes deles). No gráfico, cada mês dos últimos 12 ao lado do mesmo mês do ano anterior.",
+  },
+  gPrazoTotal: {
+    painel: "gerencia",
+    titulo: "Prazo total da OS",
+    texto: "Dias corridos da abertura da OS até a entrega do relatório final ao cliente. Entrega final = a primeira entrega registrada no dia do fim da execução ou depois; sem execução agendada, a primeira entrega da OS. Conta as entregas feitas no período; o gráfico mostra a mediana de cada mês.",
+  },
+  gCarteira: {
+    painel: "gerencia",
+    titulo: "Carteira em aberto",
+    texto: `OSs não encerradas agora. “Paradas” = mais de ${LIMITE_PARADA_DIAS} dias na fase atual. “Mais antiga” = dias desde a abertura da OS aberta há mais tempo. Estado atual.`,
+  },
+  gRetrabalho: {
+    painel: "gerencia",
+    titulo: "Retrabalho de relatórios",
+    texto: "Reprovações ÷ avaliações (aprovar + reprovar) dos relatórios de inspeção e de execução registradas no período. O gráfico mostra a taxa de cada mês dos últimos 12; os motivos são as categorias escolhidas ao reprovar no período.",
+  },
+  gPendencias: {
+    painel: "gerencia",
+    titulo: "Pendências de campo",
+    texto: "Agora: OSs com dias de execução sem RDO, OSs com a coleta de fotos incompleta (fases 8 a 10), OSs com medição sem aprovação (fases 3 a 5) e OSs na fase 10 com pendência para encerrar — as mesmas regras do Dashboard de Operações. “Encerradas com pendência” = OSs encerradas no período por justificativa.",
+  },
+  gOcupacao: {
+    painel: "gerencia",
+    titulo: "Ocupação",
+    texto: "Média de dias alocados nos próximos 30 dias (hoje incluso) ÷ 30, por pessoa e por equipamento. Equipe e frota = quem esteve em algum agendamento ativo com data de 90 dias atrás até o fim da janela — quem não tem nada agendado na janela conta como 0%.",
+  },
+  gCalibracao: {
+    painel: "gerencia",
+    titulo: "Calibração",
+    texto: "Unidades ativas de equipamentos que exigem calibração: vencidas (ou sem calibração cadastrada) e que vencem nos próximos 30 dias. Estado atual; não depende dos filtros.",
+  },
+  gAgua: {
+    painel: "gerencia",
+    titulo: "Água conforme após a limpeza",
+    texto: "Dos relatórios de execução enviados no período com o laudo “depois da limpeza” preenchido, a parte sem nenhum parâmetro acima do limite (Portaria GM/MS nº 888/2021 por padrão) nem “Presente” em coliformes/E. coli.",
+  },
+  gDiasCampo: {
+    painel: "gerencia",
+    titulo: "Dias em campo por OS",
+    texto: "OSs encerradas no período: dias distintos com RDO que inclui a OS. OSs sem nenhum RDO ficam de fora.",
+  },
+  gMaisAntigas: {
+    painel: "gerencia",
+    titulo: "OSs abertas há mais tempo",
+    texto: "As 10 OSs não encerradas com mais dias desde a abertura, e quantas OSs abertas há em cada fase. Estado atual.",
+  },
+  // ── Dashboard Comercial ───────────────────────────────────────────────────
+  cRenovacoes: {
+    painel: "comercial",
+    titulo: "Renovações a vencer",
+    texto: "Clientes marcados como “Serviço recorrente”, pelo vencimento do próximo serviço (fim da última execução + a periodicidade do cadastro): vencidos e que vencem em até 30, 60 e 90 dias. Quem já tem o próximo serviço aberto não aparece. Mesma regra dos lembretes de recorrência. Estado atual.",
+  },
+  cInativos: {
+    painel: "comercial",
+    titulo: "Clientes para reativar",
+    texto: "Clientes sem OS aberta cujo último serviço (o maior entre o fim da execução agendada e o encerramento) foi há mais de 12 meses. “Sem nenhum serviço” = clientes e órgãos cadastrados que nunca tiveram projeto. Estado atual.",
+  },
+  cPrazoEntrega: {
+    painel: "comercial",
+    titulo: "Prazo de entrega ao cliente",
+    texto: "Dias corridos do fim da execução até a entrega do relatório final (a primeira entrega no dia do fim da execução ou depois). Conta as entregas feitas no período.",
+  },
+  cAndamento: {
+    painel: "comercial",
+    titulo: "OSs em andamento por cliente",
+    texto: "OSs não encerradas agora, por cliente: em que fases estão, dias desde a abertura da mais antiga e a próxima execução agendada. Estado atual.",
+  },
+  cFunil: {
+    painel: "comercial",
+    titulo: "Funil do Follow-up",
+    texto: "Processos do Follow-up em cada etapa agora. O tempo por etapa é a mediana de dias entre a entrada e a saída da etapa (datas de autenticação das trocas), nas saídas que aconteceram no período.",
+  },
+  cConversao: {
+    painel: "comercial",
+    titulo: "Conversão do Follow-up",
+    texto: "Processos abertos no período: em cada etapa, a parte dos que chegaram nela que também chegou à etapa seguinte. O KPI é a parte que chegou a “Finalizado”. Processo recente ainda em andamento conta como não convertido — use um período mais longo para ler a taxa.",
+  },
+  cParados: {
+    painel: "comercial",
+    titulo: "Processos parados",
+    texto: "Processos do Follow-up ainda não finalizados que estão há mais de 30 dias na etapa atual (desde a data de autenticação da última troca, ou da abertura). Estado atual.",
+  },
+  cProjetosNovos: {
+    painel: "comercial",
+    titulo: "Projetos novos",
+    texto: "Projetos pela data de abertura, no período e comparados ao período anterior de mesmo tamanho. “Cliente novo” = o primeiro projeto do cliente; “recorrente” = cliente que já tinha projeto. O gráfico mostra os últimos 12 meses.",
+  },
+  cRecompra: {
+    painel: "comercial",
+    titulo: "Taxa de recompra",
+    texto: "Dos clientes cujo primeiro projeto foi aberto há pelo menos 12 meses, a parte que abriu outro projeto em até 12 meses depois do primeiro. Não depende do período.",
+  },
 };
+
+/** Definições do glossário de um Dashboard. */
+export const definicoesDo = (painel: PainelId) => Object.values(DEFINICOES).filter((d) => (d.painel || "operacoes") === painel);

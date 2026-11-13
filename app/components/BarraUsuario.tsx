@@ -16,6 +16,7 @@ import HistoricoConteudo from "./HistoricoConteudo";
 import PerfilConteudo from "./PerfilConteudo";
 import AdminUsuariosConteudo from "./AdminUsuariosConteudo";
 import { corPerfil, NOMES_PERFIL, textoAvatarPerfil } from "@/lib/perfil";
+import { hrefDashboard } from "@/lib/asp/dashboard-acesso";
 
 type ModalId = "orgaos" | "historico" | "perfil" | "admin" | null;
 type TipoPerfil = "admin" | "editor" | "visualizador" | null;
@@ -188,7 +189,7 @@ export default function BarraUsuario() {
   }
 
   const abas = [
-    { href: "/dashboard", rotulo: "Dashboard" },
+    { href: hrefDashboard(tipoPerfil), rotulo: "Dashboard" },
     { href: "/projetos", rotulo: "Projetos" },
     { href: "/arquivos", rotulo: "Arquivos" },
     { href: "/catalogo", rotulo: "Catálogo" },

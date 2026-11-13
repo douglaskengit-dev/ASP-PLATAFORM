@@ -15,7 +15,6 @@ import TituloPagina from "@/app/components/TituloPagina";
 import CalendarioAgenda from "@/app/components/CalendarioAgenda";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import type { ChavePeriodo, Dashboard, FiltrosDashboard } from "@/lib/asp/dashboard";
-import { DEFINICOES } from "./definicoes";
 import {
   Base, ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, Mais, num, pct, plural, ROT_TIPO, Secao, Tabela, useVisao, Vazio,
 } from "./componentes";
@@ -23,6 +22,9 @@ import { ROTULO_STATUS_RECORRENCIA } from "@/lib/validacao";
 import s from "./dashboard.module.css";
 import PendenciasCampo from "@/app/components/PendenciasCampo";
 import CalibracoesPainel from "@/app/components/CalibracoesPainel";
+import { useRouter } from "next/navigation";
+import type { PainelId } from "@/lib/asp/dashboard-acesso";
+import { AbasDashboard, Glossario } from "./painel-comum";
 
 const PERIODOS: { chave: ChavePeriodo; rotulo: string }[] = [
   { chave: "7", rotulo: "Últimos 7 dias" },
@@ -63,6 +65,8 @@ export default function DashboardPage() {
   const [painel, setPainel] = useState<Dashboard | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [paineis, setPaineis] = useState<PainelId[]>([]);
+  const router = useRouter();
 
   useEffect(() => { setF(filtrosDaUrl()); setPronto(true); }, []);
 
@@ -76,15 +80,18 @@ export default function DashboardPage() {
       const r = await fetch(`/api/dashboard${q ? `?${q}` : ""}`, { signal: sinal, cache: "no-store" });
       if (r.status === 401) { window.location.href = "/login"; return; }
       const d = await r.json().catch(() => ({}));
+      // Perfil sem acesso a Operações (ex.: Comercial): vai para o seu Dashboard.
+      if (r.status === 403 && d.destino && d.destino !== window.location.pathname) { router.replace(d.destino); return; }
       if (!r.ok) throw new Error(d.erro || `Erro ${r.status}`);
       setPainel(d.painel);
+      setPaineis(Array.isArray(d.paineis) ? d.paineis : []);
     } catch (e: any) {
       if (e?.name === "AbortError") return;
       setErro(e?.message || "Falha ao carregar.");
     } finally {
       if (!sinal?.aborted) setCarregando(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!pronto || personalizadoIncompleto) return;
@@ -103,6 +110,7 @@ export default function DashboardPage() {
   return (
     <div className="page-larga">
       <TituloPagina titulo="Dashboard de Operações" subtitulo="Fluxo das Ordens de Serviço (OS), relatórios, agenda e campo — horário de Brasília" />
+      <AbasDashboard atual="operacoes" paineis={paineis} />
 
       <PendenciasCampo />
       <CalibracoesPainel />
@@ -184,22 +192,11 @@ export default function DashboardPage() {
         <CalendarioAgenda />
       </div>
 
-      <details className={`${s.secao} ${s.glossario}`}>
-        <summary>Como cada indicador é calculado</summary>
-        <dl>
-          {Object.values(DEFINICOES).map((d) => (
-            <div key={d.titulo} style={{ display: "contents" }}>
-              <dt>{d.titulo}</dt>
-              <dd>{d.texto}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className={s.sub} style={{ marginTop: 10 }}>
-          Base comum: OSs e projetos fora da lixeira; agendamentos substituídos por remarcação não contam; “Agora” = estado atual,
-          “No período” = eventos com data dentro do período. Datas e horas no fuso de Brasília. Filtros de cliente, procedimento e pessoa
-          valem para todos os quadros.
-        </p>
-      </details>
+      <Glossario painel="operacoes" rodape={<>
+        Base comum: OSs e projetos fora da lixeira; agendamentos substituídos por remarcação não contam; “Agora” = estado atual,
+        “No período” = eventos com data dentro do período. Datas e horas no fuso de Brasília. Filtros de cliente, procedimento e pessoa
+        valem para todos os quadros.
+      </>} />
     </div>
   );
 }

@@ -119,6 +119,30 @@
 @keyframes brilho { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .esqueleto { animation: none; } }
 
+/* Abas entre os Dashboards (Operações, Gerência, Comercial) */
+.abasPainel { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 12px; border-bottom: 1px solid var(--borda); }
+.abaPainel {
+  padding: 8px 14px; font-size: 14px; font-weight: 600; color: var(--texto-suave); text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.abaPainel:hover { color: var(--texto); }
+.abaPainel[aria-current="page"] { color: var(--primaria); border-bottom-color: var(--primaria); }
+.abaPainel:focus-visible { outline: 2px solid var(--primaria); outline-offset: 2px; }
+
+/* Colunas por mês */
+.legenda { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--texto-suave); margin-bottom: 6px; }
+.legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.colunas { display: flex; align-items: stretch; gap: 4px; height: 150px; }
+.colunaMes { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.colunaBarras {
+  flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 2px;
+  border-bottom: 1px solid var(--borda);
+}
+.barra, .barraComp { width: 100%; max-width: 16px; border-radius: 4px 4px 0 0; }
+.barraComp { background: var(--cinza); opacity: .45; }
+.colunaRotulo { font-size: 10px; color: var(--cinza); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 420px) { .colunaRotulo { font-size: 9px; } .colunas { gap: 2px; } }
+
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 @media (max-width: 1100px) {
