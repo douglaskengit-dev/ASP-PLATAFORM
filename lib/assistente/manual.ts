@@ -374,7 +374,9 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 
 **Robô ASP — Avaliações**: o acompanhamento do assistente fica no link **Avaliações**, no rodapé do chat do robô (veja a seção 16).
 
-## 15. Dashboard de Operações, Arquivos e Lixeira
+## 15. Dashboards, Arquivos e Lixeira
+
+**Quem vê cada Dashboard**: Administração vê os três (Operações, Gerência e Comercial); Gerência vê o de Gerência e o de Operações; Operações vê o de Operações; Comercial vê só o Comercial. Quem vê mais de um troca pelas abas no topo da página.
 
 **Dashboard de Operações**: a visão geral da operação, com filtros de período, cliente, procedimento e pessoa. Os filtros ficam no endereço da página, então dá para compartilhar o link. Cada indicador tem um botão (i) com a definição exata e indica se mostra "Agora" ou "No período".
 
@@ -385,6 +387,10 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 - **Próximos serviços recorrentes**: clientes perto do vencimento, com **+ Novo projeto**.
 - Cada gráfico tem **Ver tabela**.
 - **Pendências de campo — hoje**: no topo, para quem está na equipe de uma execução hoje, as fotos e o RDO que faltam em cada OS (veja a seção 11).
+
+**Dashboard de Gerência**: resultado da operação, com filtros de período, cliente e procedimento. Mostra serviços concluídos (comparados ao período anterior e, mês a mês, ao mesmo mês do ano anterior), prazo total da OS até a entrega do relatório, carteira em aberto, retrabalho de relatórios e seus motivos, água conforme após a limpeza, dias em campo por OS, ocupação média da equipe e dos equipamentos, pendências de campo e calibrações vencidas ou a vencer.
+
+**Dashboard Comercial**: clientes e vendas, com filtros de período e cliente. Mostra renovações vencidas ou a vencer em 30, 60 e 90 dias, clientes sem serviço há mais de 12 meses, prazo de entrega ao cliente, OSs em andamento por cliente, o funil do Follow-up (processos por etapa, conversão, tempo por etapa e processos parados há mais de 30 dias), projetos novos de clientes novos e recorrentes e a taxa de recompra.
 
 **Arquivos**: reúne os documentos de todos os projetos (medições, relatórios, versões assinadas, laudos, RDOs). Filtre por tipo e baixe um ZIP organizado em pastas por cliente, projeto e OS.
 

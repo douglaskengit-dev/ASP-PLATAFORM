@@ -425,7 +425,7 @@ const PESO_RECORRENCIA: Record<StatusRecorrencia, number> = { vencido: 0, em_bre
  *  (mesma regra de lib/validacao/recorrencia.ts que os lembretes usam). O
  *  filtro de cliente vale; procedimento e pessoa não (é do cliente). */
 export function montarRecorrencia(
-  d: Pick<DadosDashboard, "orgaos" | "projetos" | "oss" | "agendamentos">, hoje: string, clienteFiltro?: string | null,
+  d: Pick<DadosDashboard, "orgaos" | "projetos" | "oss" | "agendamentos">, hoje: string, clienteFiltro?: string | null, limite: number = MAX_LISTA,
 ): Dashboard["recorrencia"] {
   const recorrentes = (d.orgaos || []).filter((o) => o.recorrente === true && (!clienteFiltro || o.id === clienteFiltro));
   const clienteDoProjeto = new Map(d.projetos.map((p) => [p.id, p.cliente_id]));
@@ -451,13 +451,13 @@ export function montarRecorrencia(
     vencidos: itens.filter((x) => x.status === "vencido").length,
     emBreve: itens.filter((x) => x.status === "em_breve").length,
     semHistorico: itens.filter((x) => x.status === "sem_historico").length,
-    itens: itens.slice(0, MAX_LISTA),
+    itens: itens.slice(0, limite),
   };
 }
 
 const taxa = (avaliacoes: number, reprovacoes: number): Taxa => ({ avaliacoes, reprovacoes, taxa: avaliacoes ? reprovacoes / avaliacoes : null });
 
-function porChave<T, K>(lista: T[], chave: (x: T) => K): Map<K, T[]> {
+export function porChave<T, K>(lista: T[], chave: (x: T) => K): Map<K, T[]> {
   const m = new Map<K, T[]>();
   for (const x of lista) {
     const k = chave(x);
