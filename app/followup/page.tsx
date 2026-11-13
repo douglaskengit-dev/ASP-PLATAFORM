@@ -13,7 +13,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Modal from "@/app/components/Modal";
 import FormularioOrgao from "@/app/components/FormularioOrgao";
 import OportunidadeModal from "@/app/components/crm/OportunidadeModal";
-import { dataCurta, iniciais, moeda, type Oportunidade, type Orgao, type Usuario } from "@/app/components/crm/tipos";
+import CampoTitulo from "@/app/components/crm/CampoTitulo";
+import { dataCurta, iniciais, moeda, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "@/app/components/crm/tipos";
 import { MOTIVOS_PERDA, ORIGENS, PERFIS_CRM, situacaoProximaAcao } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
 import s from "@/app/components/crm/crm.module.css";
@@ -38,6 +39,7 @@ function FollowupConteudo() {
   const [etapas, setEtapas] = useState<EtapaFluxo[]>([]);
   const [orgaos, setOrgaos] = useState<Orgao[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [procedimentos, setProcedimentos] = useState<Procedimento[]>([]);
   const [eu, setEu] = useState("");
   const [hoje, setHoje] = useState(hojeLocal());
   const [migrado, setMigrado] = useState(true);
@@ -60,7 +62,9 @@ function FollowupConteudo() {
   const carregar = useCallback(async () => {
     setErro("");
     try {
-      const [rp, rg, ru] = await Promise.all([fetch("/api/processos", { cache: "no-store" }), fetch("/api/orgaos"), fetch("/api/usuarios")]);
+      const [rp, rg, ru, rc] = await Promise.all([
+        fetch("/api/processos", { cache: "no-store" }), fetch("/api/orgaos"), fetch("/api/usuarios"), fetch("/api/catalogo"),
+      ]);
       if (rp.status === 401) { window.location.href = "/login"; return; }
       if (rp.status === 403) { setSemAcesso(true); return; }
       const dp = await rp.json();
@@ -73,6 +77,7 @@ function FollowupConteudo() {
       setOrgaos((await rg.json().catch(() => ({}))).orgaos || []);
       const du = await ru.json().catch(() => ({}));
       setUsuarios(((du.usuarios || []) as Usuario[]).filter((u) => PERFIS_CRM.includes(u.perfil)));
+      setProcedimentos((await rc.json().catch(() => ({}))).procedimentos || []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao carregar as oportunidades.");
     } finally {
@@ -273,11 +278,11 @@ function FollowupConteudo() {
       )}
 
       {opAberta && (
-        <OportunidadeModal op={opAberta} etapas={etapas} orgaos={orgaos} usuarios={usuarios} hoje={hoje}
+        <OportunidadeModal op={opAberta} etapas={etapas} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} hoje={hoje}
           onFechar={fecharFicha} onMudou={carregar} />
       )}
       {nova && (
-        <NovaOportunidade orgaos={orgaos} usuarios={usuarios} eu={eu} hoje={hoje} onFechar={() => setNova(false)}
+        <NovaOportunidade orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} eu={eu} hoje={hoje} onFechar={() => setNova(false)}
           onCriada={async (id) => { setNova(false); await carregar(); setAberta(id); }} onNovoOrgao={carregar} />
       )}
       {movimento && (
@@ -344,11 +349,11 @@ function ConfirmarMovimento({ m, etapas, hoje, onFechar, onFeito }: { m: Movimen
   );
 }
 
-function NovaOportunidade({ orgaos, usuarios, eu, hoje, onFechar, onCriada, onNovoOrgao }: {
-  orgaos: Orgao[]; usuarios: Usuario[]; eu: string; hoje: string;
+function NovaOportunidade({ orgaos, usuarios, procedimentos, eu, hoje, onFechar, onCriada, onNovoOrgao }: {
+  orgaos: Orgao[]; usuarios: Usuario[]; procedimentos: Procedimento[]; eu: string; hoje: string;
   onFechar: () => void; onCriada: (id: string) => void; onNovoOrgao: () => Promise<void>;
 }) {
-  const [f, setF] = useState({ titulo: "", orgaoId: "", valor: "", origem: "", responsavelId: eu, previsaoFechamento: "", proximaAcao: "", proximaAcaoEm: "" });
+  const [f, setF] = useState({ titulo: "", procedimentoId: "", orgaoId: "", valor: "", origem: "", responsavelId: eu, previsaoFechamento: "", proximaAcao: "", proximaAcaoEm: "" });
   const [modalOrgao, setModalOrgao] = useState(false);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -369,10 +374,8 @@ function NovaOportunidade({ orgaos, usuarios, eu, hoje, onFechar, onCriada, onNo
     <Modal titulo="Nova oportunidade" onFechar={onFechar}>
       <form className={s.ficha} onSubmit={salvar}>
         <div className={s.gradeForm}>
-          <label className={s.campo} style={{ gridColumn: "1 / -1" }}>
-            <span>Título *</span>
-            <input value={f.titulo} maxLength={200} required onChange={muda("titulo")} placeholder="Ex.: Limpeza dos reservatórios da ETA" autoFocus />
-          </label>
+          <CampoTitulo procedimentos={procedimentos} procedimentoId={f.procedimentoId} titulo={f.titulo} autoFocus
+            onChange={(t) => setF((v) => ({ ...v, ...t }))} />
           <label className={s.campo} style={{ gridColumn: "1 / -1" }}>
             <span>Cliente *</span>
             <span className={s.linhaForm} style={{ flexWrap: "nowrap" }}>

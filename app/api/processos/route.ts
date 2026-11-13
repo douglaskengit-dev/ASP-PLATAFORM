@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { ETAPAS_FLUXO } from "@/lib/processos/etapas";
-import { faltaMigracaoCrm, gerarLembretesProximaAcao, processoParaApi } from "@/lib/processos/crm-api";
+import { aplicarProcedimento, faltaColunaProcedimento, faltaMigracaoCrm, gerarLembretesProximaAcao, processoParaApi } from "@/lib/processos/crm-api";
 import { hojeBrasil, podeUsarCrm, validarOportunidade } from "@/lib/validacao";
 
 export const runtime = "nodejs";
@@ -70,9 +70,15 @@ export async function POST(req: NextRequest) {
   if ("erro" in v) return NextResponse.json({ erro: v.erro }, { status: 400 });
 
   const supabase = getSupabaseRouteClient();
+  const erroProc = await aplicarProcedimento(supabase, v.colunas);
+  if (erroProc) return NextResponse.json({ erro: erroProc }, { status: 400 });
   const base = { criado_por: profile.id, etapa: 0, documentos: {}, arquivos: {} };
   const extras = { responsavel_id: profile.id, ...v.colunas };
   let { data: criado, error } = await supabase.from("gp_processos").insert({ ...base, ...extras }).select("id").single();
+  if (error && faltaColunaProcedimento(error)) {
+    delete (extras as Record<string, unknown>).procedimento_id;
+    ({ data: criado, error } = await supabase.from("gp_processos").insert({ ...base, ...extras }).select("id").single());
+  }
   if (error && faltaMigracaoCrm(error)) {
     // Antes da migração: só título e órgão.
     const soBasico = { ...base, titulo: v.colunas.titulo, orgao_id: v.colunas.orgao_id };

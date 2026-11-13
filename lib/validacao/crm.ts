@@ -64,6 +64,8 @@ export function lerValorMonetario(v: unknown): number | null {
 
 export interface DadosOportunidade {
   titulo?: string;
+  /** Procedimento do Catálogo; vazio = "Outros" (título livre). */
+  procedimentoId?: string | null;
   orgaoId?: string;
   contatoId?: string | null;
   valor?: number | null;
@@ -86,6 +88,7 @@ export function validarOportunidade(b: Record<string, unknown>, hoje: string): {
     if (t.length > 200) return { erro: "Título muito longo (máximo 200 caracteres)." };
     c.titulo = t;
   }
+  if (tem("procedimentoId")) c.procedimento_id = texto(b.procedimentoId) || null;
   if (tem("orgaoId")) {
     const o = texto(b.orgaoId);
     if (!o) return { erro: "Selecione o cliente da oportunidade." };

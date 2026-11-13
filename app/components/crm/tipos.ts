@@ -2,6 +2,7 @@
 import type { ProcessoDocs } from "./DocumentosProcesso";
 
 export interface Orgao { id: string; razao_social: string; tipo_ente?: string; cidade?: string; uf?: string }
+export interface Procedimento { id: string; codigo: string; nome: string; ativo?: boolean }
 export interface Usuario { id: string; nome: string; perfil: string }
 export interface EventoHistorico {
   etapa?: number; nome?: string; data_autenticacao?: string; alterado_em?: string; alterado_por?: string;
@@ -27,6 +28,7 @@ export interface Oportunidade extends ProcessoDocs {
   previsao_fechamento: string | null;
   proxima_acao: string | null;
   proxima_acao_em: string | null;
+  procedimento_id: string | null;
   migrado: boolean;
   criado_por: { id: string; nome: string } | null;
 }
