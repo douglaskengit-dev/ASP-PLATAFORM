@@ -1,12 +1,11 @@
 /**
- * Macrofases do fluxo de processos (Fluxograma Macro).
+ * Etapas comerciais do Follow-up (CRM). O processo é uma oportunidade de
+ * venda: anda pelas etapas abaixo e termina com um resultado — ganha ou
+ * perdida (gp_processos.resultado). Depois de ganha, a execução segue nas OSs.
  *
- * tipo "auto": fase coberta pela automação de documentos — avança sozinha
- * conforme os documentos entram. Não pode ser selecionada manualmente.
- * tipo "manual": fase conduzida pela equipe, avançada manualmente pelo sistema.
- *
- * Todas as fases do fluxo atual são manuais — não há automação de documentos
- * disparando o avanço de etapa.
+ * Até a migração 20261114100000_asp_crm_followup, eram 8 macrofases que
+ * misturavam venda e operação; a migração converteu etapa e histórico
+ * (gp_processos.etapas_versao = 2). Todas as etapas são manuais.
  */
 export type TipoEtapa = "auto" | "manual";
 
@@ -16,22 +15,19 @@ export interface EtapaFluxo {
 }
 
 export const ETAPAS_FLUXO: EtapaFluxo[] = [
-  { nome: "Abertura", tipo: "manual" },
-  { nome: "Dados Iniciais do Cliente", tipo: "manual" },
-  { nome: "Agendar visita", tipo: "manual" },
-  { nome: "Coleta de dados de Campo", tipo: "manual" },
-  { nome: "Relatório", tipo: "manual" },
-  { nome: "Agendar execução", tipo: "manual" },
-  { nome: "Relatório de Limpeza", tipo: "manual" },
-  { nome: "Finalizado", tipo: "manual" },
+  { nome: "Prospecção", tipo: "manual" },
+  { nome: "Qualificação", tipo: "manual" },
+  { nome: "Visita técnica", tipo: "manual" },
+  { nome: "Proposta", tipo: "manual" },
+  { nome: "Negociação", tipo: "manual" },
 ];
 
 /** Documentos essenciais anexáveis manualmente ao processo. */
 export const DOCS_FOLLOWUP = ["oficio"] as const;
 
-/** A etapa "Coleta de dados de Campo" tem a ferramenta Medidor de Sedimento
+/** A etapa "Visita técnica" tem a ferramenta Medidor de Sedimento
  * disponível (public/ferramentas/medidor-sedimento.html), embutida por
  * iframe num modal. */
 export function etapaTemMedidorSedimento(nomeEtapa: string | undefined): boolean {
-  return nomeEtapa === "Coleta de dados de Campo";
+  return nomeEtapa === "Visita técnica";
 }

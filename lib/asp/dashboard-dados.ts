@@ -97,10 +97,12 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
  *  para qualquer perfil ativo — o mesmo que a tela do Follow-up mostra. */
 export async function carregarProcessosDashboard(supabase: any): Promise<ProcessoBruto[]> {
   const linhas = await todas<any>(() => supabase.from("gp_processos")
-    .select("id, titulo, orgao_id, etapa, created_at, historico_etapas, orgao:gp_orgaos(razao_social)").order("id"));
+    // "*": resultado/resultado_em sem quebrar antes da migração do CRM.
+    .select("*, orgao:gp_orgaos(razao_social)").order("id"));
   return linhas.map((p: any) => ({
     id: p.id, titulo: p.titulo || "Processo sem título", orgao_id: p.orgao_id || null, orgao_nome: p.orgao?.razao_social || null,
     etapa: Number(p.etapa) || 0, created_at: p.created_at,
     historico_etapas: Array.isArray(p.historico_etapas) ? p.historico_etapas : [],
+    resultado: p.resultado || "aberta", resultado_em: p.resultado_em || null,
   }));
 }

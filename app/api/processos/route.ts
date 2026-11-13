@@ -1,26 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { ETAPAS_FLUXO } from "@/lib/processos/etapas";
+import { faltaMigracaoCrm, gerarLembretesProximaAcao, processoParaApi } from "@/lib/processos/crm-api";
+import { hojeBrasil, podeUsarCrm, validarOportunidade } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-/** Lista os processos do Follow-up (RLS: usuário vê os próprios; admin vê todos).
- * D44: com ?meus=1, devolve apenas os criados pelo próprio usuário — vale
- * para todos, inclusive admin (usado no Histórico). */
+/** Lista as oportunidades do Follow-up (CRM): Admin, Gerência e Comercial.
+ * D44: com ?meus=1, devolve só as criadas pelo próprio usuário — vale para
+ * qualquer perfil (usado no Histórico). */
 export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
   const apenasMeus = req.nextUrl.searchParams.get("meus") === "1";
+  if (!apenasMeus && !podeUsarCrm(profile.perfil)) {
+    return NextResponse.json({ erro: "O Follow-up é do Comercial, da Gerência e da Administração." }, { status: 403 });
+  }
+  if (!apenasMeus) {
+    try { await gerarLembretesProximaAcao(); } catch { /* lembrete é complementar */ }
+  }
 
-  // D29: "criado por" só é exposto para administradores — só neste caso o
-  // select embute o criador (RLS já garante que não-admin só vê os próprios
-  // processos, então mostrar quem criou seria redundante para eles).
+  // D29: "criado por" só é exposto para administradores. D41: status da
+  // análise de TR vinculada, para o botão "Analisar TR".
   const ehAdmin = profile.perfil === "admin";
-  // D41: também traz o status da análise de TR vinculada (em_analise =
-  // rascunho pronto para revisar, concluida = relatório já gerado), para o
-  // botão "Analisar TR" distinguir os dois estados.
   const campos = ehAdmin
     ? "*, orgao:gp_orgaos(id, razao_social, tipo_ente, cidade, uf), criador:gp_profiles!gp_processos_criado_por_fkey(id, nome_completo, email), cadastro_tr:gp_cadastros_tr(status)"
     : "*, orgao:gp_orgaos(id, razao_social, tipo_ente, cidade, uf), cadastro_tr:gp_cadastros_tr(status)";
@@ -34,64 +38,48 @@ export async function GET(req: NextRequest) {
   const { data, error } = await consulta;
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
-  const processos = (data || []).map((p: any) => ({
-    id: p.id,
-    titulo: p.titulo,
-    orgao: p.orgao,
-    data: p.created_at,
-    atualizado_em: p.updated_at,
-    tr_nome: p.tr_nome || "",
-    etapa: p.etapa,
-    documentos: p.documentos || {},
-    arquivos: Object.keys(p.arquivos || {}),
-    cadastro_tr_id: p.cadastro_tr_id,
-    cadastro_tr_status: p.cadastro_tr?.status || null,
-    proposta_aprovada: !!p.proposta_aprovada,
-    historico_etapas: p.historico_etapas || [],
-    subetapas: p.subetapas || {},
-    criado_por: ehAdmin
-      ? { id: p.criador?.id ?? p.criado_por, nome: p.criador?.nome_completo || p.criador?.email || "—" }
-      : null,
-  }));
-
-  return NextResponse.json({ ok: true, processos, etapas: ETAPAS_FLUXO, souAdmin: ehAdmin, perfil: profile.perfil });
+  const processos = (data || []).map((p: any) => processoParaApi(p, ehAdmin));
+  return NextResponse.json({
+    ok: true, processos, etapas: ETAPAS_FLUXO, souAdmin: ehAdmin, perfil: profile.perfil, eu: profile.id,
+    hoje: hojeBrasil(), migrado: processos.length === 0 || processos.every((p) => p.migrado),
+  });
 }
 
-/** Abre um processo no Follow-up. Fluxo de documentos é TR > Proposta > Ofício
- *  (D14) — o processo nasce só com título e órgão; o TR entra em seguida pelo
- *  card, e o Ofício só é liberado depois que a Proposta é aprovada. */
+/** Abre uma oportunidade. Aceita JSON (Follow-up novo) ou formulário (título
+ *  e órgão). Nasce em Prospecção, com o autor como responsável. O fluxo de
+ *  documentos (TR > Proposta > Ofício) segue pelo card. */
 export async function POST(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
-
-  const form = await req.formData();
-  const titulo = String(form.get("titulo") || "").trim();
-  const orgaoId = String(form.get("orgao_id") || "").trim();
-
-  if (!titulo) {
-    return NextResponse.json({ erro: "Informe o título do processo." }, { status: 400 });
+  if (!podeUsarCrm(profile.perfil)) {
+    return NextResponse.json({ erro: "O Follow-up é do Comercial, da Gerência e da Administração." }, { status: 403 });
   }
-  if (!orgaoId) {
-    return NextResponse.json({ erro: "Selecione o órgão (cliente) do processo." }, { status: 400 });
+
+  let corpo: Record<string, unknown>;
+  if ((req.headers.get("content-type") || "").includes("application/json")) {
+    corpo = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  } else {
+    const form = await req.formData();
+    corpo = { titulo: String(form.get("titulo") || ""), orgaoId: String(form.get("orgao_id") || "") };
   }
+  if (!Object.prototype.hasOwnProperty.call(corpo, "titulo")) corpo.titulo = "";
+  if (!Object.prototype.hasOwnProperty.call(corpo, "orgaoId")) corpo.orgaoId = "";
+  const v = validarOportunidade(corpo, hojeBrasil());
+  if ("erro" in v) return NextResponse.json({ erro: v.erro }, { status: 400 });
 
   const supabase = getSupabaseRouteClient();
-  const { data: criado, error } = await supabase
-    .from("gp_processos")
-    .insert({
-      criado_por: profile.id,
-      titulo,
-      orgao_id: orgaoId,
-      etapa: 0,
-      documentos: {},
-      arquivos: {},
-    })
-    .select("id")
-    .single();
+  const base = { criado_por: profile.id, etapa: 0, documentos: {}, arquivos: {} };
+  const extras = { responsavel_id: profile.id, ...v.colunas };
+  let { data: criado, error } = await supabase.from("gp_processos").insert({ ...base, ...extras }).select("id").single();
+  if (error && faltaMigracaoCrm(error)) {
+    // Antes da migração: só título e órgão.
+    const soBasico = { ...base, titulo: v.colunas.titulo, orgao_id: v.colunas.orgao_id };
+    ({ data: criado, error } = await supabase.from("gp_processos").insert(soBasico).select("id").single());
+  }
   if (error || !criado) {
-    return NextResponse.json({ erro: error?.message || "Falha ao criar o processo." }, { status: 500 });
+    return NextResponse.json({ erro: error?.message || "Falha ao criar a oportunidade." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, id: criado.id, etapa: 0, nome: ETAPAS_FLUXO[0].nome });

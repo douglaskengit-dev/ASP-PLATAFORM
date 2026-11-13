@@ -77,9 +77,9 @@ function Conteudo({ p }: { p: PainelComercial }) {
           sub={k.prazoEntrega ? <>mediana · média {dec(k.prazoEntrega.media)} d · {plural(k.prazoEntrega.n, "entrega", "entregas")}</> : "nenhuma entrega final no período"} />
         <Kpi def="cAndamento" valor={num(k.andamento.oss)} sub={<>em {plural(k.andamento.clientes, "cliente", "clientes")}</>} />
         <Kpi def="cFunil" valor={num(k.funil.ativos)} alerta={k.parados > 0}
-          sub={<>processos em andamento · {plural(k.parados, "parado", "parados")} · {plural(k.funil.finalizadosPeriodo, "finalizado", "finalizados")} no período</>} />
+          sub={<>oportunidades em aberto · {plural(k.parados, "parado", "parados")} · {num(k.funil.ganhasPeriodo)} {k.funil.ganhasPeriodo === 1 ? "ganha" : "ganhas"} e {num(k.funil.perdidasPeriodo)} {k.funil.perdidasPeriodo === 1 ? "perdida" : "perdidas"} no período</>} />
         <Kpi def="cConversao" periodo valor={pct(k.conversao.taxa)}
-          sub={k.conversao.criados ? <>{num(k.conversao.finalizados)} de {plural(k.conversao.criados, "processo aberto", "processos abertos")} chegaram a Finalizado</> : "nenhum processo aberto no período"} />
+          sub={k.conversao.criados ? <>{num(k.conversao.ganhas)} de {plural(k.conversao.criados, "oportunidade aberta", "oportunidades abertas")} no período foram ganhas</> : "nenhum processo aberto no período"} />
         <Kpi def="cProjetosNovos" periodo valor={num(k.projetosNovos.periodo)}
           sub={<>{plural(k.projetosNovos.clientesNovos, "cliente novo", "clientes novos")} · {num(k.projetosNovos.recorrentes)} recorrentes · antes {num(k.projetosNovos.anterior)}{k.projetosNovos.variacao != null ? ` (${sinal(k.projetosNovos.variacao)})` : ""}</>} />
         <Kpi def="cRecompra" valor={pct(k.recompra.taxa)}

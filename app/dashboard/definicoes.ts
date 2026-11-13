@@ -177,17 +177,17 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
   cFunil: {
     painel: "comercial",
     titulo: "Funil do Follow-up",
-    texto: "Processos do Follow-up em cada etapa agora. O tempo por etapa é a mediana de dias entre a entrada e a saída da etapa (datas de autenticação das trocas), nas saídas que aconteceram no período.",
+    texto: "Oportunidades em aberto em cada etapa agora; o KPI mostra também as ganhas e perdidas no período (pela data do resultado). O tempo por etapa é a mediana de dias entre a entrada e a saída da etapa (datas informadas nas trocas; a última etapa termina no ganho ou na perda), nas saídas que aconteceram no período.",
   },
   cConversao: {
     painel: "comercial",
     titulo: "Conversão do Follow-up",
-    texto: "Processos abertos no período: em cada etapa, a parte dos que chegaram nela que também chegou à etapa seguinte. O KPI é a parte que chegou a “Finalizado”. Processo recente ainda em andamento conta como não convertido — use um período mais longo para ler a taxa.",
+    texto: "Oportunidades abertas no período: em cada etapa, a parte das que chegaram nela que também chegou à etapa seguinte (na última, a parte que foi ganha). O KPI é a parte das abertas no período que foi ganha. Oportunidade recente ainda em aberto conta como não convertida — use um período mais longo para ler a taxa.",
   },
   cParados: {
     painel: "comercial",
     titulo: "Processos parados",
-    texto: "Processos do Follow-up ainda não finalizados que estão há mais de 30 dias na etapa atual (desde a data de autenticação da última troca, ou da abertura). Estado atual.",
+    texto: "Oportunidades em aberto que estão há mais de 30 dias na etapa atual (desde a data da última troca de etapa, ou da abertura). Estado atual.",
   },
   cProjetosNovos: {
     painel: "comercial",

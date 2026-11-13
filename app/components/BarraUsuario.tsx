@@ -17,6 +17,7 @@ import PerfilConteudo from "./PerfilConteudo";
 import AdminUsuariosConteudo from "./AdminUsuariosConteudo";
 import { corPerfil, NOMES_PERFIL, textoAvatarPerfil } from "@/lib/perfil";
 import { hrefDashboard } from "@/lib/asp/dashboard-acesso";
+import { podeUsarCrm } from "@/lib/validacao/crm";
 
 type ModalId = "orgaos" | "historico" | "perfil" | "admin" | null;
 type TipoPerfil = "admin" | "editor" | "visualizador" | null;
@@ -190,6 +191,7 @@ export default function BarraUsuario() {
 
   const abas = [
     { href: hrefDashboard(tipoPerfil), rotulo: "Dashboard" },
+    ...(podeUsarCrm(tipoPerfil) ? [{ href: "/followup", rotulo: "Follow-up" }] : []),
     { href: "/projetos", rotulo: "Projetos" },
     { href: "/arquivos", rotulo: "Arquivos" },
     { href: "/catalogo", rotulo: "Catálogo" },
