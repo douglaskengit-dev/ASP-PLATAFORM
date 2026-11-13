@@ -2428,7 +2428,7 @@ with esperado(tabela, coluna) as (values
   ('gp_profiles','registro_profissional'),
   -- CRM do Follow-up: supabase/migrations/20261114100000_asp_crm_followup.sql
   ('gp_processos','resultado'), ('gp_processos','valor'), ('gp_processos','origem'), ('gp_processos','responsavel_id'),
-  ('gp_processos','proxima_acao_em'), ('gp_processos','etapas_versao'), ('gp_processo_atividades','descricao'), ('gp_lembretes_proxima_acao','data'),
+  ('gp_processos','proxima_acao_em'), ('gp_processos','etapas_versao'), ('gp_processos','procedimento_id'), ('gp_processo_atividades','descricao'), ('gp_lembretes_proxima_acao','data'),
   ('gp_equipamento_unidades','vence_em'), ('gp_calibracoes','vence_em'), ('gp_calibracao_avisos','etapa'),
   ('gp_procedimentos','metodos'), ('gp_procedimentos','equipamentos'),
   ('gp_checklist_equipamentos','itens'),

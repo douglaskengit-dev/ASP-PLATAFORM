@@ -5,9 +5,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
 import DocumentosProcesso from "./DocumentosProcesso";
+import CampoTitulo from "./CampoTitulo";
 import { MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
-import { dataBr, moeda, valorParaCampo, type Oportunidade, type Orgao, type Usuario } from "./tipos";
+import { dataBr, moeda, valorParaCampo, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "./tipos";
 import s from "./crm.module.css";
 
 interface Atividade { id: string; tipo: string; descricao: string; data: string; autor: string | null; minha: boolean }
@@ -23,8 +24,8 @@ async function enviar(url: string, metodo: string, corpo?: unknown): Promise<str
   return (await r.json().catch(() => ({}))).erro || `Erro ${r.status}`;
 }
 
-export default function OportunidadeModal({ op, etapas, orgaos, usuarios, hoje, onFechar, onMudou }: {
-  op: Oportunidade; etapas: EtapaFluxo[]; orgaos: Orgao[]; usuarios: Usuario[]; hoje: string;
+export default function OportunidadeModal({ op, etapas, orgaos, usuarios, procedimentos, hoje, onFechar, onMudou }: {
+  op: Oportunidade; etapas: EtapaFluxo[]; orgaos: Orgao[]; usuarios: Usuario[]; procedimentos: Procedimento[]; hoje: string;
   onFechar: () => void; onMudou: () => Promise<void> | void;
 }) {
   const [erro, setErro] = useState("");
@@ -59,7 +60,7 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, hoje, 
         <Situacao op={op} etapas={etapas} hoje={hoje} ocupado={ocupado} acao={acao} />
         <ProximaAcao op={op} hoje={hoje} ocupado={ocupado} acao={acao} />
         <Atividades op={op} hoje={hoje} />
-        <Dados op={op} orgaos={orgaos} usuarios={usuarios} ocupado={ocupado} acao={acao} />
+        <Dados op={op} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} ocupado={ocupado} acao={acao} />
 
         <section className={s.bloco}>
           <h3>Documentos</h3>
@@ -297,9 +298,11 @@ function Atividades({ op, hoje }: { op: Oportunidade; hoje: string }) {
   );
 }
 
-function Dados({ op, orgaos, usuarios, ocupado, acao }: { op: Oportunidade; orgaos: Orgao[]; usuarios: Usuario[]; ocupado: boolean; acao: Acao }) {
+function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
+  op: Oportunidade; orgaos: Orgao[]; usuarios: Usuario[]; procedimentos: Procedimento[]; ocupado: boolean; acao: Acao;
+}) {
   const inicial = useCallback(() => ({
-    titulo: op.titulo, orgaoId: op.orgao?.id || "", contatoId: op.contato_id || "", valor: valorParaCampo(op.valor),
+    titulo: op.titulo, procedimentoId: op.procedimento_id || "", orgaoId: op.orgao?.id || "", contatoId: op.contato_id || "", valor: valorParaCampo(op.valor),
     origem: op.origem || "", responsavelId: op.responsavel_id || "", previsaoFechamento: op.previsao_fechamento || "",
   }), [op]);
   const [f, setF] = useState(inicial);
@@ -320,7 +323,8 @@ function Dados({ op, orgaos, usuarios, ocupado, acao }: { op: Oportunidade; orga
     <section className={s.bloco}>
       <h3>Dados da oportunidade</h3>
       <div className={s.gradeForm}>
-        <label className={s.campo} style={{ gridColumn: "1 / -1" }}><span>Título *</span><input value={f.titulo} maxLength={200} onChange={muda("titulo")} /></label>
+        <CampoTitulo procedimentos={procedimentos} procedimentoId={f.procedimentoId} titulo={f.titulo}
+          onChange={(t) => setF((v) => ({ ...v, ...t }))} />
         <label className={s.campo}>
           <span>Cliente *</span>
           <select value={f.orgaoId} onChange={muda("orgaoId")}>

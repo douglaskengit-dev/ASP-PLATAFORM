@@ -21,6 +21,20 @@ export function faltaMigracaoCrm(e: { code?: string; message?: string } | null |
     || /column .* does not exist|relation .* does not exist|could not find the .* column/i.test(e.message || "");
 }
 
+/** Título vinculado ao procedimento: confere que ele existe no Catálogo e
+ *  usa o nome dele como título. Sem procedimento ("Outros"), vale o título
+ *  digitado. Devolve o erro, se houver. */
+export async function aplicarProcedimento(
+  supabase: { from: (t: string) => any },
+  colunas: Record<string, unknown>,
+): Promise<string | null> {
+  if (!colunas.procedimento_id) return null;
+  const { data } = await supabase.from("gp_procedimentos").select("id, nome").eq("id", colunas.procedimento_id).maybeSingle();
+  if (!data) return "Procedimento não encontrado no Catálogo.";
+  colunas.titulo = data.nome;
+  return null;
+}
+
 const fmt = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 
 let ultimaGeracao = 0;
@@ -82,6 +96,7 @@ export function processoParaApi(p: any, ehAdmin: boolean) {
     previsao_fechamento: p.previsao_fechamento || null,
     proxima_acao: p.proxima_acao || null,
     proxima_acao_em: p.proxima_acao_em || null,
+    procedimento_id: p.procedimento_id || null,
     migrado: p.resultado !== undefined,
     criado_por: ehAdmin
       ? { id: p.criador?.id ?? p.criado_por, nome: p.criador?.nome_completo || p.criador?.email || "—" }
