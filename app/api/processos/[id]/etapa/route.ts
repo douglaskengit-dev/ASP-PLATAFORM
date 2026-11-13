@@ -1,80 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { ETAPAS_FLUXO } from "@/lib/processos/etapas";
+import { hojeBrasil, podeUsarCrm } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-/** Muda a fase do processo. D43/D48: admin escolhe qualquer fase, sem
- * restrição de tipo (manual/automática) nem de ordem; editor só pode avançar
- * para a próxima fase; visualizador não troca. */
+/** Move a oportunidade para qualquer etapa comercial (Admin, Gerência e
+ * Comercial). A data (dia em que a mudança aconteceu) entra no histórico e
+ * mede o tempo em cada etapa. Mover uma oportunidade ganha ou perdida para
+ * uma etapa a reabre. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
-  if (profile.perfil !== "admin" && profile.perfil !== "editor") {
-    return NextResponse.json(
-      { erro: "Apenas administradores e editores podem trocar a fase do processo." },
-      { status: 403 }
-    );
+  if (!podeUsarCrm(profile.perfil)) {
+    return NextResponse.json({ erro: "Só Comercial, Gerência e Administração movem oportunidades." }, { status: 403 });
   }
 
-  const { etapa, dataAutenticacao } = (await req.json().catch(() => ({}))) as {
-    etapa?: number;
-    dataAutenticacao?: string;
-  };
-  if (typeof etapa !== "number" || etapa < 0 || etapa >= ETAPAS_FLUXO.length) {
+  const { etapa, dataAutenticacao } = (await req.json().catch(() => ({}))) as { etapa?: number; dataAutenticacao?: string };
+  if (typeof etapa !== "number" || !Number.isInteger(etapa) || etapa < 0 || etapa >= ETAPAS_FLUXO.length) {
     return NextResponse.json({ erro: "Etapa inválida." }, { status: 400 });
   }
-  // Data de autenticação: confirma quando essa mudança de fase foi
-  // autenticada (assinada/validada) — obrigatória para toda fase manual.
   if (!dataAutenticacao || !/^\d{4}-\d{2}-\d{2}$/.test(dataAutenticacao)) {
-    return NextResponse.json({ erro: "Informe a data de autenticação para avançar de fase." }, { status: 400 });
+    return NextResponse.json({ erro: "Informe a data da mudança de etapa." }, { status: 400 });
   }
-  const hoje = new Date().toISOString().slice(0, 10);
-  if (dataAutenticacao > hoje) {
-    return NextResponse.json({ erro: "A data de autenticação não pode ser futura." }, { status: 400 });
+  if (dataAutenticacao > hojeBrasil()) {
+    return NextResponse.json({ erro: "A data da mudança não pode ser futura." }, { status: 400 });
   }
 
   const supabase = getSupabaseRouteClient();
-
-  const { data: processoAtual, error: erroBusca } = await supabase
-    .from("gp_processos")
-    .select("etapa, historico_etapas")
-    .eq("id", params.id)
-    .single();
-  if (erroBusca || !processoAtual) {
-    return NextResponse.json({ erro: "Processo não encontrado." }, { status: 404 });
+  const { data: atual, error: erroBusca } = await supabase
+    .from("gp_processos").select("*").eq("id", params.id).maybeSingle();
+  if (erroBusca || !atual) {
+    return NextResponse.json({ erro: "Oportunidade não encontrada." }, { status: 404 });
   }
-  // D48: editor só avança para a fase seguinte à atual.
-  if (profile.perfil === "editor" && etapa !== processoAtual.etapa + 1) {
-    return NextResponse.json(
-      { erro: "Editores só podem avançar o processo para a próxima fase." },
-      { status: 403 }
-    );
+  const fechada = atual.resultado === "ganha" || atual.resultado === "perdida";
+  if (atual.etapa === etapa && !fechada) return NextResponse.json({ ok: true, etapa, nome: ETAPAS_FLUXO[etapa].nome });
+
+  const historico = Array.isArray(atual.historico_etapas) ? atual.historico_etapas : [];
+  const agora = new Date().toISOString();
+  const novos: Record<string, unknown>[] = [];
+  if (fechada) novos.push({ evento: "resultado", resultado: "aberta", anterior: atual.resultado, data: dataAutenticacao, alterado_em: agora, alterado_por: profile.id });
+  if (atual.etapa !== etapa) {
+    novos.push({ etapa, nome: ETAPAS_FLUXO[etapa].nome, data_autenticacao: dataAutenticacao, alterado_em: agora, alterado_por: profile.id });
   }
+  const mudanca: Record<string, unknown> = { etapa, historico_etapas: [...historico, ...novos], updated_at: agora };
+  if (fechada) Object.assign(mudanca, { resultado: "aberta", resultado_em: null, motivo_perda: null, motivo_perda_detalhe: null });
 
-  const historico = Array.isArray(processoAtual.historico_etapas) ? processoAtual.historico_etapas : [];
-  const novoHistorico = [
-    ...historico,
-    {
-      etapa,
-      nome: ETAPAS_FLUXO[etapa].nome,
-      data_autenticacao: dataAutenticacao,
-      alterado_em: new Date().toISOString(),
-      alterado_por: profile.id,
-    },
-  ];
-
-  const { data, error } = await supabase
-    .from("gp_processos")
-    .update({ etapa, historico_etapas: novoHistorico, updated_at: new Date().toISOString() })
-    .eq("id", params.id)
-    .select("id")
-    .single();
+  const { data, error } = await supabase.from("gp_processos").update(mudanca).eq("id", params.id).select("id").maybeSingle();
   if (error || !data) {
-    return NextResponse.json({ erro: "Processo não encontrado." }, { status: 404 });
+    return NextResponse.json({ erro: error?.message || "Oportunidade não encontrada." }, { status: 404 });
   }
-
-  return NextResponse.json({ ok: true, etapa, nome: ETAPAS_FLUXO[etapa].nome, dataAutenticacao });
+  return NextResponse.json({ ok: true, etapa, nome: ETAPAS_FLUXO[etapa].nome, dataAutenticacao, reaberta: fechada });
 }

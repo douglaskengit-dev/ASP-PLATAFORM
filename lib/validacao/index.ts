@@ -42,3 +42,4 @@ export * from "./funcao";
 export * from "./recorrencia";
 export * from "./acesso";
 export * from "./email";
+export * from "./crm";

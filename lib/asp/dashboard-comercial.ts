@@ -1,9 +1,10 @@
 /** Dashboard Comercial — operação vista pelo cliente e funil do Follow-up
  * (agregações puras). Filtros: período e cliente.
  *
- * Follow-up: gp_processos.etapa é o índice em ETAPAS_FLUXO (0 = Abertura,
- * última = Finalizado). historico_etapas guarda cada troca com a data de
- * autenticação (dia informado por quem trocou). */
+ * Follow-up (CRM): gp_processos.etapa é o índice em ETAPAS_FLUXO (etapas
+ * comerciais, 0 = Prospecção) e resultado diz se a oportunidade está em
+ * aberto, ganha ou perdida (resultado_em = dia do fechamento).
+ * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
 import { diaBrasilia, fimDaOS } from "../validacao";
 import {
@@ -20,7 +21,12 @@ export interface ProcessoBruto {
   etapa: number;
   created_at: string;
   historico_etapas: { etapa?: number | null; data_autenticacao?: string | null; alterado_em?: string | null }[] | null;
+  /** Antes da migração do CRM: ausente (= aberta). */
+  resultado?: "aberta" | "ganha" | "perdida" | null;
+  resultado_em?: string | null;
 }
+
+const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
 
 export interface DadosComercial extends DadosDashboard {
   processos: ProcessoBruto[];
@@ -30,7 +36,6 @@ export interface DadosComercial extends DadosDashboard {
 export const MESES_INATIVO = 12;
 /** Processo do Follow-up parado: mais que isto (dias) na etapa atual. */
 export const LIMITE_PROCESSO_PARADO_DIAS = 30;
-const ULTIMA_ETAPA = ETAPAS_FLUXO.length - 1;
 
 export interface PainelComercial {
   geradoEm: string;
@@ -43,8 +48,8 @@ export interface PainelComercial {
     inativos: { total: number; semServico: number };
     prazoEntrega: Estatistica | null;
     andamento: { oss: number; clientes: number };
-    funil: { ativos: number; finalizadosPeriodo: number; criadosPeriodo: number };
-    conversao: { criados: number; finalizados: number; taxa: number | null };
+    funil: { ativos: number; ganhasPeriodo: number; perdidasPeriodo: number; criadosPeriodo: number };
+    conversao: { criados: number; ganhas: number; taxa: number | null };
     parados: number;
     projetosNovos: { periodo: number; anterior: number; variacao: number | null; clientesNovos: number; recorrentes: number };
     recompra: { base: number; recompraram: number; taxa: number | null };
@@ -58,7 +63,8 @@ export interface PainelComercial {
 }
 
 /** Entradas do processo em cada etapa, em ordem: [{etapa, dia}]. A abertura
- *  (created_at) é a entrada na etapa 0. */
+ *  (created_at) é a entrada na etapa 0. Fechada (ganha/perdida), termina com
+ *  { etapa: -1, dia: resultado_em } — a saída da última etapa. */
 export function entradasDoProcesso(p: ProcessoBruto): { etapa: number; dia: string }[] {
   const out: { etapa: number; dia: string }[] = [{ etapa: 0, dia: diaBrasilia(p.created_at) || p.created_at.slice(0, 10) }];
   const hist = (Array.isArray(p.historico_etapas) ? p.historico_etapas : [])
@@ -67,6 +73,7 @@ export function entradasDoProcesso(p: ProcessoBruto): { etapa: number; dia: stri
     .filter((h) => h.dia)
     .sort((a, b) => a.ord.localeCompare(b.ord));
   for (const h of hist) if (h.etapa !== out[out.length - 1].etapa) out.push({ etapa: h.etapa, dia: h.dia });
+  if (!aberta(p) && p.resultado_em) out.push({ etapa: -1, dia: p.resultado_em.slice(0, 10) });
   return out;
 }
 
@@ -168,7 +175,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
       duracoes.set(ent[i].etapa, l);
     }
     const atual = Number(p.etapa) || 0;
-    if (atual < ULTIMA_ETAPA) {
+    if (aberta(p)) {
       const desde = [...ent].reverse().find((e) => e.etapa === atual)?.dia || ent[0].dia;
       const dias = Math.max(0, diferencaDias(desde, hoje));
       if (dias > LIMITE_PROCESSO_PARADO_DIAS) {
@@ -180,20 +187,22 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
   const paradosPorEtapa = porChave(paradosLista, (x) => x.etapa);
   const funil = ETAPAS_FLUXO.map((e, i) => {
     const alcancaram = criadosPeriodo.filter((p) => maiorEtapa(p) >= i).length;
-    const seguinte = i < ULTIMA_ETAPA ? criadosPeriodo.filter((p) => maiorEtapa(p) >= i + 1).length : null;
+    // Última etapa: "seguinte" = ganha.
+    const seguinte = i < ETAPAS_FLUXO.length - 1
+      ? criadosPeriodo.filter((p) => maiorEtapa(p) >= i + 1).length
+      : criadosPeriodo.filter((p) => p.resultado === "ganha").length;
     const dur = duracoes.get(i) || [];
     return {
       etapa: i, nome: e.nome,
-      ativos: procs.filter((p) => (Number(p.etapa) || 0) === i).length,
+      ativos: procs.filter((p) => aberta(p) && (Number(p.etapa) || 0) === i).length,
       alcancaram,
       conversao: seguinte == null || !alcancaram ? null : seguinte / alcancaram,
       tempoMediano: mediana(dur), passagens: dur.length,
       parados: (paradosPorEtapa.get(e.nome) || []).length,
     };
   });
-  const finalizadosPeriodo = procs.filter((p) => (Number(p.etapa) || 0) === ULTIMA_ETAPA
-    && noIntervalo((entradas.get(p.id) || []).filter((e) => e.etapa === ULTIMA_ETAPA).pop()?.dia, periodo)).length;
-  const criadosFinalizados = criadosPeriodo.filter((p) => maiorEtapa(p) >= ULTIMA_ETAPA).length;
+  const fechadasNoPeriodo = (r: "ganha" | "perdida") => procs.filter((p) => p.resultado === r && noIntervalo(p.resultado_em?.slice(0, 10), periodo)).length;
+  const criadosGanhos = criadosPeriodo.filter((p) => p.resultado === "ganha").length;
 
   // ── Projetos novos e recompra ─────────────────────────────────────────────
   const projsCli = d.projetos.filter((p) => !filtros.cliente || p.cliente_id === filtros.cliente)
@@ -240,8 +249,8 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
       inativos: { total: inativos.length, semServico },
       prazoEntrega: estatistica(prazos.filter((n) => n >= 0)),
       andamento: { oss: abertas.length, clientes: andamento.length },
-      funil: { ativos: procs.filter((p) => (Number(p.etapa) || 0) < ULTIMA_ETAPA).length, finalizadosPeriodo, criadosPeriodo: criadosPeriodo.length },
-      conversao: { criados: criadosPeriodo.length, finalizados: criadosFinalizados, taxa: criadosPeriodo.length ? criadosFinalizados / criadosPeriodo.length : null },
+      funil: { ativos: procs.filter(aberta).length, ganhasPeriodo: fechadasNoPeriodo("ganha"), perdidasPeriodo: fechadasNoPeriodo("perdida"), criadosPeriodo: criadosPeriodo.length },
+      conversao: { criados: criadosPeriodo.length, ganhas: criadosGanhos, taxa: criadosPeriodo.length ? criadosGanhos / criadosPeriodo.length : null },
       parados: paradosLista.length,
       projetosNovos: {
         periodo: noPer.length, anterior: noAnt, variacao: variacao(noPer.length, noAnt),

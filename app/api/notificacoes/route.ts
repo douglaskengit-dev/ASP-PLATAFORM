@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { gerarLembretesRecorrencia, PERFIS_LEMBRETE_RECORRENCIA } from "@/lib/asp/recorrencia-api";
+import { gerarLembretesProximaAcao } from "@/lib/processos/crm-api";
+import { podeUsarCrm } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
 /** Notificações in-app do usuário logado (mais recentes primeiro). Para o
  *  Comercial/Gerência, antes gera os lembretes de serviço recorrente devidos
  *  (sem cron: roda quando eles abrem o app — idempotente, um por cliente e
- *  vencimento; ver lib/asp/recorrencia-api.ts). */
+ *  vencimento; ver lib/asp/recorrencia-api.ts) e, para quem usa o Follow-up,
+ *  os avisos de próxima ação (lib/processos/crm-api.ts). */
 export async function GET() {
   const profile = await getProfileAtual();
   if (!profile) return NextResponse.json({ erro: "Sessão expirada." }, { status: 401 });
   if (PERFIS_LEMBRETE_RECORRENCIA.includes(profile.perfil)) {
     try { await gerarLembretesRecorrencia(); } catch { /* lembrete é complementar */ }
+  }
+  if (podeUsarCrm(profile.perfil)) {
+    try { await gerarLembretesProximaAcao(); } catch { /* lembrete é complementar */ }
   }
 
   const supabase = getSupabaseRouteClient();

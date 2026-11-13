@@ -1,36 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { removerArquivos } from "@/lib/processos/arquivos";
+import { faltaMigracaoCrm, MSG_MIGRACAO_CRM } from "@/lib/processos/crm-api";
+import { hojeBrasil, podeUsarCrm, validarOportunidade } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
-/** Edita o título do processo e, opcionalmente, o órgão vinculado a ele. */
+/** Edita a oportunidade: só os campos enviados (título, cliente, contato,
+ * valor, origem, responsável, previsão de fechamento e próxima ação). */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {
     return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
   }
+  if (!podeUsarCrm(profile.perfil)) {
+    return NextResponse.json({ erro: "O Follow-up é do Comercial, da Gerência e da Administração." }, { status: 403 });
+  }
 
-  const { titulo, orgaoId } = (await req.json().catch(() => ({}))) as { titulo?: string; orgaoId?: string };
-  if (!titulo || !titulo.trim()) {
-    return NextResponse.json({ erro: "Informe o título do processo." }, { status: 400 });
-  }
-  if (!orgaoId) {
-    return NextResponse.json({ erro: "Informe o órgão do processo." }, { status: 400 });
-  }
+  const corpo = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const v = validarOportunidade(corpo, hojeBrasil());
+  if ("erro" in v) return NextResponse.json({ erro: v.erro }, { status: 400 });
+  if (!Object.keys(v.colunas).length) return NextResponse.json({ erro: "Nada para salvar." }, { status: 400 });
 
   const supabase = getSupabaseRouteClient();
+  // Trocou o cliente: o contato antigo não vale mais.
+  if (v.colunas.orgao_id && !Object.prototype.hasOwnProperty.call(v.colunas, "contato_id")) {
+    const { data: atual } = await supabase.from("gp_processos").select("orgao_id").eq("id", params.id).maybeSingle();
+    if (atual && atual.orgao_id !== v.colunas.orgao_id) v.colunas.contato_id = null;
+  }
   const { data, error } = await supabase
     .from("gp_processos")
-    .update({ titulo: titulo.trim(), orgao_id: orgaoId, updated_at: new Date().toISOString() })
+    .update({ ...v.colunas, updated_at: new Date().toISOString() })
     .eq("id", params.id)
-    .select("id, titulo, orgao_id")
-    .single();
-  if (error || !data) {
-    return NextResponse.json({ erro: error?.message || "Processo não encontrado." }, { status: 404 });
-  }
+    .select("id")
+    .maybeSingle();
+  if (error && faltaMigracaoCrm(error)) return NextResponse.json({ erro: MSG_MIGRACAO_CRM }, { status: 409 });
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ erro: "Oportunidade não encontrada." }, { status: 404 });
 
-  return NextResponse.json({ ok: true, titulo: data.titulo, orgaoId: data.orgao_id });
+  return NextResponse.json({ ok: true });
 }
 
 /** Exclui o processo, seus arquivos exclusivos no storage e devolve ao drop

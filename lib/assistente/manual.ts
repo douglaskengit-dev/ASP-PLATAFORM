@@ -59,7 +59,7 @@ Todas as áreas ficam na barra azul do topo; no celular, elas ficam no botão de
 
 ### Barra superior
 
-- **Abas**: Dashboard, Projetos, Arquivos, Catálogo e Lixeira. Clientes, Histórico e Administração abrem em janelas.
+- **Abas**: Dashboard, Follow-up (só Comercial, Gerência e Administração), Projetos, Arquivos, Catálogo e Lixeira. Clientes, Histórico e Administração abrem em janelas.
 - **💬 Feedback**: envie erros e sugestões para a equipe do sistema.
 - **🔔 Notificações**: avisos de agendamentos, remarcações, relatórios e lembretes. O número mostra quantas estão sem ler.
 - **☀️ / 🌙 Tema**: alterna entre claro e escuro.
@@ -391,6 +391,14 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 **Dashboard de Gerência**: resultado da operação, com filtros de período, cliente e procedimento. Mostra serviços concluídos (comparados ao período anterior e, mês a mês, ao mesmo mês do ano anterior), prazo total da OS até a entrega do relatório, carteira em aberto, retrabalho de relatórios e seus motivos, água conforme após a limpeza, dias em campo por OS, ocupação média da equipe e dos equipamentos, pendências de campo e calibrações vencidas ou a vencer.
 
 **Dashboard Comercial**: clientes e vendas, com filtros de período e cliente. Mostra renovações vencidas ou a vencer em 30, 60 e 90 dias, clientes sem serviço há mais de 12 meses, prazo de entrega ao cliente, OSs em andamento por cliente, o funil do Follow-up (processos por etapa, conversão, tempo por etapa e processos parados há mais de 30 dias), projetos novos de clientes novos e recorrentes e a taxa de recompra.
+
+**Follow-up (CRM do Comercial)**: as oportunidades de venda num quadro com uma coluna por etapa — Prospecção, Qualificação, Visita técnica, Proposta e Negociação — e as colunas Ganhas e Perdidas. Usado pelo Comercial, pela Gerência e pela Administração.
+
+- **Mover**: arraste o card para outra coluna e informe a data. Em Ganhas, informe a data do fechamento; em Perdidas, o motivo da perda. Arrastar uma oportunidade fechada para uma etapa a reabre.
+- **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades (ligação, e-mail, WhatsApp, reunião, visita, anotação), os documentos (TR → Proposta → Ofício e, na Visita técnica, o Medidor de Sedimento) e o histórico.
+- **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.
+- **Filtros**: busca, cliente, responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
+- Depois do ganho, abra o projeto em Projetos para seguir com as OSs.
 
 **Arquivos**: reúne os documentos de todos os projetos (medições, relatórios, versões assinadas, laudos, RDOs). Filtre por tipo e baixe um ZIP organizado em pastas por cliente, projeto e OS.
 
