@@ -49,7 +49,7 @@ export async function carregarDadosDashboard(supabase: any): Promise<DadosDashbo
       .is("excluido_em", null).order("id")),
     todas<any>(() => supabase.from("gp_coletas").select("inspecao_id, tipo, aprovada_em").is("excluido_em", null).order("id")),
     todas<any>(() => supabase.from("gp_entregas").select("inspecao_id, data").is("excluido_em", null).order("id")),
-    todas<any>(() => supabase.from("gp_procedimentos").select("codigo, nome, agua_potavel, limpeza_robotizada").order("codigo")),
+    todas<any>(() => supabase.from("gp_procedimentos").select("id, codigo, nome, agua_potavel, limpeza_robotizada").order("codigo")),
     // Clientes (recorrência). "*": sem as colunas novas, ninguém é recorrente.
     todas<any>(() => supabase.from("gp_orgaos").select("*").is("excluido_em", null).order("id")),
   ]);
@@ -104,5 +104,6 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     etapa: Number(p.etapa) || 0, created_at: p.created_at,
     historico_etapas: Array.isArray(p.historico_etapas) ? p.historico_etapas : [],
     resultado: p.resultado || "aberta", resultado_em: p.resultado_em || null,
+    procedimento_id: p.procedimento_id || null,
   }));
 }

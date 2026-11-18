@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Dashboard Comercial (Admin e Comercial). Filtros: ?periodo=&de=&ate=
- * &cliente=. Leitura via RLS (route client). */
+ * &cliente=&procedimento=. Leitura via RLS (route client). */
 export async function GET(req: NextRequest) {
   const profile = await getProfileAtual();
   if (!profile) {
