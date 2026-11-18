@@ -157,12 +157,12 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
   cRenovacoes: {
     painel: "comercial",
     titulo: "Renovações a vencer",
-    texto: "Clientes marcados como “Serviço recorrente”, pelo vencimento do próximo serviço (fim da última execução + a periodicidade do cadastro): vencidos e que vencem em até 30, 60 e 90 dias. Quem já tem o próximo serviço aberto não aparece. Mesma regra dos lembretes de recorrência. Estado atual.",
+    texto: "Clientes marcados como “Serviço recorrente”, pelo vencimento do próximo serviço (fim da última execução + a periodicidade do cadastro): vencidos e que vencem em até 30, 60 e 90 dias. Quem já tem o próximo serviço aberto não aparece. Mesma regra dos lembretes de recorrência. Não muda com o filtro de procedimento. Estado atual.",
   },
   cInativos: {
     painel: "comercial",
     titulo: "Clientes para reativar",
-    texto: "Clientes sem OS aberta cujo último serviço (o maior entre o fim da execução agendada e o encerramento) foi há mais de 12 meses. “Sem nenhum serviço” = clientes e órgãos cadastrados que nunca tiveram projeto. Estado atual.",
+    texto: "Clientes sem OS aberta cujo último serviço (o maior entre o fim da execução agendada e o encerramento) foi há mais de 12 meses. Com o filtro de procedimento, conta só os serviços daquele procedimento. “Sem nenhum serviço” = clientes e órgãos cadastrados que nunca tiveram projeto (não muda com o filtro de procedimento). Estado atual.",
   },
   cPrazoEntrega: {
     painel: "comercial",
@@ -192,7 +192,7 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
   cProjetosNovos: {
     painel: "comercial",
     titulo: "Projetos novos",
-    texto: "Projetos pela data de abertura, no período e comparados ao período anterior de mesmo tamanho. “Cliente novo” = o primeiro projeto do cliente; “recorrente” = cliente que já tinha projeto. O gráfico mostra os últimos 12 meses.",
+    texto: "Projetos pela data de abertura, no período e comparados ao período anterior de mesmo tamanho. Com o filtro de procedimento, só os projetos com alguma OS daquele procedimento. “Cliente novo” = o primeiro projeto do cliente; “recorrente” = cliente que já tinha projeto. O gráfico mostra os últimos 12 meses.",
   },
   cRecompra: {
     painel: "comercial",

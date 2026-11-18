@@ -1,5 +1,10 @@
 /** Dashboard Comercial — operação vista pelo cliente e funil do Follow-up
- * (agregações puras). Filtros: período e cliente.
+ * (agregações puras). Filtros: período, cliente e procedimento.
+ *
+ * Procedimento: OSs pelo código (inspecoes.procedimento); oportunidades do
+ * Follow-up pelo procedimento_id (o id do mesmo procedimento no Catálogo);
+ * projetos que têm alguma OS do procedimento. Renovações não dependem dele
+ * (a recorrência é do cliente).
  *
  * Follow-up (CRM): gp_processos.etapa é o índice em ETAPAS_FLUXO (etapas
  * comerciais, 0 = Prospecção) e resultado diz se a oportunidade está em
@@ -24,6 +29,8 @@ export interface ProcessoBruto {
   /** Antes da migração do CRM: ausente (= aberta). */
   resultado?: "aberta" | "ganha" | "perdida" | null;
   resultado_em?: string | null;
+  /** Procedimento do título (Catálogo). Nulo = "Outros" ou antes da migração. */
+  procedimento_id?: string | null;
 }
 
 const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
@@ -42,7 +49,7 @@ export interface PainelComercial {
   hoje: string;
   periodo: Intervalo & { chave: ChavePeriodo };
   filtros: FiltrosDashboard;
-  opcoes: { clientes: { id: string; nome: string }[] };
+  opcoes: { clientes: { id: string; nome: string }[]; procedimentos: { codigo: string; nome: string }[] };
   kpis: {
     renovacoes: { vencidas: number; ate30: number; ate60: number; ate90: number; recorrentes: number };
     inativos: { total: number; semServico: number };
@@ -78,7 +85,7 @@ export function entradasDoProcesso(p: ProcessoBruto): { etapa: number; dia: stri
 }
 
 export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: string, agora: string = new Date().toISOString()): PainelComercial {
-  const filtros: FiltrosDashboard = { periodo: f.periodo, de: f.de, ate: f.ate, cliente: f.cliente, procedimento: null, pessoa: null };
+  const filtros: FiltrosDashboard = { periodo: f.periodo, de: f.de, ate: f.ate, cliente: f.cliente, procedimento: f.procedimento || null, pessoa: null };
   const periodo = { ...intervaloDoPeriodo(filtros, hoje), chave: f.periodo };
   const anterior = periodoAnterior(periodo);
   const projetos = new Map(d.projetos.map((p) => [p.id, p]));
@@ -91,7 +98,20 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
   const mapaCli = new Map<string, string>();
   d.projetos.forEach((p) => { if (p.cliente_id) mapaCli.set(p.cliente_id, p.cliente_nome || "Cliente sem nome"); });
   d.processos.forEach((p) => { if (p.orgao_id && !mapaCli.has(p.orgao_id)) mapaCli.set(p.orgao_id, p.orgao_nome || "Cliente sem nome"); });
-  const opcoes = { clientes: Array.from(mapaCli, ([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")) };
+  // Procedimentos: os usados em OSs ou em oportunidades do Follow-up.
+  const procPorCodigo = new Map(d.procedimentos.map((p) => [p.codigo, p]));
+  const codigoDoId = new Map(d.procedimentos.filter((p) => p.id).map((p) => [p.id!, p.codigo]));
+  const projetoVivo = new Set(d.projetos.map((p) => p.id));
+  const usados = new Set<string>();
+  d.oss.forEach((o) => { if (o.procedimento && projetoVivo.has(o.projeto_id)) usados.add(o.procedimento); });
+  d.processos.forEach((p) => { const c = p.procedimento_id ? codigoDoId.get(p.procedimento_id) : null; if (c) usados.add(c); });
+  const opcoes = {
+    clientes: Array.from(mapaCli, ([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
+    procedimentos: Array.from(usados).map((codigo) => ({ codigo, nome: procPorCodigo.get(codigo)?.nome || codigo }))
+      .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR")),
+  };
+  const proc = filtros.procedimento;
+  const doProc = (codigo: string | null | undefined) => !proc || codigo === proc;
 
   // ── Renovações (recorrência, estado atual) ────────────────────────────────
   const rec = montarRecorrencia(d, hoje, filtros.cliente);
@@ -106,7 +126,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
   const ossPorCliente = new Map<string, typeof oss>();
   for (const o of d.oss) {
     const cli = projetos.get(o.projeto_id)?.cliente_id;
-    if (!cli || (filtros.cliente && cli !== filtros.cliente)) continue;
+    if (!cli || (filtros.cliente && cli !== filtros.cliente) || !doProc(o.procedimento)) continue;
     const l = ossPorCliente.get(cli) || [];
     l.push(o);
     ossPorCliente.set(cli, l);
@@ -158,7 +178,8 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
   }).sort((a, b) => b.oss - a.oss || b.maisAntigaDias - a.maisAntigaDias);
 
   // ── Follow-up ─────────────────────────────────────────────────────────────
-  const procs = d.processos.filter((p) => !filtros.cliente || p.orgao_id === filtros.cliente);
+  const procs = d.processos.filter((p) => (!filtros.cliente || p.orgao_id === filtros.cliente)
+    && doProc(p.procedimento_id ? codigoDoId.get(p.procedimento_id) : null));
   const entradas = new Map(procs.map((p) => [p.id, entradasDoProcesso(p)]));
   const criadosPeriodo = procs.filter((p) => noIntervalo(diaBrasilia(p.created_at), periodo));
   const maiorEtapa = (p: ProcessoBruto) => Math.max(Number(p.etapa) || 0, ...(entradas.get(p.id) || []).map((e) => e.etapa));
@@ -205,7 +226,8 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
   const criadosGanhos = criadosPeriodo.filter((p) => p.resultado === "ganha").length;
 
   // ── Projetos novos e recompra ─────────────────────────────────────────────
-  const projsCli = d.projetos.filter((p) => !filtros.cliente || p.cliente_id === filtros.cliente)
+  const projetosDoProc = proc ? new Set(d.oss.filter((o) => o.procedimento === proc).map((o) => o.projeto_id)) : null;
+  const projsCli = d.projetos.filter((p) => (!filtros.cliente || p.cliente_id === filtros.cliente) && (!projetosDoProc || projetosDoProc.has(p.id)))
     .map((p) => ({ ...p, dia: p.data_abertura || diaBrasilia(p.criado_em) || "" }))
     .filter((p) => p.dia)
     .sort((a, b) => a.dia.localeCompare(b.dia) || a.id.localeCompare(b.id));

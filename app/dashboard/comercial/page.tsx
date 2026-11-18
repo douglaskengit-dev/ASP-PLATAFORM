@@ -17,7 +17,7 @@ const ROT_FAIXA: Record<PainelComercial["renovacoes"][number]["faixa"], string> 
 
 export default function DashboardComercialPage() {
   const { f, setF, muda, painel, paineis, carregando, erro, carregar, pronto, personalizadoIncompleto } = usePainel<PainelComercial>("/api/dashboard/comercial");
-  const temFiltro = f.periodo !== "30" || !!f.cliente;
+  const temFiltro = f.periodo !== "30" || !!(f.cliente || f.procedimento);
 
   return (
     <div className="page-larga">
@@ -31,6 +31,13 @@ export default function DashboardComercialPage() {
           <select id="f-cliente" value={f.cliente || ""} onChange={muda("cliente")}>
             <option value="">Todos</option>
             {painel?.opcoes.clientes.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
+        </div>
+        <div className={s.campo}>
+          <label htmlFor="f-proc">Procedimento</label>
+          <select id="f-proc" value={f.procedimento || ""} onChange={muda("procedimento")}>
+            <option value="">Todos</option>
+            {painel?.opcoes.procedimentos.map((p) => <option key={p.codigo} value={p.codigo}>{p.codigo === p.nome ? p.codigo : `${p.codigo} — ${p.nome}`}</option>)}
           </select>
         </div>
         <div className={s.acoesFiltro}>
@@ -58,7 +65,7 @@ export default function DashboardComercialPage() {
         </div>
       )}
 
-      <Glossario painel="comercial" rodape={<>Base comum: projetos e OSs fora da lixeira; agendamentos substituídos por remarcação não contam. “Agora” = estado atual; “No período” = eventos com data dentro do período. O filtro de cliente vale para todos os quadros.</>} />
+      <Glossario painel="comercial" rodape={<>Base comum: projetos e OSs fora da lixeira; agendamentos substituídos por remarcação não contam. “Agora” = estado atual; “No período” = eventos com data dentro do período. O filtro de cliente vale para todos os quadros. O de procedimento vale para todos, menos as renovações e os cadastrados sem nenhum serviço; no Follow-up, conta o procedimento escolhido no título da oportunidade.</>} />
     </div>
   );
 }

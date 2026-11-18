@@ -107,6 +107,8 @@ export interface EntregaBruta {
   data: string;
 }
 export interface ProcedimentoBruto {
+  /** Liga o Follow-up (gp_processos.procedimento_id) ao código das OSs. */
+  id?: string;
   codigo: string;
   nome: string | null;
   agua_potavel?: boolean | null;
