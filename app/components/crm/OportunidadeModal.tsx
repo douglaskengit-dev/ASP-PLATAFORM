@@ -1,13 +1,12 @@
 "use client";
 
 /** Ficha da oportunidade no Follow-up (CRM): situação (etapa, ganha,
- * perdida), próxima ação, atividades, dados, documentos e histórico. */
+ * perdida), próxima ação, atividades, dados e histórico. */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/app/components/Modal";
-import DocumentosProcesso from "./DocumentosProcesso";
 import CampoTitulo from "./CampoTitulo";
 import { MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
-import { etapaTemMedidorSedimento, type EtapaFluxo } from "@/lib/processos/etapas";
+import type { EtapaFluxo } from "@/lib/processos/etapas";
 import { dataBr, moeda, valorParaCampo, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "./tipos";
 import s from "./crm.module.css";
 
@@ -52,7 +51,7 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
         </p>
         {!op.migrado && (
           <p className={s.aviso} role="status">
-            O Follow-up novo precisa da migração do CRM no Supabase. Até ela rodar, só os documentos funcionam.
+            O Follow-up novo precisa da migração do CRM no Supabase. Até ela rodar, os dados novos da oportunidade não salvam.
           </p>
         )}
         {erro && <p className={s.erro} role="alert">{erro}</p>}
@@ -61,13 +60,6 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
         <ProximaAcao op={op} hoje={hoje} ocupado={ocupado} acao={acao} />
         <Atividades op={op} hoje={hoje} />
         <Dados op={op} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} ocupado={ocupado} acao={acao} />
-
-        {etapaTemMedidorSedimento(nomeEtapa) && (
-          <section className={s.bloco}>
-            <DocumentosProcesso p={op} nomeEtapa={nomeEtapa} onMudou={() => onMudou()} />
-          </section>
-        )}
-
         <Historico op={op} etapas={etapas} usuarios={usuarios} />
 
         <div className={s.rodapeFicha}>

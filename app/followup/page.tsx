@@ -6,7 +6,7 @@
  * perdida. Quadro (kanban) com uma coluna por etapa + Ganhas + Perdidas:
  * arrastar o card move a oportunidade (pede a data; ganha pede a data e
  * perdida pede o motivo). O card abre a ficha (próxima ação, atividades,
- * dados, Medidor de Sedimento na Visita técnica). Admin, Gerência e Comercial.
+ * dados e histórico). Admin, Gerência e Comercial.
  */
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
