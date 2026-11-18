@@ -398,7 +398,7 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 - **Mover**: arraste o card para outra coluna e informe a data. Em Ganhas, informe a data do fechamento; em Perdidas, o motivo da perda. Arrastar uma oportunidade fechada para uma etapa a reabre.
 - **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades (ligação, e-mail, WhatsApp, reunião, visita, anotação) e o histórico.
 - **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.
-- **Filtros**: busca, cliente, responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
+- **Filtros**: busca, cliente, procedimento (ou "Outros"), responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
 - Depois do ganho, abra o projeto em Projetos para seguir com as OSs.
 
 **Arquivos**: reúne os documentos de todos os projetos (medições, relatórios, versões assinadas, laudos, RDOs). Filtre por tipo e baixe um ZIP organizado em pastas por cliente, projeto e OS.
