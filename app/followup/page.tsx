@@ -35,6 +35,8 @@ function FollowupConteudo() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const alvo = searchParams.get("processo");
+  // Ficha do cliente: ?nova=1&cliente=<id> abre "Nova oportunidade" com o cliente.
+  const novaCliente = searchParams.get("nova") === "1" ? searchParams.get("cliente") || "" : null;
   const [ops, setOps] = useState<Oportunidade[]>([]);
   const [etapas, setEtapas] = useState<EtapaFluxo[]>([]);
   const [orgaos, setOrgaos] = useState<Orgao[]>([]);
@@ -89,6 +91,7 @@ function FollowupConteudo() {
 
   // Vindo do Dashboard ou de uma notificação (?processo=id): abre a ficha.
   useEffect(() => { if (alvo && !carregando) setAberta(alvo); }, [alvo, carregando]);
+  useEffect(() => { if (novaCliente !== null && !carregando) setNova(true); }, [novaCliente, carregando]);
   function fecharFicha() {
     setAberta(null);
     if (alvo) router.replace("/followup");
@@ -298,12 +301,19 @@ function FollowupConteudo() {
           onFechar={fecharFicha} onMudou={carregar} />
       )}
       {nova && (
-        <NovaOportunidade orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} eu={eu} hoje={hoje} onFechar={() => setNova(false)}
-          onCriada={async (id) => { setNova(false); await carregar(); setAberta(id); }} onNovoOrgao={carregar} />
+        <NovaOportunidade orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} eu={eu} hoje={hoje}
+          clienteInicial={novaCliente || ""}
+          onFechar={() => { setNova(false); if (novaCliente !== null) router.replace("/followup"); }}
+          onCriada={async (id) => { setNova(false); if (novaCliente !== null) router.replace("/followup"); await carregar(); setAberta(id); }}
+          onNovoOrgao={carregar} />
       )}
       {movimento && (
         <ConfirmarMovimento m={movimento} etapas={etapas} hoje={hoje} onFechar={() => setMovimento(null)}
-          onFeito={async () => { setMovimento(null); await carregar(); }} />
+          onFeito={async () => {
+            const ganha = movimento.destino.resultado === "ganha" ? movimento.op.id : null;
+            setMovimento(null); await carregar();
+            if (ganha) setAberta(ganha);
+          }} />
       )}
     </div>
   );
@@ -365,11 +375,11 @@ function ConfirmarMovimento({ m, etapas, hoje, onFechar, onFeito }: { m: Movimen
   );
 }
 
-function NovaOportunidade({ orgaos, usuarios, procedimentos, eu, hoje, onFechar, onCriada, onNovoOrgao }: {
-  orgaos: Orgao[]; usuarios: Usuario[]; procedimentos: Procedimento[]; eu: string; hoje: string;
+function NovaOportunidade({ orgaos, usuarios, procedimentos, eu, hoje, clienteInicial, onFechar, onCriada, onNovoOrgao }: {
+  orgaos: Orgao[]; usuarios: Usuario[]; procedimentos: Procedimento[]; eu: string; hoje: string; clienteInicial: string;
   onFechar: () => void; onCriada: (id: string) => void; onNovoOrgao: () => Promise<void>;
 }) {
-  const [f, setF] = useState({ titulo: "", procedimentoId: "", orgaoId: "", valor: "", origem: "", responsavelId: eu, previsaoFechamento: "", proximaAcao: "", proximaAcaoEm: "" });
+  const [f, setF] = useState({ titulo: "", procedimentoId: "", orgaoId: clienteInicial, valor: "", origem: "", responsavelId: eu, previsaoFechamento: "", proximaAcao: "", proximaAcaoEm: "" });
   const [modalOrgao, setModalOrgao] = useState(false);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);

@@ -1,9 +1,12 @@
 "use client";
 
 /** Ficha da oportunidade no Follow-up (CRM): situação (etapa, ganha,
- * perdida), próxima ação, atividades, dados e histórico. */
+ * perdida — a ganha abre o projeto), próxima ação, atividades, versões da
+ * proposta, dados e histórico. */
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import Modal from "@/app/components/Modal";
+import Propostas from "./Propostas";
 import CampoTitulo from "./CampoTitulo";
 import { MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
@@ -59,6 +62,7 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
         <Situacao op={op} etapas={etapas} hoje={hoje} ocupado={ocupado} acao={acao} />
         <ProximaAcao op={op} hoje={hoje} ocupado={ocupado} acao={acao} />
         <Atividades op={op} hoje={hoje} />
+        <Propostas processoId={op.id} hoje={hoje} onValorMudou={onMudou} />
         <Dados op={op} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} ocupado={ocupado} acao={acao} />
         <Historico op={op} etapas={etapas} usuarios={usuarios} />
 
@@ -98,6 +102,13 @@ function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapa
           {op.resultado === "perdida" && (
             <span className="detalhe">Motivo: {rotuloMotivoPerda(op.motivo_perda) || "—"}{op.motivo_perda_detalhe ? ` — ${op.motivo_perda_detalhe}` : ""}</span>
           )}
+          {op.resultado === "ganha" && (op.projeto ? (
+            <Link className="btn-dl btn-sec" href={`/projetos/${op.projeto.id}`}>📁 Projeto {op.projeto.codigo || ""}</Link>
+          ) : op.migrado && (
+            <Link className="btn-azul" style={{ textDecoration: "none" }}
+              href={`/projetos?novo=1${op.orgao?.id ? `&cliente=${op.orgao.id}` : ""}&processo=${op.id}`}
+              title="Abrir o projeto desta oportunidade, com o cliente já escolhido">📁 Abrir projeto</Link>
+          ))}
           <button type="button" className="btn-doc" disabled={ocupado}
             onClick={() => acao(() => enviar(`/api/processos/${op.id}/resultado`, "POST", { resultado: "aberta" }))}>
             Reabrir

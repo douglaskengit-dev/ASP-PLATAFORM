@@ -39,6 +39,16 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
 
   const processos = (data || []).map((p: any) => processoParaApi(p, ehAdmin));
+  // Projeto aberto a partir da oportunidade ganha: código para o link.
+  const idsProjeto = Array.from(new Set(processos.map((p) => p.projeto_id).filter(Boolean))) as string[];
+  if (idsProjeto.length) {
+    const { data: projs } = await supabase.from("gp_projetos").select("id, codigo_projeto, pedido_compra").in("id", idsProjeto);
+    const mapa = new Map(((projs || []) as any[]).map((x) => [x.id, x]));
+    for (const p of processos) {
+      const x = p.projeto_id ? mapa.get(p.projeto_id) : null;
+      if (x) p.projeto = { id: x.id, codigo: x.codigo_projeto || x.pedido_compra || null };
+    }
+  }
   return NextResponse.json({
     ok: true, processos, etapas: ETAPAS_FLUXO, souAdmin: ehAdmin, perfil: profile.perfil, eu: profile.id,
     hoje: hojeBrasil(), migrado: processos.length === 0 || processos.every((p) => p.migrado),

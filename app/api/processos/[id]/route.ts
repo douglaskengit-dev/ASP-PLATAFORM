@@ -73,6 +73,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   for (const info of Object.values(processo.documentos || {}) as { arquivo?: string }[]) {
     if (info?.arquivo?.startsWith(`${params.id}/`)) caminhos.push(info.arquivo);
   }
+  // Arquivos das versões da proposta (antes da migração: nenhum).
+  const { data: propostas } = await supabase.from("gp_processo_propostas").select("arquivo").eq("processo_id", params.id);
+  for (const pr of (propostas || []) as { arquivo: string | null }[]) if (pr.arquivo) caminhos.push(pr.arquivo);
   await removerArquivos(caminhos);
 
   // ofícios vinculados voltam ao drop

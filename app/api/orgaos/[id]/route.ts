@@ -6,6 +6,7 @@ import { TipoEnte } from "@/lib/orgaos/types";
 import { mesmaVersao } from "@/lib/asp/usuario-api";
 import { cidadesDaUf, clientesCadastrados, projetosParaExclusao } from "@/lib/orgaos/validacao-api";
 import { situacaoRecorrencia } from "@/lib/asp/recorrencia-api";
+import { podeUsarCrm } from "@/lib/validacao/crm";
 import {
   cnpjRepetido, conflitoRestauracao, decisaoExcluirCliente, mesclar, msgVersaoCliente, normalizarCidade, normalizarCnpj, normalizarEspacos,
   primeiroErro, recorrenciaParaGravar, ROTULOS_CLIENTE, ROTULOS_RECORRENCIA, temErros, validarCliente, validarRecorrencia,
@@ -45,9 +46,11 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const ehAdmin = profile.perfil === "admin";
   // D41: também traz o status da análise de TR vinculada (em_analise =
   // rascunho pronto para revisar, concluida = relatório já gerado).
+  // "*": campos do CRM (resultado, valor, próxima ação...) sem quebrar antes
+  // da migração.
   const campos = ehAdmin
-    ? "id, titulo, etapa, arquivos, documentos, proposta_aprovada, historico_etapas, cadastro_tr_id, created_at, criador:gp_profiles!gp_processos_criado_por_fkey(id, nome_completo, email), cadastro_tr:gp_cadastros_tr(status)"
-    : "id, titulo, etapa, arquivos, documentos, proposta_aprovada, historico_etapas, cadastro_tr_id, created_at, cadastro_tr:gp_cadastros_tr(status)";
+    ? "*, criador:gp_profiles!gp_processos_criado_por_fkey(id, nome_completo, email), cadastro_tr:gp_cadastros_tr(status)"
+    : "*, cadastro_tr:gp_cadastros_tr(status)";
 
   const { data: processos, error: erroProcessos } = await supabase
     .from("gp_processos")
@@ -69,6 +72,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     cadastro_tr_status: p.cadastro_tr?.status || null,
     proposta_aprovada: !!p.proposta_aprovada,
     historico_etapas: p.historico_etapas || [],
+    // CRM (ficha 360° do cliente)
+    resultado: p.resultado || "aberta",
+    resultado_em: p.resultado_em || null,
+    valor: p.valor == null ? null : Number(p.valor),
+    responsavel_id: p.responsavel_id || null,
+    proxima_acao: p.proxima_acao || null,
+    proxima_acao_em: p.proxima_acao_em || null,
+    projeto_id: p.projeto_id || null,
     criado_por: ehAdmin
       ? { id: p.criador?.id ?? null, nome: p.criador?.nome_completo || p.criador?.email || "—" }
       : null,
@@ -80,8 +91,26 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     try { recorrencia = (await situacaoRecorrencia([params.id])).get(params.id)?.proximo || null; } catch { /* complementar */ }
   }
 
+  // Ficha 360°: últimas atividades do Follow-up com o cliente (só para quem
+  // usa o CRM; antes da migração, nenhuma).
+  const crm = podeUsarCrm(profile.perfil);
+  let atividades: any[] = [];
+  if (crm && processosMapeados.length) {
+    const titulos = new Map(processosMapeados.map((p) => [p.id, p.titulo]));
+    const { data: ats } = await supabase.from("gp_processo_atividades")
+      .select("id, processo_id, tipo, descricao, data, autor:gp_profiles!gp_processo_atividades_criado_por_fkey(nome_completo)")
+      .in("processo_id", processosMapeados.map((p) => p.id).slice(0, 200))
+      .order("data", { ascending: false }).order("criado_em", { ascending: false }).limit(10);
+    atividades = ((ats || []) as any[]).map((a) => ({
+      id: a.id, processo_id: a.processo_id, processo: titulos.get(a.processo_id) || "", tipo: a.tipo,
+      descricao: a.descricao, data: a.data, autor: a.autor?.nome_completo || null,
+    }));
+  }
+
   return NextResponse.json({
     ok: true,
+    crm,
+    atividades,
     recorrencia,
     orgao: { ...orgao, contatos: contatos || [] },
     processos: processosMapeados,

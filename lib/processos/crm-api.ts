@@ -103,6 +103,8 @@ export function processoParaApi(p: any, ehAdmin: boolean) {
     proxima_acao: p.proxima_acao || null,
     proxima_acao_em: p.proxima_acao_em || null,
     procedimento_id: p.procedimento_id || null,
+    projeto_id: p.projeto_id || null,
+    projeto: null as { id: string; codigo: string | null } | null,
     migrado: p.resultado !== undefined,
     criado_por: ehAdmin
       ? { id: p.criador?.id ?? p.criado_por, nome: p.criador?.nome_completo || p.criador?.email || "—" }

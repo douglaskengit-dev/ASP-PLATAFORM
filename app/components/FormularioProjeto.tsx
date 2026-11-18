@@ -84,9 +84,11 @@ function useVerificacao(codigo: string, clienteId: string, excluirId?: string) {
   return ctx;
 }
 
-export default function FormularioProjeto({ modo, projetoId, inicial, clienteAtualNome, onSalvo, onCancelar }: {
+export default function FormularioProjeto({ modo, projetoId, processoId, inicial, clienteAtualNome, onSalvo, onCancelar }: {
   modo: "novo" | "editar";
   projetoId?: string;
+  /** Novo projeto aberto a partir de uma oportunidade ganha do Follow-up. */
+  processoId?: string | null;
   inicial?: Partial<DadosFormProjeto>;
   /** Nome do cliente atual (edição) — aparece mesmo se ele foi para a lixeira. */
   clienteAtualNome?: string | null;
@@ -310,7 +312,10 @@ Salvar e atualizar o responsável desses projetos?`)) await salvarContato(true);
       const r = await fetch(modo === "novo" ? "/api/projetos" : `/api/projetos/${projetoId}`, {
         method: modo === "novo" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, usarContato: usarContato === true, contatoId: contatoUsado, comInspecaoPadrao: inspecaoEfetiva }),
+        body: JSON.stringify({
+          ...form, usarContato: usarContato === true, contatoId: contatoUsado, comInspecaoPadrao: inspecaoEfetiva,
+          ...(modo === "novo" && processoId ? { processoId } : {}),
+        }),
       });
       const d = await r.json();
       if (!r.ok) {

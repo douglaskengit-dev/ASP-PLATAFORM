@@ -91,7 +91,9 @@ Todo projeto começa por um cliente cadastrado; cadastre-o uma vez e reaproveite
 
 O sistema bloqueia CNPJ inválido ou já cadastrado e avisa quando a razão social é parecida com a de outro cliente. A cidade é padronizada ao salvar; se já existir com outra grafia na mesma UF, aparece o botão **Usar "…"**.
 
-**Cliente recorrente**: o primeiro projeto vem com inspeção e os seguintes vêm sem inspeção. O Comercial recebe um aviso 30 dias antes de vencer o próximo serviço, contado a partir do fim da última execução.
+**Cliente recorrente**: o primeiro projeto vem com inspeção e os seguintes vêm sem inspeção. O Comercial recebe um aviso 30 dias antes de vencer o próximo serviço, contado a partir do fim da última execução. Junto com o aviso, o sistema abre uma oportunidade de renovação no Follow-up (Prospecção, origem "Cliente recorrente", com o procedimento do último serviço e a próxima ação para o dia), a menos que o cliente já tenha uma oportunidade em aberto.
+
+**Ficha do cliente**: para o Comercial, a Gerência e a Administração, mostra também o lado comercial: oportunidades em aberto, ganhas e perdidas (com valores e a taxa de ganho), a lista das oportunidades com a próxima ação, as últimas atividades e o botão **+ Nova oportunidade**, que já abre com o cliente escolhido.
 
 ### Contatos
 
@@ -396,10 +398,11 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 
 - **Título**: escolha o Procedimento do Catálogo (o título fica com o nome dele) ou "Outros" para escrever outra descrição.
 - **Mover**: arraste o card para outra coluna e informe a data. Em Ganhas, informe a data do fechamento; em Perdidas, o motivo da perda. Arrastar uma oportunidade fechada para uma etapa a reabre.
-- **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades (ligação, e-mail, WhatsApp, reunião, visita, anotação) e o histórico.
+- **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades (ligação, e-mail, WhatsApp, reunião, visita, anotação), as versões da proposta e o histórico.
 - **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.
 - **Filtros**: busca, cliente, procedimento (ou "Outros"), responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
-- Depois do ganho, abra o projeto em Projetos para seguir com as OSs.
+- **Propostas**: em **+ Nova versão**, informe a data de envio, o valor, uma observação e, se quiser, o arquivo (PDF, Word ou Excel, até 20 MB). A versão mais nova com valor passa a ser o valor da oportunidade.
+- **Ganho → projeto**: na oportunidade ganha, **Abrir projeto** abre o cadastro do projeto com o cliente já escolhido. Depois de salvar, a ficha mostra o link para o projeto.
 
 **Arquivos**: reúne os documentos de todos os projetos (medições, relatórios, versões assinadas, laudos, RDOs). Filtre por tipo e baixe um ZIP organizado em pastas por cliente, projeto e OS.
 
