@@ -152,6 +152,49 @@ export function validarAtividade(b: Record<string, unknown>, hoje: string): { ti
   return { tipo: tipo as TipoAtividade, data, descricao };
 }
 
+/** Arquivo da proposta: extensões aceitas e tamanho máximo. */
+export const EXTENSOES_PROPOSTA = ["pdf", "docx", "doc", "xlsx", "xls"] as const;
+export const TAM_MAX_PROPOSTA = 20 * 1024 * 1024;
+export const TAM_OBS_PROPOSTA = 2000;
+
+/** Nova versão da proposta: data de envio (até hoje), valor e observação
+ *  opcionais. O arquivo é conferido à parte (validarArquivoProposta). */
+export function validarProposta(b: Record<string, unknown>, hoje: string): { data: string; valor: number | null; observacao: string | null } | { erro: string } {
+  const data = typeof b.data === "string" ? b.data : "";
+  if (!diaValido(data)) return { erro: "Informe a data da proposta." };
+  if (data > hoje) return { erro: "A data da proposta não pode ser futura." };
+  const valor = lerValorMonetario(b.valor);
+  if (valor !== null && (Number.isNaN(valor) || valor < 0 || valor > VALOR_MAXIMO)) return { erro: "Valor da proposta inválido." };
+  const observacao = typeof b.observacao === "string" ? b.observacao.trim() : "";
+  if (observacao.length > TAM_OBS_PROPOSTA) return { erro: `Observação muito longa (máximo ${TAM_OBS_PROPOSTA} caracteres).` };
+  if (valor === null && !observacao && !b.temArquivo) return { erro: "Informe o valor, anexe o arquivo ou escreva uma observação." };
+  return { data, valor, observacao: observacao || null };
+}
+
+export function validarArquivoProposta(nome: string, tamanho: number): string | null {
+  const ext = (nome.split(".").pop() || "").toLowerCase();
+  if (!(EXTENSOES_PROPOSTA as readonly string[]).includes(ext)) return "Anexe a proposta em PDF, Word ou Excel.";
+  if (tamanho > TAM_MAX_PROPOSTA) return "Arquivo muito grande (máximo 20 MB).";
+  if (tamanho === 0) return "O arquivo está vazio.";
+  return null;
+}
+
+/** Resumo comercial do cliente (ficha 360°): oportunidades em aberto, ganhas
+ *  e perdidas, com valores, e a taxa de ganho (ganhas / fechadas). */
+export function resumoComercialCliente(ops: { resultado?: string | null; valor?: number | null }[]) {
+  const soma = (l: typeof ops) => l.reduce((a, o) => a + (Number(o.valor) || 0), 0);
+  const abertas = ops.filter((o) => (o.resultado || "aberta") === "aberta");
+  const ganhas = ops.filter((o) => o.resultado === "ganha");
+  const perdidas = ops.filter((o) => o.resultado === "perdida");
+  const fechadas = ganhas.length + perdidas.length;
+  return {
+    abertas: abertas.length, valorAberto: soma(abertas),
+    ganhas: ganhas.length, valorGanho: soma(ganhas),
+    perdidas: perdidas.length,
+    taxaGanho: fechadas ? ganhas.length / fechadas : null,
+  };
+}
+
 /** Situação da próxima ação de uma oportunidade aberta. */
 export type SituacaoAcao = "atrasada" | "hoje" | "futura" | "sem_acao";
 export function situacaoProximaAcao(p: { resultado?: string | null; proxima_acao_em?: string | null }, hoje: string): SituacaoAcao | null {

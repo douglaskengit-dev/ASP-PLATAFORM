@@ -11,10 +11,15 @@
  *    vencimento) decide quem notifica — duas chamadas ao mesmo tempo, só uma
  *    insere; a outra recebe 23505 e não notifica.
  *
+ *  · Junto com o lembrete, abre uma oportunidade no Follow-up (Prospecção,
+ *    origem "Cliente recorrente", próxima ação para hoje), se o cliente não
+ *    tiver nenhuma em aberto. O título é o procedimento do último serviço.
+ *
  *  Sem a migração (colunas/tabela), nada quebra: nenhum cliente é
  *  recorrente e os lembretes não são gerados. */
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { enviarPushParaUsuarios } from "@/lib/push/send";
+import { faltaColunaProcedimento } from "@/lib/processos/crm-api";
 import {
   diaBrasilia, hojeBrasil, lembreteDevido, proximoServico, type OSRecorrencia, type ProximoServico,
 } from "@/lib/validacao";
@@ -90,7 +95,7 @@ export async function situacaoRecorrencia(ids?: string[], hoje: string = hojeBra
 const fmt = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 
 /** Texto do lembrete (in-app e push). */
-export function textoLembrete(s: SituacaoCliente): { titulo: string; mensagem: string } {
+export function textoLembrete(s: SituacaoCliente, comOportunidade = false): { titulo: string; mensagem: string } {
   const p = s.proximo;
   const venc = p.vencimento ? fmt(p.vencimento) : "—";
   const titulo = p.status === "vencido"
@@ -98,8 +103,54 @@ export function textoLembrete(s: SituacaoCliente): { titulo: string; mensagem: s
     : `Próximo serviço recorrente em breve — ${s.razao_social}`;
   const mensagem = `${s.razao_social}: serviço a cada ${s.periodicidade_meses} meses; última execução em `
     + `${p.ultimaExecucao ? fmt(p.ultimaExecucao) : "—"}; próximo vence em ${venc}`
-    + `${p.status === "vencido" ? " (vencido)" : ""}. Abra um novo projeto para o cliente.`;
+    + `${p.status === "vencido" ? " (vencido)" : ""}. `
+    + (comOportunidade ? "Uma oportunidade foi aberta no Follow-up para a renovação." : "Abra um novo projeto para o cliente.");
   return { titulo, mensagem };
+}
+
+/** Abre a oportunidade de renovação no Follow-up. Não abre se o cliente já
+ *  tem oportunidade em aberto, nem antes da migração do CRM. Devolve o id. */
+export async function criarOportunidadeRecorrencia(s: SituacaoCliente, hoje: string = hojeBrasil()): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  try {
+    const { data: abertas, error } = await admin.from("gp_processos").select("id")
+      .eq("orgao_id", s.id).eq("resultado", "aberta").limit(1);
+    if (error || (abertas || []).length) return null;
+
+    // Procedimento do último serviço do cliente (título da oportunidade).
+    let proc: { id: string; nome: string } | null = null;
+    const { data: projs } = await admin.from("gp_projetos").select("id").eq("cliente_id", s.id).is("excluido_em", null);
+    const idsProj = ((projs || []) as any[]).map((p) => p.id as string).slice(0, 100);
+    if (idsProj.length) {
+      const { data: os } = await admin.from("gp_inspecoes").select("procedimento").in("projeto_id", idsProj)
+        .is("excluido_em", null).not("procedimento", "is", null).order("criado_em", { ascending: false }).limit(1).maybeSingle();
+      if (os?.procedimento) {
+        const { data: pr } = await admin.from("gp_procedimentos").select("id, nome").eq("codigo", os.procedimento).maybeSingle();
+        if (pr) proc = pr as { id: string; nome: string };
+      }
+    }
+    // Responsável: o da última oportunidade ganha do cliente.
+    const { data: ganha } = await admin.from("gp_processos").select("responsavel_id")
+      .eq("orgao_id", s.id).eq("resultado", "ganha").order("resultado_em", { ascending: false }).limit(1).maybeSingle();
+
+    const venc = s.proximo.vencimento;
+    const linha: Record<string, unknown> = {
+      titulo: proc?.nome || `Renovação — ${s.razao_social}`.slice(0, 200), procedimento_id: proc?.id || null,
+      orgao_id: s.id, etapa: 0, resultado: "aberta", origem: "recorrencia",
+      responsavel_id: (ganha as any)?.responsavel_id || null,
+      previsao_fechamento: venc && venc >= hoje ? venc : null,
+      proxima_acao: "Contatar o cliente para renovar o serviço recorrente", proxima_acao_em: hoje,
+      documentos: {}, arquivos: {}, historico_etapas: [],
+    };
+    let { data, error: eIns } = await admin.from("gp_processos").insert(linha).select("id").single();
+    if (eIns && faltaColunaProcedimento(eIns)) {
+      delete linha.procedimento_id;
+      ({ data, error: eIns } = await admin.from("gp_processos").insert(linha).select("id").single());
+    }
+    return eIns || !data ? null : (data as any).id;
+  } catch {
+    return null;
+  }
 }
 
 let ultimaGeracao = 0;
@@ -128,9 +179,11 @@ export async function gerarLembretesRecorrencia(opts: { forcar?: boolean; hoje?:
       .select("id").maybeSingle();
     if (error || !novo) continue;   // 23505 (já lembrado) ou tabela ausente
     gerados++;
+    const processoId = await criarOportunidadeRecorrencia(s);
+    if (processoId) await admin.from("gp_lembretes_recorrencia").update({ processo_id: processoId }).eq("id", novo.id);
     if (!destinatarios.length) continue;
-    const { titulo, mensagem } = textoLembrete(s);
-    const link = `/orgaos/${s.id}`;
+    const { titulo, mensagem } = textoLembrete(s, !!processoId);
+    const link = processoId ? `/followup?processo=${processoId}` : `/orgaos/${s.id}`;
     await admin.from("gp_notificacoes").insert(destinatarios.map((id) => ({
       usuario_id: id, tipo: TIPO_NOTIFICACAO_RECORRENCIA, titulo, mensagem, link,
     })));

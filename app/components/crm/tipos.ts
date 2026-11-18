@@ -30,6 +30,9 @@ export interface Oportunidade {
   proxima_acao: string | null;
   proxima_acao_em: string | null;
   procedimento_id: string | null;
+  /** Projeto aberto a partir da oportunidade ganha. */
+  projeto_id: string | null;
+  projeto: { id: string; codigo: string | null } | null;
   migrado: boolean;
   criado_por: { id: string; nome: string } | null;
 }

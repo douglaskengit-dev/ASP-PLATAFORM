@@ -77,6 +77,8 @@ export default function ProjetosPage() {
   const [modalAberto, setModalAberto] = useState(false);
   /** Cliente já escolhido ao abrir o modal (link "+ Novo projeto" do cliente/Dashboard). */
   const [clienteInicial, setClienteInicial] = useState<string | null>(null);
+  /** Oportunidade ganha do Follow-up que abriu o modal (?processo=). */
+  const [processoOrigem, setProcessoOrigem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [verLixeira, setVerLixeira] = useState(false);
   // Filtros, ordenação e agrupamento da lista.
@@ -102,11 +104,13 @@ export default function ProjetosPage() {
   useEffect(() => { carregar(verLixeira); }, [verLixeira]);
 
   // /projetos?novo=1&cliente=<id>: abre "Abrir novo projeto" com o cliente
-  // escolhido (lembrete de serviço recorrente, página do cliente).
+  // escolhido (lembrete de serviço recorrente, página do cliente). Com
+  // &processo=<id> (oportunidade ganha no Follow-up), liga os dois.
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (sp.get("novo") !== "1") return;
     setClienteInicial(sp.get("cliente"));
+    setProcessoOrigem(sp.get("processo"));
     setModalAberto(true);
     window.history.replaceState(null, "", window.location.pathname);
   }, []);
@@ -126,6 +130,7 @@ export default function ProjetosPage() {
   function abrirModal() {
     setErro(null);
     setClienteInicial(null);
+    setProcessoOrigem(null);
     setModalAberto(true);
   }
 
@@ -324,6 +329,7 @@ export default function ProjetosPage() {
         <Modal titulo="Abrir novo projeto" onFechar={() => setModalAberto(false)}>
           <FormularioProjeto
             modo="novo"
+            processoId={processoOrigem}
             inicial={clienteInicial ? { clienteId: clienteInicial } : undefined}
             onCancelar={() => setModalAberto(false)}
             onSalvo={(projeto) => router.push(`/projetos/${projeto.id}`)}

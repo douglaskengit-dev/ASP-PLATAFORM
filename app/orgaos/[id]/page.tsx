@@ -11,6 +11,8 @@ import {
 } from "@/app/components/FormularioOrgao";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import AvisoCliente from "@/app/components/AvisoCliente";
+import { ETAPAS_FLUXO } from "@/lib/processos/etapas";
+import { resumoComercialCliente, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
 import {
   mesclar, normalizarCidade, normalizarCnpj, normalizarEspacos, novoResultado, ResultadoValidacao, ROTULOS_CLIENTE, ROTULOS_RECORRENCIA,
   ROTULO_STATUS_RECORRENCIA, temErros, validarCliente, validarContato, validarRecorrencia, type ProximoServico,
@@ -23,6 +25,17 @@ interface ProjetoCliente {
   cliente: { id: string } | null;
   inspecoes: { id: string; fase: number; com_inspecao?: boolean }[];
 }
+
+/** Oportunidade do Follow-up deste cliente (ficha 360°). */
+interface OportunidadeCliente {
+  id: string; titulo: string; data: string; etapa: number;
+  resultado: "aberta" | "ganha" | "perdida"; resultado_em: string | null; valor: number | null;
+  proxima_acao: string | null; proxima_acao_em: string | null; projeto_id: string | null;
+}
+interface AtividadeCliente { id: string; processo_id: string; processo: string; tipo: string; descricao: string; data: string; autor: string | null }
+
+const moedaBr = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const hojeSP = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
 /** Chip de cada status do próximo serviço (paleta única de status). */
 const CHIP_RECORRENCIA: Record<string, string> = {
@@ -46,6 +59,9 @@ export default function OrgaoDetalhePage() {
   const [erro, setErro] = useState<string | null>(null);
   const [orgao, setOrgao] = useState<OrgaoComContatos | null>(null);
   const [projetos, setProjetos] = useState<ProjetoCliente[]>([]);
+  const [crm, setCrm] = useState(false);
+  const [oportunidades, setOportunidades] = useState<OportunidadeCliente[]>([]);
+  const [atividades, setAtividades] = useState<AtividadeCliente[]>([]);
   const [podeExcluirContato, setPodeExcluirContato] = useState(false);
 
   const [editando, setEditando] = useState(false);
@@ -118,6 +134,9 @@ export default function OrgaoDetalhePage() {
       if (!resp.ok || !dados.ok) throw new Error(dados.erro || "Falha ao carregar o cliente.");
       setOrgao(dados.orgao);
       setProximo(dados.recorrencia || null);
+      setCrm(!!dados.crm);
+      setOportunidades(dados.processos || []);
+      setAtividades(dados.atividades || []);
       preencherEdicao(dados.orgao);
       setPodeExcluirContato(["admin", "comercial", "gerencia"].includes(dados.perfil));
 
@@ -541,6 +560,8 @@ export default function OrgaoDetalhePage() {
           )}
         </section>
 
+        {crm && <Comercial orgaoId={orgao.id} oportunidades={oportunidades} atividades={atividades} />}
+
         <section className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <h2>Projetos deste cliente ({projetos.length})</h2>
@@ -574,5 +595,95 @@ export default function OrgaoDetalhePage() {
         </section>
       </div>
     </main>
+  );
+}
+
+/** Ficha 360° — o lado comercial do cliente: resumo do Follow-up, as
+ *  oportunidades (abrem a ficha no Follow-up) e as últimas atividades. */
+function Comercial({ orgaoId, oportunidades, atividades }: {
+  orgaoId: string; oportunidades: OportunidadeCliente[]; atividades: AtividadeCliente[];
+}) {
+  const r = resumoComercialCliente(oportunidades);
+  const hoje = hojeSP();
+  const ordenadas = [...oportunidades].sort((a, b) =>
+    Number(a.resultado !== "aberta") - Number(b.resultado !== "aberta")
+    || (b.resultado_em || b.data).localeCompare(a.resultado_em || a.data));
+  const chip = (o: OportunidadeCliente) => (o.resultado === "ganha" ? "chip-sucesso" : o.resultado === "perdida" ? "chip-perigo" : "chip-info");
+  const rotulo = (o: OportunidadeCliente) => (o.resultado === "ganha" ? `Ganha em ${dataBr(o.resultado_em)}`
+    : o.resultado === "perdida" ? `Perdida em ${dataBr(o.resultado_em)}` : (ETAPAS_FLUXO[o.etapa]?.nome || `Etapa ${o.etapa + 1}`));
+  const cartoes = [
+    { rot: "Em aberto", val: `${r.abertas}`, sub: r.valorAberto ? moedaBr(r.valorAberto) : "sem valor" },
+    { rot: "Ganhas", val: `${r.ganhas}`, sub: r.valorGanho ? moedaBr(r.valorGanho) : "—" },
+    { rot: "Perdidas", val: `${r.perdidas}`, sub: "" },
+    { rot: "Taxa de ganho", val: r.taxaGanho == null ? "—" : `${Math.round(r.taxaGanho * 100)}%`, sub: "das fechadas" },
+  ];
+
+  return (
+    <section className="card">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <h2>Comercial (Follow-up)</h2>
+        <Link href={`/followup?nova=1&cliente=${orgaoId}`} className="btn secondary" style={{ display: "inline-block", textDecoration: "none" }}>
+          + Nova oportunidade
+        </Link>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, margin: "8px 0 12px" }}>
+        {cartoes.map((k) => (
+          <div key={k.rot} className="item item-col" style={{ alignItems: "flex-start" }}>
+            <span className="detalhe" style={{ margin: 0 }}>{k.rot}</span>
+            <strong style={{ fontSize: 20 }}>{k.val}</strong>
+            {k.sub && <span className="detalhe" style={{ margin: 0 }}>{k.sub}</span>}
+          </div>
+        ))}
+      </div>
+
+      {ordenadas.length === 0 ? (
+        <p style={{ color: "var(--cinza)", fontSize: 13 }}>Nenhuma oportunidade no Follow-up para este cliente.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {ordenadas.slice(0, 15).map((o) => {
+            const sit = situacaoProximaAcao(o, hoje);
+            return (
+              <Link key={o.id} href={`/followup?processo=${o.id}`} className="item item-col" style={{ textDecoration: "none", color: "inherit" }}>
+                <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 13 }}>{o.titulo}</strong>
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {o.valor != null && <strong style={{ fontSize: 13 }}>{moedaBr(o.valor)}</strong>}
+                    <span className={`chip ${chip(o)}`}>{rotulo(o)}</span>
+                  </span>
+                </div>
+                {o.resultado === "aberta" && (
+                  <span className="detalhe" style={{ margin: 0, color: sit === "atrasada" ? "var(--perigo)" : undefined }}>
+                    {o.proxima_acao
+                      ? `Próxima ação: ${o.proxima_acao} — ${dataBr(o.proxima_acao_em)}${sit === "atrasada" ? " (atrasada)" : ""}`
+                      : "Sem próxima ação"}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+          {ordenadas.length > 15 && <p className="detalhe">E mais {ordenadas.length - 15} no Follow-up.</p>}
+        </div>
+      )}
+
+      {atividades.length > 0 && (
+        <>
+          <h3 style={{ fontSize: 14, margin: "14px 0 6px" }}>Últimas atividades</h3>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            {atividades.map((a) => {
+              const t = TIPOS_ATIVIDADE.find((x) => x.valor === a.tipo);
+              return (
+                <li key={a.id} style={{ fontSize: 13 }}>
+                  <span aria-hidden="true">{t?.icone || "•"}</span>{" "}
+                  <strong>{dataBr(a.data)}</strong> · {t?.rotulo || a.tipo}{a.autor ? ` · ${a.autor}` : ""} ·{" "}
+                  <Link href={`/followup?processo=${a.processo_id}`}>{a.processo}</Link>
+                  <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "var(--texto-suave)" }}>{a.descricao}</div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }

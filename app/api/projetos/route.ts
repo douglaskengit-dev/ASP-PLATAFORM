@@ -51,6 +51,8 @@ interface NovoProjetoBody {
   /** "Usar dados do contato do cliente?" = Sim. */
   usarContato?: boolean;
   contatoId?: string | null;
+  /** Oportunidade ganha do Follow-up que originou o projeto. */
+  processoId?: string | null;
   /** "Haverá inspeção?" — padrão das OSs do projeto. Ausente = a regra do
    *  cliente recorrente (inspecaoPadraoDoProjeto). */
   comInspecaoPadrao?: boolean;
@@ -105,6 +107,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ erro: "Código do projeto: já usado por outro projeto. Atualize a sugestão e tente de novo." }, { status: 409 });
     }
     return NextResponse.json({ erro: error.message }, { status: 500 });
+  }
+  // Veio do Follow-up (oportunidade ganha): liga a oportunidade ao projeto.
+  // Complementar — sem a migração ou sem permissão, o projeto fica aberto.
+  if (typeof body.processoId === "string" && body.processoId) {
+    await supabase.from("gp_processos").update({ projeto_id: data.id, updated_at: new Date().toISOString() })
+      .eq("id", body.processoId).is("projeto_id", null);
   }
   return NextResponse.json({ ok: true, projeto: data, avisos: resultado.avisos });
 }
