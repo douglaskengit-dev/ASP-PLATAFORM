@@ -1,5 +1,4 @@
 /** Tipos e formatação comuns às telas do Follow-up (CRM). */
-import type { ProcessoDocs } from "./DocumentosProcesso";
 
 export interface Orgao { id: string; razao_social: string; tipo_ente?: string; cidade?: string; uf?: string }
 export interface Procedimento { id: string; codigo: string; nome: string; ativo?: boolean }
@@ -10,7 +9,9 @@ export interface EventoHistorico {
   etapa_antiga?: number;
 }
 
-export interface Oportunidade extends ProcessoDocs {
+export interface Oportunidade {
+  id: string;
+  arquivos: string[];
   titulo: string;
   orgao: Orgao | null;
   data: string;

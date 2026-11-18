@@ -25,9 +25,3 @@ export const ETAPAS_FLUXO: EtapaFluxo[] = [
 /** Documentos essenciais anexáveis manualmente ao processo. */
 export const DOCS_FOLLOWUP = ["oficio"] as const;
 
-/** A etapa "Visita técnica" tem a ferramenta Medidor de Sedimento
- * disponível (public/ferramentas/medidor-sedimento.html), embutida por
- * iframe num modal. */
-export function etapaTemMedidorSedimento(nomeEtapa: string | undefined): boolean {
-  return nomeEtapa === "Visita técnica";
-}
