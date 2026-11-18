@@ -56,6 +56,7 @@ function FollowupConteudo() {
   const [busca, setBusca] = useState("");
   const [fCliente, setFCliente] = useState("");
   const [fResp, setFResp] = useState("");
+  const [fProc, setFProc] = useState("");
   const [fAcao, setFAcao] = useState("");
   const [fFechadas, setFFechadas] = useState("90");
 
@@ -105,6 +106,8 @@ function FollowupConteudo() {
     return ops.filter((o) => {
       if (t && !`${o.titulo} ${o.orgao?.razao_social || ""}`.toLowerCase().includes(t)) return false;
       if (fCliente && o.orgao?.id !== fCliente) return false;
+      if (fProc === "outros" && o.procedimento_id) return false;
+      if (fProc && fProc !== "outros" && o.procedimento_id !== fProc) return false;
       if (fResp === "eu" && o.responsavel_id !== eu) return false;
       if (fResp === "ninguem" && o.responsavel_id) return false;
       if (fResp && fResp !== "eu" && fResp !== "ninguem" && o.responsavel_id !== fResp) return false;
@@ -112,8 +115,13 @@ function FollowupConteudo() {
       if (o.resultado !== "aberta" && corteFechadas && (o.resultado_em || o.atualizado_em.slice(0, 10)) < corteFechadas) return false;
       return true;
     });
-  }, [ops, busca, fCliente, fResp, fAcao, eu, hoje, corteFechadas]);
-  const temFiltro = !!(busca || fCliente || fResp || fAcao || fFechadas !== "90");
+  }, [ops, busca, fCliente, fProc, fResp, fAcao, eu, hoje, corteFechadas]);
+  const temFiltro = !!(busca || fCliente || fProc || fResp || fAcao || fFechadas !== "90");
+  // Procedimentos ativos e os desativados que ainda têm oportunidade.
+  const procsFiltro = useMemo(() => {
+    const usados = new Set(ops.map((o) => o.procedimento_id).filter(Boolean));
+    return procedimentos.filter((p) => p.ativo !== false || usados.has(p.id));
+  }, [procedimentos, ops]);
 
   const abertas = ops.filter((o) => o.resultado === "aberta");
   const resumo = {
@@ -184,6 +192,14 @@ function FollowupConteudo() {
           </select>
         </label>
         <label className={s.campo}>
+          <span>Procedimento</span>
+          <select value={fProc} onChange={(e) => setFProc(e.target.value)}>
+            <option value="">Todos</option>
+            {procsFiltro.map((p) => <option key={p.id} value={p.id}>{p.nome}{p.ativo === false ? " (desativado)" : ""}</option>)}
+            <option value="outros">Outros (sem procedimento)</option>
+          </select>
+        </label>
+        <label className={s.campo}>
           <span>Responsável</span>
           <select value={fResp} onChange={(e) => setFResp(e.target.value)}>
             <option value="">Todos</option>
@@ -212,7 +228,7 @@ function FollowupConteudo() {
         </label>
         {temFiltro && (
           <button type="button" className="btn-doc" style={{ alignSelf: "flex-end" }}
-            onClick={() => { setBusca(""); setFCliente(""); setFResp(""); setFAcao(""); setFFechadas("90"); }}>Limpar</button>
+            onClick={() => { setBusca(""); setFCliente(""); setFProc(""); setFResp(""); setFAcao(""); setFFechadas("90"); }}>Limpar</button>
         )}
       </div>
 
