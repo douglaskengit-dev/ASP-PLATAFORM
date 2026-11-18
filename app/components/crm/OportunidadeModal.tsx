@@ -7,7 +7,7 @@ import Modal from "@/app/components/Modal";
 import DocumentosProcesso from "./DocumentosProcesso";
 import CampoTitulo from "./CampoTitulo";
 import { MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
-import type { EtapaFluxo } from "@/lib/processos/etapas";
+import { etapaTemMedidorSedimento, type EtapaFluxo } from "@/lib/processos/etapas";
 import { dataBr, moeda, valorParaCampo, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "./tipos";
 import s from "./crm.module.css";
 
@@ -62,10 +62,11 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
         <Atividades op={op} hoje={hoje} />
         <Dados op={op} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} ocupado={ocupado} acao={acao} />
 
-        <section className={s.bloco}>
-          <h3>Documentos</h3>
-          <DocumentosProcesso p={op} nomeEtapa={nomeEtapa} onMudou={() => onMudou()} />
-        </section>
+        {etapaTemMedidorSedimento(nomeEtapa) && (
+          <section className={s.bloco}>
+            <DocumentosProcesso p={op} nomeEtapa={nomeEtapa} onMudou={() => onMudou()} />
+          </section>
+        )}
 
         <Historico op={op} etapas={etapas} usuarios={usuarios} />
 
