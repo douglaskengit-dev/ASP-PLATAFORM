@@ -11,6 +11,7 @@
  * aberto, ganha ou perdida (resultado_em = dia do fechamento).
  * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
+import { rotuloMotivoPerda, rotuloOrigem } from "../validacao/crm";
 import { diaBrasilia, fimDaOS } from "../validacao";
 import {
   diferencaDias, estatistica, intervaloDoPeriodo, montarRecorrencia, noIntervalo, porChave,
@@ -31,6 +32,13 @@ export interface ProcessoBruto {
   resultado_em?: string | null;
   /** Procedimento do título (Catálogo). Nulo = "Outros" ou antes da migração. */
   procedimento_id?: string | null;
+  /** Dados da oportunidade (CRM). Ausentes antes da migração. */
+  valor?: number | null;
+  origem?: string | null;
+  motivo_perda?: string | null;
+  previsao_fechamento?: string | null;
+  /** Projeto aberto a partir da oportunidade ganha (Abrir projeto). */
+  projeto_id?: string | null;
 }
 
 const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
@@ -60,7 +68,21 @@ export interface PainelComercial {
     parados: number;
     projetosNovos: { periodo: number; anterior: number; variacao: number | null; clientesNovos: number; recorrentes: number };
     recompra: { base: number; recompraram: number; taxa: number | null };
+    /** Em aberto agora: soma dos valores; previsto30 = previsão de fechamento até hoje + 30 dias (inclui as atrasadas). */
+    pipeline: { valor: number; abertas: number; semValor: number; previsto30: number; qtdPrevisto30: number };
+    /** Fechadas no período (data do resultado). taxa = ganhas / (ganhas + perdidas). */
+    ganho: { ganhas: number; perdidas: number; taxa: number | null; valorGanho: number; valorPerdido: number; ticketMedio: number | null; cicloMediano: number | null };
   };
+  /** Perdidas no período, por motivo (mais frequente primeiro). */
+  motivosPerda: { motivo: string; rotulo: string; n: number; valor: number }[];
+  /** Abertas no período, por origem; ganhas/perdidas = desfecho dessas mesmas oportunidades. */
+  /** Histórico: oportunidades ganhas (todas as datas) e o projeto que saiu de cada uma. */
+  projetosFollowup: {
+    total: number; comProjeto: number; semProjeto: number;
+    itens: { id: string; titulo: string; clienteId: string | null; cliente: string | null; valor: number | null; ganhaEm: string | null;
+      projeto: { id: string; codigo: string | null; situacao: "concluido" | "andamento" | "sem_os"; oss: number; ossAbertas: number } | null }[];
+  };
+  origens: { origem: string; rotulo: string; criadas: number; ganhas: number; perdidas: number; taxa: number | null; valorGanho: number }[];
   renovacoes: (ItemRecorrencia & { faixa: "vencido" | "30" | "60" | "90" })[];
   inativos: { clienteId: string; cliente: string; ultimoServico: string; meses: number }[];
   andamento: { clienteId: string | null; cliente: string; oss: number; fases: string; maisAntigaDias: number; proximaExecucao: string | null }[];
@@ -225,6 +247,48 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
   const fechadasNoPeriodo = (r: "ganha" | "perdida") => procs.filter((p) => p.resultado === r && noIntervalo(p.resultado_em?.slice(0, 10), periodo)).length;
   const criadosGanhos = criadosPeriodo.filter((p) => p.resultado === "ganha").length;
 
+  // ── Valores, taxa de ganho, motivos de perda e origem ────────────────────
+  const valorDe = (p: ProcessoBruto) => (Number.isFinite(Number(p.valor)) && p.valor != null ? Number(p.valor) : 0);
+  const soma = (l: ProcessoBruto[]) => l.reduce((a, p) => a + valorDe(p), 0);
+  const emAberto = procs.filter(aberta);
+  const limite30 = somarDias(hoje, 30);
+  const previstas = emAberto.filter((p) => p.previsao_fechamento && p.previsao_fechamento.slice(0, 10) <= limite30);
+  const fechadas = (r: "ganha" | "perdida") => procs.filter((p) => p.resultado === r && noIntervalo(p.resultado_em?.slice(0, 10), periodo));
+  const ganhasPer = fechadas("ganha"), perdidasPer = fechadas("perdida");
+  const ganhasComValor = ganhasPer.filter((p) => valorDe(p) > 0);
+  const ciclos = ganhasPer.map((p) => diferencaDias(diaBrasilia(p.created_at) || p.created_at.slice(0, 10), p.resultado_em!.slice(0, 10))).filter((n) => n >= 0);
+  const motivos = new Map<string, { n: number; valor: number }>();
+  for (const p of perdidasPer) {
+    const k = p.motivo_perda || "nao_informado";
+    const m = motivos.get(k) || { n: 0, valor: 0 };
+    m.n++; m.valor += valorDe(p);
+    motivos.set(k, m);
+  }
+  const motivosPerda = Array.from(motivos, ([motivo, m]) => ({ motivo, rotulo: rotuloMotivoPerda(motivo) || "Não informado", ...m }))
+    .sort((a, b) => b.n - a.n || b.valor - a.valor || a.rotulo.localeCompare(b.rotulo, "pt-BR"));
+  const porOrigem = porChave(criadosPeriodo, (p) => p.origem || "nao_informada");
+  const origens = Array.from(porOrigem, ([origem, l]) => {
+    const g = l.filter((p) => p.resultado === "ganha"), pe = l.filter((p) => p.resultado === "perdida").length;
+    return { origem, rotulo: rotuloOrigem(origem) || "Não informada", criadas: l.length, ganhas: g.length, perdidas: pe,
+      taxa: g.length + pe ? g.length / (g.length + pe) : null, valorGanho: soma(g) };
+  }).sort((a, b) => b.criadas - a.criadas || b.ganhas - a.ganhas || a.rotulo.localeCompare(b.rotulo, "pt-BR"));
+
+  // ── Histórico: ganhas → projeto ───────────────────────────────────────────
+  const ossPorProjeto = porChave(d.oss, (o) => o.projeto_id);
+  const historico = procs.filter((p) => p.resultado === "ganha").map((p) => {
+    const pj = p.projeto_id ? projetos.get(p.projeto_id) : undefined;   // na lixeira = sem projeto
+    const lista = pj ? ossPorProjeto.get(pj.id) || [] : [];
+    const ossAbertas = lista.filter((o) => !o.encerrada_em).length;
+    return {
+      id: p.id, titulo: p.titulo, clienteId: p.orgao_id, cliente: p.orgao_nome, valor: p.valor ?? null, ganhaEm: p.resultado_em?.slice(0, 10) || null,
+      projeto: pj ? {
+        id: pj.id, codigo: pj.codigo_projeto, oss: lista.length, ossAbertas,
+        situacao: (pj.concluido_em || (lista.length && !ossAbertas) ? "concluido" : lista.length ? "andamento" : "sem_os") as "concluido" | "andamento" | "sem_os",
+      } : null,
+    };
+  }).sort((a, b) => (b.ganhaEm || "").localeCompare(a.ganhaEm || "") || a.titulo.localeCompare(b.titulo, "pt-BR"));
+  const comProjetoHist = historico.filter((x) => x.projeto).length;
+
   // ── Projetos novos e recompra ─────────────────────────────────────────────
   const projetosDoProc = proc ? new Set(d.oss.filter((o) => o.procedimento === proc).map((o) => o.projeto_id)) : null;
   const projsCli = d.projetos.filter((p) => (!filtros.cliente || p.cliente_id === filtros.cliente) && (!projetosDoProc || projetosDoProc.has(p.id)))
@@ -279,7 +343,21 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
         clientesNovos: noPer.filter(ehNovo).length, recorrentes: noPer.filter((p) => !ehNovo(p)).length,
       },
       recompra: { base: baseRecompra, recompraram, taxa: baseRecompra ? recompraram / baseRecompra : null },
+      pipeline: {
+        valor: soma(emAberto), abertas: emAberto.length, semValor: emAberto.filter((p) => !(valorDe(p) > 0)).length,
+        previsto30: soma(previstas), qtdPrevisto30: previstas.length,
+      },
+      ganho: {
+        ganhas: ganhasPer.length, perdidas: perdidasPer.length,
+        taxa: ganhasPer.length + perdidasPer.length ? ganhasPer.length / (ganhasPer.length + perdidasPer.length) : null,
+        valorGanho: soma(ganhasPer), valorPerdido: soma(perdidasPer),
+        ticketMedio: ganhasComValor.length ? soma(ganhasComValor) / ganhasComValor.length : null,
+        cicloMediano: mediana(ciclos),
+      },
     },
+    motivosPerda,
+    origens,
+    projetosFollowup: { total: historico.length, comProjeto: comProjetoHist, semProjeto: historico.length - comProjetoHist, itens: historico.slice(0, 100) },
     renovacoes: renovacoes.slice(0, 30),
     inativos: inativos.slice(0, 30),
     andamento: andamento.slice(0, 20),
@@ -290,6 +368,13 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
 }
 
 // ── Auxiliares ───────────────────────────────────────────────────────────────
+
+/** Soma dias a um dia AAAA-MM-DD. */
+function somarDias(dia: string, n: number): string {
+  const d = new Date(`${dia}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 
 /** Soma meses a um dia AAAA-MM-DD (dia que não existe vira o último do mês). */
 function somarMeses(dia: string, meses: number): string {

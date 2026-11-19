@@ -17,6 +17,9 @@ const fmtPct = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractio
 export const num = (v: number | null | undefined) => (v == null ? "—" : fmtInt.format(v));
 export const dec = (v: number | null | undefined) => (v == null ? "—" : fmt1.format(v));
 export const pct = (v: number | null | undefined) => (v == null ? "—" : fmtPct.format(v));
+const fmtMoeda = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+/** Reais sem centavos (R$ 12.500). */
+export const moeda = (v: number | null | undefined) => (v == null ? "—" : fmtMoeda.format(v));
 /** "AAAA-MM-DD" → "dd/mm". */
 export const ddmm = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—");
 /** "AAAA-MM-DD" → "dd/mm/aaaa". */

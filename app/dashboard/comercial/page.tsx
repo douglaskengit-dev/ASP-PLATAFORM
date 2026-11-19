@@ -9,7 +9,7 @@ import TituloPagina from "@/app/components/TituloPagina";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import type { PainelComercial } from "@/lib/asp/dashboard-comercial";
 import { AbasDashboard, CamposPeriodo, ColunasMensais, FILTROS_PADRAO, Glossario, usePainel } from "../painel-comum";
-import { ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, ListaCurta, num, pct, plural, Secao, Tabela, useVisao, Vazio } from "../componentes";
+import { ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, ListaCurta, moeda, num, pct, plural, Secao, Tabela, useVisao, Vazio } from "../componentes";
 import s from "../dashboard.module.css";
 
 const sinal = (v: number | null) => (v == null ? "" : `${v > 0 ? "+" : ""}${pct(v)}`);
@@ -85,6 +85,10 @@ function Conteudo({ p }: { p: PainelComercial }) {
         <Kpi def="cAndamento" valor={num(k.andamento.oss)} sub={<>em {plural(k.andamento.clientes, "cliente", "clientes")}</>} />
         <Kpi def="cFunil" valor={num(k.funil.ativos)} alerta={k.parados > 0}
           sub={<>oportunidades em aberto · {plural(k.parados, "parado", "parados")} · {num(k.funil.ganhasPeriodo)} {k.funil.ganhasPeriodo === 1 ? "ganha" : "ganhas"} e {num(k.funil.perdidasPeriodo)} {k.funil.perdidasPeriodo === 1 ? "perdida" : "perdidas"} no período</>} />
+        <Kpi def="cPipeline" valor={moeda(k.pipeline.valor)}
+          sub={<>{plural(k.pipeline.abertas, "oportunidade", "oportunidades")}{k.pipeline.semValor ? ` (${num(k.pipeline.semValor)} sem valor)` : ""} · {moeda(k.pipeline.previsto30)} previsto em 30 dias ({num(k.pipeline.qtdPrevisto30)})</>} />
+        <Kpi def="cTaxaGanho" periodo valor={pct(k.ganho.taxa)}
+          sub={k.ganho.ganhas + k.ganho.perdidas ? <>{num(k.ganho.ganhas)} {k.ganho.ganhas === 1 ? "ganha" : "ganhas"} de {plural(k.ganho.ganhas + k.ganho.perdidas, "fechada", "fechadas")} · {moeda(k.ganho.valorGanho)} ganhos{k.ganho.ticketMedio != null ? ` · ticket médio ${moeda(k.ganho.ticketMedio)}` : ""}{k.ganho.cicloMediano != null ? ` · ciclo ${dias(k.ganho.cicloMediano)}` : ""}</> : "nenhuma oportunidade fechada no período"} />
         <Kpi def="cConversao" periodo valor={pct(k.conversao.taxa)}
           sub={k.conversao.criados ? <>{num(k.conversao.ganhas)} de {plural(k.conversao.criados, "oportunidade aberta", "oportunidades abertas")} no período foram ganhas</> : "nenhum processo aberto no período"} />
         <Kpi def="cProjetosNovos" periodo valor={num(k.projetosNovos.periodo)}
@@ -105,6 +109,11 @@ function Conteudo({ p }: { p: PainelComercial }) {
         <Funil p={p} />
         <Parados p={p} />
       </div>
+      <div className={s.grade2}>
+        <MotivosPerda p={p} />
+        <Origens p={p} />
+      </div>
+      <div className={s.cheio}><ProjetosFollowup p={p} /></div>
       <div className={s.cheio}><ProjetosMes p={p} /></div>
     </>
   );
@@ -221,6 +230,83 @@ function Parados({ p }: { p: PainelComercial }) {
             <span className={`${s.chip} ${s.chipAlerta}`}>{dias(x.dias)}</span>
           </div>
         )} />
+      )}
+    </Secao>
+  );
+}
+
+function MotivosPerda({ p }: { p: PainelComercial }) {
+  const { tabela, botao } = useVisao();
+  const total = p.kpis.ganho.perdidas;
+  return (
+    <Secao def="cMotivosPerda" periodo contador={total} acoes={total ? botao : undefined}>
+      {total === 0 ? <Vazio>Nenhuma oportunidade perdida no período.</Vazio> : tabela ? (
+        <Tabela legenda="Perdidas no período por motivo" colunas={["Motivo", "Perdidas", "Parte", "Valor"]}
+          linhas={p.motivosPerda.map((m) => [m.rotulo, num(m.n), pct(m.n / total), moeda(m.valor)])} />
+      ) : (
+        <BarrasHorizontais dados={p.motivosPerda.map((m) => ({ rotulo: m.rotulo, valor: m.n, m }))} rotuloAria="Oportunidades perdidas por motivo"
+          cor="var(--cor-aviso)" formatar={(v) => `${num(v)} · ${pct(v / total)}`}
+          detalhe={(d) => (d.m.valor ? `${moeda(d.m.valor)} perdidos` : null)} />
+      )}
+    </Secao>
+  );
+}
+
+function Origens({ p }: { p: PainelComercial }) {
+  const { tabela, botao } = useVisao();
+  const total = p.kpis.conversao.criados;
+  return (
+    <Secao def="cOrigens" periodo contador={total} acoes={total ? botao : undefined}>
+      {total === 0 ? <Vazio>Nenhuma oportunidade aberta no período.</Vazio> : tabela ? (
+        <Tabela legenda="Oportunidades abertas no período por origem" colunas={["Origem", "Abertas", "Ganhas", "Perdidas", "Taxa de ganho", "Valor ganho"]}
+          linhas={p.origens.map((o) => [o.rotulo, num(o.criadas), num(o.ganhas), num(o.perdidas), pct(o.taxa), moeda(o.valorGanho)])} />
+      ) : (
+        <BarrasHorizontais dados={p.origens.map((o) => ({ rotulo: o.rotulo, valor: o.criadas, o }))} rotuloAria="Oportunidades abertas por origem"
+          detalhe={(d) => {
+            const partes = [`${num(d.o.ganhas)} ${d.o.ganhas === 1 ? "ganha" : "ganhas"}`, `${num(d.o.perdidas)} ${d.o.perdidas === 1 ? "perdida" : "perdidas"}`];
+            if (d.o.taxa != null) partes.push(`taxa ${pct(d.o.taxa)}`);
+            if (d.o.valorGanho) partes.push(moeda(d.o.valorGanho));
+            return partes.join(" · ");
+          }} />
+      )}
+    </Secao>
+  );
+}
+
+const ROT_SITUACAO = { concluido: "Concluído", andamento: "Em andamento", sem_os: "Sem OS" } as const;
+
+function ProjetosFollowup({ p }: { p: PainelComercial }) {
+  const h = p.projetosFollowup;
+  return (
+    <Secao def="cProjetosFollowup" contador={h.total}>
+      {h.total === 0 ? <Vazio>Nenhuma oportunidade ganha no Follow-up{p.filtros.cliente || p.filtros.procedimento ? " neste filtro" : ""}.</Vazio> : (
+        <>
+          <p className={s.sub} style={{ margin: "0 0 8px" }}>{plural(h.comProjeto, "com projeto", "com projeto")} · {plural(h.semProjeto, "sem projeto ligado", "sem projeto ligado")}</p>
+          <div className={s.tabelaWrap}>
+            <table className={s.tabela}>
+              <caption className={s.srOnly}>Oportunidades ganhas e os projetos abertos a partir delas</caption>
+              <thead>
+                <tr><th scope="col">Oportunidade</th><th scope="col">Cliente</th><th scope="col">Ganha em</th><th scope="col">Valor</th><th scope="col">Projeto</th><th scope="col">Situação</th></tr>
+              </thead>
+              <tbody>
+                {h.itens.map((x) => (
+                  <tr key={x.id}>
+                    <th scope="row" style={{ fontWeight: 500, color: "inherit", fontSize: 13 }}>
+                      <Link className={s.link} href={`/followup?processo=${x.id}`}>{x.titulo}</Link>
+                    </th>
+                    <td>{x.clienteId ? <Link className={s.link} href={`/orgaos/${x.clienteId}`}>{x.cliente || "Cliente"}</Link> : "—"}</td>
+                    <td>{ddmmaa(x.ganhaEm)}</td>
+                    <td>{moeda(x.valor)}</td>
+                    <td>{x.projeto ? <Link className={s.link} href={`/projetos/${x.projeto.id}`}>{x.projeto.codigo || "Projeto"}</Link>
+                      : <Link className={s.link} href={`/projetos?novo=1${x.clienteId ? `&cliente=${x.clienteId}` : ""}&processo=${x.id}`}>+ Abrir projeto</Link>}</td>
+                    <td>{x.projeto ? <>{ROT_SITUACAO[x.projeto.situacao]}{x.projeto.oss ? <span className={s.sub}> · {plural(x.projeto.oss, "OS", "OSs")}{x.projeto.ossAbertas ? `, ${num(x.projeto.ossAbertas)} aberta${x.projeto.ossAbertas === 1 ? "" : "s"}` : ""}</span> : null}</> : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {h.total > h.itens.length && <p className={s.sub} style={{ margin: "8px 0 0" }}>Mostrando as {num(h.itens.length)} mais recentes de {num(h.total)}.</p>}
+        </>
       )}
     </Secao>
   );

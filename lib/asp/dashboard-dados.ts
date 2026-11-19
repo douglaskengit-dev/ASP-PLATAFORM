@@ -105,5 +105,8 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     historico_etapas: Array.isArray(p.historico_etapas) ? p.historico_etapas : [],
     resultado: p.resultado || "aberta", resultado_em: p.resultado_em || null,
     procedimento_id: p.procedimento_id || null,
+    valor: p.valor == null ? null : Number(p.valor), origem: p.origem || null,
+    motivo_perda: p.motivo_perda || null, previsao_fechamento: p.previsao_fechamento || null,
+    projeto_id: p.projeto_id || null,
   }));
 }
