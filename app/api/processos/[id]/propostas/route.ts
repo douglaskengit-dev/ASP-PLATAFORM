@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { baixarArquivo, removerArquivos, respostaArquivo, uploadArquivo } from "@/lib/processos/arquivos";
 import { faltaMigracaoCrm } from "@/lib/processos/crm-api";
-import { hojeBrasil, podeUsarCrm, validarArquivoProposta, validarProposta } from "@/lib/validacao";
+import { ehSituacaoProposta, hojeBrasil, podeUsarCrm, validarArquivoProposta, validarProposta } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
 const SEM_ACESSO = { erro: "O Follow-up é do Comercial, da Gerência e da Administração." };
 const MSG_MIGRACAO =
   "As versões da proposta precisam da migração 20261118100000_asp_crm_propostas_projeto no Supabase. Peça ao administrador para rodá-la.";
+const MSG_MIGRACAO_SITUACAO =
+  "A validade e a situação da proposta precisam da migração 20261121100000_asp_crm_proposta_validade_situacao no Supabase. Peça ao administrador para rodá-la.";
 const MIME: Record<string, string> = {
   pdf: "application/pdf",
   doc: "application/msword",
@@ -36,14 +38,19 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   const { data, error } = await supabase.from("gp_processo_propostas")
-    .select("id, versao, data, valor, observacao, arquivo_nome, arquivo, criado_em, criado_por, autor:gp_profiles!gp_processo_propostas_criado_por_fkey(nome_completo)")
+    // "*": validade/situação sem quebrar antes da migração 20261121100000.
+    .select("*, autor:gp_profiles!gp_processo_propostas_criado_por_fkey(nome_completo)")
     .eq("processo_id", params.id).order("versao", { ascending: false });
   if (error && faltaMigracaoCrm(error)) return NextResponse.json({ ok: true, propostas: [], aviso: MSG_MIGRACAO });
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  const linhas = data || [];
   return NextResponse.json({
     ok: true,
-    propostas: (data || []).map((p: any) => ({
+    // Sem a migração 20261121100000 a tela esconde validade e situação.
+    comSituacao: linhas.length === 0 || linhas.some((p: any) => p.situacao !== undefined),
+    propostas: linhas.map((p: any) => ({
       id: p.id, versao: p.versao, data: p.data, valor: p.valor == null ? null : Number(p.valor), observacao: p.observacao,
+      validade: p.validade || null, situacao: p.situacao || "enviada", situacao_em: p.situacao_em || null,
       arquivo_nome: p.arquivo ? (p.arquivo_nome || `Proposta-v${p.versao}`) : null, criado_em: p.criado_em,
       autor: p.autor?.nome_completo || null, minha: p.criado_por === profile.id,
     })),
@@ -62,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const arquivo = form.get("arquivo");
   const temArquivo = arquivo instanceof Blob && arquivo.size > 0 && !!(arquivo as File).name;
   const v = validarProposta({
-    data: String(form.get("data") || ""), valor: String(form.get("valor") || ""),
+    data: String(form.get("data") || ""), validade: String(form.get("validade") || ""), valor: String(form.get("valor") || ""),
     observacao: String(form.get("observacao") || ""), temArquivo,
   }, hojeBrasil());
   if ("erro" in v) return NextResponse.json({ erro: v.erro }, { status: 400 });
@@ -83,10 +90,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .eq("processo_id", params.id).order("versao", { ascending: false }).limit(1).maybeSingle();
     if (eUlt && faltaMigracaoCrm(eUlt)) return NextResponse.json({ erro: MSG_MIGRACAO }, { status: 409 });
     const versao = (ultima?.versao || 0) + 1;
-    const { data, error } = await supabase.from("gp_processo_propostas")
-      .insert({ processo_id: params.id, versao, data: v.data, valor: v.valor, observacao: v.observacao, criado_por: profile.id })
-      .select("id, versao").single();
+    const linha: Record<string, unknown> = { processo_id: params.id, versao, data: v.data, valor: v.valor, observacao: v.observacao, criado_por: profile.id };
+    if (v.validade) linha.validade = v.validade;
+    const { data, error } = await supabase.from("gp_processo_propostas").insert(linha).select("id, versao").single();
     if (error && (error as any).code === "23505") continue;
+    if (error && v.validade && faltaMigracaoCrm(error)) return NextResponse.json({ erro: MSG_MIGRACAO_SITUACAO }, { status: 409 });
     if (error && faltaMigracaoCrm(error)) return NextResponse.json({ erro: MSG_MIGRACAO }, { status: 409 });
     if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
     criada = data;
@@ -103,13 +111,60 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       await supabase.from("gp_processo_propostas").delete().eq("id", criada.id);
       return NextResponse.json({ erro: e?.message || "Falha ao salvar o arquivo." }, { status: 500 });
     }
-    await supabase.from("gp_processo_propostas").update({ arquivo: caminho, arquivo_nome: nome.slice(0, 200) }).eq("id", criada.id);
+    const { data: ligado } = await supabase.from("gp_processo_propostas")
+      .update({ arquivo: caminho, arquivo_nome: nome.slice(0, 200) }).eq("id", criada.id).select("id");
+    if (!ligado?.length) {
+      // Sem a policy de UPDATE (migração 20261121100000) o anexo ficaria solto.
+      await removerArquivos([caminho]);
+      await supabase.from("gp_processo_propostas").delete().eq("id", criada.id);
+      return NextResponse.json({ erro: MSG_MIGRACAO_SITUACAO }, { status: 409 });
+    }
   }
 
   const mudanca: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (v.valor !== null) mudanca.valor = v.valor;
   await supabase.from("gp_processos").update(mudanca).eq("id", params.id);
   return NextResponse.json({ ok: true, id: criada.id, versao: criada.versao });
+}
+
+/** Muda a situação de uma versão. Body: { proposta, situacao: enviada | aceita | recusada }.
+ *  Só uma versão fica aceita: aceitar uma devolve a anterior aceita para
+ *  "enviada". Aceita com valor passa a ser o valor da oportunidade. */
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const profile = await getProfileAtual();
+  if (!profile) return NextResponse.json({ erro: "Sessão expirada. Faça login novamente." }, { status: 401 });
+  if (!podeUsarCrm(profile.perfil)) return NextResponse.json(SEM_ACESSO, { status: 403 });
+  const corpo = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const id = typeof corpo.proposta === "string" ? corpo.proposta : "";
+  if (!id) return NextResponse.json({ erro: "Versão não informada." }, { status: 400 });
+  if (!ehSituacaoProposta(corpo.situacao)) return NextResponse.json({ erro: "Situação inválida." }, { status: 400 });
+  const situacao = corpo.situacao;
+
+  const supabase = getSupabaseRouteClient();
+  const { data: versao, error: eBusca } = await supabase.from("gp_processo_propostas").select("*")
+    .eq("id", id).eq("processo_id", params.id).maybeSingle();
+  if (eBusca) return NextResponse.json({ erro: eBusca.message }, { status: 500 });
+  if (!versao) return NextResponse.json({ erro: "Versão não encontrada." }, { status: 404 });
+  if (versao.situacao === undefined) return NextResponse.json({ erro: MSG_MIGRACAO_SITUACAO }, { status: 409 });
+  if (versao.situacao === situacao) return NextResponse.json({ ok: true });
+
+  if (situacao === "aceita") {
+    const { error } = await supabase.from("gp_processo_propostas").update({ situacao: "enviada", situacao_em: null, situacao_por: null })
+      .eq("processo_id", params.id).eq("situacao", "aceita");
+    if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  }
+  const enviada = situacao === "enviada";
+  const { data: feito, error } = await supabase.from("gp_processo_propostas")
+    .update({ situacao, situacao_em: enviada ? null : hojeBrasil(), situacao_por: enviada ? null : profile.id })
+    .eq("id", id).select("id");
+  if (error && (error as any).code === "23505") return NextResponse.json({ erro: "Outra versão foi aceita ao mesmo tempo. Atualize a tela." }, { status: 409 });
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  if (!feito?.length) return NextResponse.json({ erro: MSG_MIGRACAO_SITUACAO }, { status: 409 });
+
+  if (situacao === "aceita" && versao.valor != null) {
+    await supabase.from("gp_processos").update({ valor: versao.valor, updated_at: new Date().toISOString() }).eq("id", params.id);
+  }
+  return NextResponse.json({ ok: true });
 }
 
 /** Apaga uma versão (?proposta=<id>): o autor ou um administrador. Se era a
