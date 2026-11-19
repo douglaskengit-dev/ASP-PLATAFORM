@@ -82,6 +82,60 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
 
 type Acao = (fn: () => Promise<string | null>) => Promise<boolean>;
 
+interface ProjetoCandidato { id: string; codigo: string | null; pedido: string | null; data: string | null; ligadoA: string | null }
+
+/** Ganha antiga cujo projeto já existe: escolhe um projeto do cliente (os
+ *  mais próximos da data do ganho primeiro) e liga à oportunidade. */
+function LigarProjeto({ op, ocupado, acao }: { op: Oportunidade; ocupado: boolean; acao: Acao }) {
+  const [aberto, setAberto] = useState(false);
+  const [lista, setLista] = useState<ProjetoCandidato[] | null>(null);
+  const [erro, setErro] = useState("");
+  const [escolhido, setEscolhido] = useState("");
+
+  async function abrir() {
+    setAberto(true); setErro(""); setLista(null);
+    const r = await fetch(`/api/processos/${op.id}/projeto`);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { setErro(j.erro || `Erro ${r.status}`); return; }
+    const l: ProjetoCandidato[] = j.projetos || [];
+    setLista(l);
+    setEscolhido(l.find((p) => !p.ligadoA)?.id || "");
+  }
+
+  if (!op.orgao?.id) return null;
+  if (!aberto) {
+    return (
+      <button type="button" className="btn-doc" disabled={ocupado} onClick={abrir}
+        title="O projeto desta oportunidade já foi aberto em Projetos: escolha qual é">
+        🔗 Ligar a projeto existente
+      </button>
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      {erro ? <span className="detalhe" role="alert">{erro}</span>
+        : !lista ? <span className="detalhe">Carregando projetos…</span>
+        : !lista.length ? <span className="detalhe">Este cliente não tem projetos.</span>
+        : (
+          <>
+            <select aria-label="Projeto do cliente" value={escolhido} onChange={(e) => setEscolhido(e.target.value)}>
+              {lista.map((p) => (
+                <option key={p.id} value={p.id} disabled={!!p.ligadoA}>
+                  {p.codigo || "Projeto sem código"}{p.data ? ` · aberto em ${dataBr(p.data)}` : ""}{p.pedido ? ` · pedido ${p.pedido}` : ""}{p.ligadoA ? ` (já ligado a "${p.ligadoA}")` : ""}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn-azul" disabled={ocupado || !escolhido}
+              onClick={() => acao(() => enviar(`/api/processos/${op.id}/projeto`, "PUT", { projetoId: escolhido }))}>
+              Ligar
+            </button>
+          </>
+        )}
+      <button type="button" className="btn-doc" onClick={() => setAberto(false)}>Cancelar</button>
+    </span>
+  );
+}
+
 function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapas: EtapaFluxo[]; hoje: string; ocupado: boolean; acao: Acao }) {
   const [modo, setModo] = useState<"" | "ganha" | "perdida">("");
   const [etapa, setEtapa] = useState(op.etapa);
@@ -103,11 +157,23 @@ function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapa
             <span className="detalhe">Motivo: {rotuloMotivoPerda(op.motivo_perda) || "—"}{op.motivo_perda_detalhe ? ` — ${op.motivo_perda_detalhe}` : ""}</span>
           )}
           {op.resultado === "ganha" && (op.projeto ? (
-            <Link className="btn-dl btn-sec" href={`/projetos/${op.projeto.id}`}>📁 Projeto {op.projeto.codigo || ""}</Link>
+            <>
+              <Link className="btn-dl btn-sec" href={`/projetos/${op.projeto.id}`}>📁 Projeto {op.projeto.codigo || ""}</Link>
+              <button type="button" className="btn-doc" disabled={ocupado} title="Soltar o vínculo com este projeto (o projeto não é apagado)"
+                onClick={() => {
+                  if (!confirm(`Desligar o projeto ${op.projeto?.codigo || ""} desta oportunidade?\n\nO projeto continua existindo.`)) return;
+                  acao(() => enviar(`/api/processos/${op.id}/projeto`, "PUT", { projetoId: null }));
+                }}>
+                Desligar
+              </button>
+            </>
           ) : op.migrado && (
-            <Link className="btn-azul" style={{ textDecoration: "none" }}
-              href={`/projetos?novo=1${op.orgao?.id ? `&cliente=${op.orgao.id}` : ""}&processo=${op.id}`}
-              title="Abrir o projeto desta oportunidade, com o cliente já escolhido">📁 Abrir projeto</Link>
+            <>
+              <Link className="btn-azul" style={{ textDecoration: "none" }}
+                href={`/projetos?novo=1${op.orgao?.id ? `&cliente=${op.orgao.id}` : ""}&processo=${op.id}`}
+                title="Abrir o projeto desta oportunidade, com o cliente já escolhido">📁 Abrir projeto</Link>
+              <LigarProjeto op={op} ocupado={ocupado} acao={acao} />
+            </>
           ))}
           <button type="button" className="btn-doc" disabled={ocupado}
             onClick={() => acao(() => enviar(`/api/processos/${op.id}/resultado`, "POST", { resultado: "aberta" }))}>
