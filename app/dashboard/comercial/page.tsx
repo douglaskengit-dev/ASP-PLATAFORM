@@ -112,6 +112,7 @@ function Conteudo({ p }: { p: PainelComercial }) {
         <Parados p={p} />
       </div>
       <div className={s.cheio}><Followups p={p} /></div>
+      <div className={s.cheio}><PropostasAcao p={p} /></div>
       <div className={s.grade2}>
         <MotivosPerda p={p} />
         <Origens p={p} />
@@ -266,6 +267,37 @@ function Followups({ p }: { p: PainelComercial }) {
             )} />
           )}
         </>
+      )}
+    </Secao>
+  );
+}
+
+function PropostasAcao({ p }: { p: PainelComercial }) {
+  const k = p.kpis.propostas;
+  const total = p.propostasAcao.length;
+  const chip = (x: PainelComercial["propostasAcao"][number]) => {
+    if (x.tipo === "aceita") return <span className={s.chip}>aceita · falta Fechar ganho</span>;
+    if (x.tipo === "vencida") return <span className={`${s.chip} ${s.chipAlerta}`}>venceu {x.dias != null ? `há ${dias(-x.dias)}` : ""}</span>;
+    return <span className={`${s.chip} ${s.chipAlerta}`}>{x.dias === 0 ? "vence hoje" : `vence em ${dias(x.dias || 0)}`}</span>;
+  };
+  return (
+    <Secao def="cPropostas" contador={total}>
+      <p className={s.sub} style={{ margin: "0 0 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <span className={s.chip}>{plural(k.aguardando, "proposta aguardando resposta", "propostas aguardando resposta")}</span>
+        {k.vencidas > 0 && <span className={`${s.chip} ${s.chipAlerta}`}>{plural(k.vencidas, "vencida", "vencidas")}</span>}
+        {k.vencem7 > 0 && <span className={`${s.chip} ${s.chipAlerta}`}>{num(k.vencem7)} vence{k.vencem7 === 1 ? "" : "m"} em 7 dias</span>}
+        {k.aceitas > 0 && <span className={s.chip}>{plural(k.aceitas, "aceita sem Fechar ganho", "aceitas sem Fechar ganho")}</span>}
+      </p>
+      {total === 0 ? <Vazio>Nenhuma proposta vencida, vencendo ou aceita sem fechar.</Vazio> : (
+        <ListaCurta itens={p.propostasAcao} inicial={8} total={total} chave={(x) => x.id} render={(x) => (
+          <div className={s.linha}>
+            <span>
+              <Link className={s.link} href={`/followup?processo=${x.id}`}>{x.titulo}</Link>
+              <span className={s.sub}>{[x.cliente, `versão ${x.versao}`, x.responsavel].filter(Boolean).join(" · ")}{x.validade ? ` · válida até ${ddmmaa(x.validade)}` : ""}</span>
+            </span>
+            {chip(x)}
+          </div>
+        )} />
       )}
     </Secao>
   );

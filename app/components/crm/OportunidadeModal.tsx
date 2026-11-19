@@ -65,7 +65,8 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
         <Situacao op={op} etapas={etapas} hoje={hoje} ocupado={ocupado} acao={acao} onFecharGanho={(d) => setGanho({ data: d })} />
         <ProximaAcao op={op} hoje={hoje} ocupado={ocupado} acao={acao} />
         <Atividades op={op} hoje={hoje} />
-        <Propostas processoId={op.id} hoje={hoje} onValorMudou={onMudou} />
+        {/* key: ao ganhar/perder, a versão atual muda de situação no servidor. */}
+        <Propostas key={op.resultado || "aberta"} processoId={op.id} hoje={hoje} aberta={(op.resultado || "aberta") === "aberta"} onValorMudou={onMudou} />
         <Dados op={op} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} ocupado={ocupado} acao={acao} />
         <Historico op={op} etapas={etapas} usuarios={usuarios} />
         {ganho && (

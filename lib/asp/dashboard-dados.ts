@@ -105,6 +105,18 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     const perfis = await todas<any>(() => supabase.from("gp_profiles").select("id, nome_completo, email").order("id"));
     perfis.forEach((u: any) => nomes.set(u.id, u.nome_completo || u.email || "Usuário"));
   } catch { /* segue sem nomes */ }
+  // Versão mais nova da proposta de cada oportunidade — complementar: sem a
+  // migração (ou sem permissão de leitura), segue sem propostas.
+  const propostas = new Map<string, { versao: number; validade: string | null; situacao: string }>();
+  try {
+    const versoes = await todas<any>(() => supabase.from("gp_processo_propostas").select("*").order("id"));
+    for (const v of versoes) {
+      const atual = propostas.get(v.processo_id);
+      if (!atual || v.versao > atual.versao) {
+        propostas.set(v.processo_id, { versao: Number(v.versao) || 1, validade: v.validade || null, situacao: v.situacao || "enviada" });
+      }
+    }
+  } catch { /* segue sem propostas */ }
   return linhas.map((p: any) => ({
     id: p.id, titulo: p.titulo || "Processo sem título", orgao_id: p.orgao_id || null, orgao_nome: p.orgao?.razao_social || null,
     etapa: Number(p.etapa) || 0, created_at: p.created_at,
@@ -116,5 +128,6 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     projeto_id: p.projeto_id || null,
     responsavel_id: p.responsavel_id || null, responsavel_nome: p.responsavel_id ? nomes.get(p.responsavel_id) || null : null,
     proxima_acao: p.proxima_acao || null, proxima_acao_em: p.proxima_acao_em || null,
+    proposta: propostas.get(p.id) || null,
   }));
 }

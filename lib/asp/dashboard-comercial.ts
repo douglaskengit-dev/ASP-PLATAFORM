@@ -11,7 +11,7 @@
  * aberto, ganha ou perdida (resultado_em = dia do fechamento).
  * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
-import { rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao } from "../validacao/crm";
+import { diasParaValidade, rotuloMotivoPerda, rotuloOrigem, situacaoPropostaVista, situacaoProximaAcao } from "../validacao/crm";
 import { diaBrasilia, fimDaOS } from "../validacao";
 import {
   diferencaDias, estatistica, intervaloDoPeriodo, montarRecorrencia, noIntervalo, porChave,
@@ -43,6 +43,8 @@ export interface ProcessoBruto {
   responsavel_nome?: string | null;
   proxima_acao?: string | null;
   proxima_acao_em?: string | null;
+  /** Versão mais nova da proposta (validade e situação). Nula sem proposta ou antes da migração. */
+  proposta?: { versao: number; validade: string | null; situacao: string } | null;
 }
 
 const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
@@ -75,12 +77,18 @@ export interface PainelComercial {
     /** Em aberto agora: soma dos valores; previsto30 = previsão de fechamento até hoje + 30 dias (inclui as atrasadas). */
     /** Em aberto agora, pela próxima ação: atrasada (data < hoje), para hoje ou sem próxima ação. */
     followups: { abertas: number; atrasadas: number; hoje: number; semAcao: number };
+    /** Em aberto agora, pela versão mais nova da proposta: aguardando resposta (enviada,
+     *  inclui as vencidas), vencidas, que vencem em até 7 dias e aceitas ainda sem Fechar ganho. */
+    propostas: { aguardando: number; vencidas: number; vencem7: number; aceitas: number };
     pipeline: { valor: number; abertas: number; semValor: number; previsto30: number; qtdPrevisto30: number };
     /** Fechadas no período (data do resultado). taxa = ganhas / (ganhas + perdidas). */
     ganho: { ganhas: number; perdidas: number; taxa: number | null; valorGanho: number; valorPerdido: number; ticketMedio: number | null; cicloMediano: number | null };
   };
   /** Próximas ações atrasadas (a mais antiga primeiro). */
   followupsAtrasados: { id: string; titulo: string; cliente: string | null; responsavel: string | null; acao: string | null; em: string; dias: number }[];
+  /** Propostas para agir: vencidas, que vencem em até 7 dias e aceitas sem Fechar ganho. */
+  propostasAcao: { id: string; titulo: string; cliente: string | null; responsavel: string | null; versao: number;
+    tipo: "vencida" | "vence" | "aceita"; validade: string | null; dias: number | null }[];
   /** Por responsável: abertas, atrasadas e sem próxima ação (mais atrasadas primeiro). */
   followupsPorResponsavel: { responsavelId: string | null; nome: string; abertas: number; atrasadas: number; semAcao: number }[];
   /** Perdidas no período, por motivo (mais frequente primeiro). */
@@ -298,6 +306,23 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     if (sit.get(p.id) === "sem_acao") r.semAcao++;
     porResp.set(k, r);
   }
+  // ── Propostas (versão mais nova de cada oportunidade em aberto) ──────────
+  const propostasAcao: PainelComercial["propostasAcao"] = [];
+  let aguardando = 0;
+  for (const p of emAberto) {
+    if (!p.proposta) continue;
+    const vista = situacaoPropostaVista(p.proposta, true, hoje);
+    const dias = diasParaValidade(p.proposta.validade, hoje);
+    if (vista === "enviada" || vista === "vencida") aguardando++;
+    const tipo = vista === "aceita" ? "aceita" : vista === "vencida" ? "vencida" : vista === "enviada" && dias != null && dias <= 7 ? "vence" : null;
+    if (!tipo) continue;
+    propostasAcao.push({ id: p.id, titulo: p.titulo, cliente: p.orgao_nome, responsavel: p.responsavel_nome || null,
+      versao: p.proposta.versao, tipo, validade: p.proposta.validade, dias });
+  }
+  const ordemTipo = { aceita: 0, vencida: 1, vence: 2 } as const;
+  propostasAcao.sort((a, b) => ordemTipo[a.tipo] - ordemTipo[b.tipo] || (a.dias ?? 0) - (b.dias ?? 0) || a.titulo.localeCompare(b.titulo, "pt-BR"));
+  const contaTipo = (t: "vencida" | "vence" | "aceita") => propostasAcao.filter((x) => x.tipo === t).length;
+
   const followupsPorResponsavel = Array.from(porResp.values())
     .sort((a, b) => b.atrasadas - a.atrasadas || b.semAcao - a.semAcao || b.abertas - a.abertas || a.nome.localeCompare(b.nome, "pt-BR"));
 
@@ -376,6 +401,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
         hoje: emAberto.filter((p) => sit.get(p.id) === "hoje").length,
         semAcao: emAberto.filter((p) => sit.get(p.id) === "sem_acao").length,
       },
+      propostas: { aguardando, vencidas: contaTipo("vencida"), vencem7: contaTipo("vence"), aceitas: contaTipo("aceita") },
       pipeline: {
         valor: soma(emAberto), abertas: emAberto.length, semValor: emAberto.filter((p) => !(valorDe(p) > 0)).length,
         previsto30: soma(previstas), qtdPrevisto30: previstas.length,
@@ -392,6 +418,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     origens,
     followupsAtrasados: followupsAtrasados.slice(0, 30),
     followupsPorResponsavel,
+    propostasAcao: propostasAcao.slice(0, 40),
     projetosFollowup: { total: historico.length, comProjeto: comProjetoHist, semProjeto: historico.length - comProjetoHist, itens: historico.slice(0, 100) },
     renovacoes: renovacoes.slice(0, 30),
     inativos: inativos.slice(0, 30),

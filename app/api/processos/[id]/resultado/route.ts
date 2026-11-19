@@ -44,5 +44,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { error } = await supabase.from("gp_processos").update(mudanca).eq("id", params.id);
   if (error && faltaMigracaoCrm(error)) return NextResponse.json({ erro: MSG_MIGRACAO_CRM }, { status: 409 });
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
+  if (v.resultado !== "aberta") await fecharPropostaAtual(supabase, params.id, v.resultado, v.data || hoje, profile.id);
   return NextResponse.json({ ok: true, resultado: v.resultado });
+}
+
+/** Ganha: a versão mais nova da proposta, se ainda "enviada" e nenhuma outra
+ *  aceita, vira aceita. Perdida: a mais nova "enviada" vira recusada.
+ *  Complementar: sem a migração 20261121100000 (ou sem versões), não faz nada. */
+async function fecharPropostaAtual(supabase: any, processoId: string, resultado: "ganha" | "perdida", dia: string, autor: string) {
+  try {
+    const { data: versoes } = await supabase.from("gp_processo_propostas").select("*")
+      .eq("processo_id", processoId).order("versao", { ascending: false });
+    const atual = versoes?.[0];
+    if (!atual || atual.situacao !== "enviada") return;
+    if (resultado === "ganha" && versoes.some((x: any) => x.situacao === "aceita")) return;
+    await supabase.from("gp_processo_propostas")
+      .update({ situacao: resultado === "ganha" ? "aceita" : "recusada", situacao_em: dia, situacao_por: autor })
+      .eq("id", atual.id);
+  } catch { /* segue: a oportunidade já foi fechada */ }
 }

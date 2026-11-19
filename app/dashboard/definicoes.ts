@@ -11,7 +11,7 @@ export type ChaveDef =
   | "gConcluidas" | "gPrazoTotal" | "gCarteira" | "gRetrabalho" | "gPendencias" | "gOcupacao" | "gCalibracao" | "gAgua"
   | "gDiasCampo" | "gMaisAntigas"
   | "cRenovacoes" | "cInativos" | "cPrazoEntrega" | "cAndamento" | "cFunil" | "cConversao" | "cParados" | "cProjetosNovos" | "cRecompra"
-  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup" | "cFollowups";
+  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup" | "cFollowups" | "cPropostas";
 
 /** `painel` = o Dashboard em cujo glossário a definição aparece (sem ele, Operações). */
 export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; painel?: PainelId }> = {
@@ -219,6 +219,11 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
     painel: "comercial",
     titulo: "Origem das oportunidades",
     texto: "Oportunidades abertas no período, por origem (Licitação, Indicação, Cliente recorrente…). Ganhas e perdidas = o desfecho dessas mesmas oportunidades até agora; a taxa é ganhas ÷ (ganhas + perdidas). Oportunidade ainda em aberto não entra na taxa.",
+  },
+  cPropostas: {
+    painel: "comercial",
+    titulo: "Propostas para agir",
+    texto: "Oportunidades em aberto, pela versão mais nova da proposta. Lista as aceitas que ainda não passaram por “Fechar ganho”, as vencidas (validade antes de hoje, sem resposta do cliente) e as que vencem em até 7 dias. “Aguardando resposta” conta as versões enviadas, vencidas ou não. Proposta sem validade não entra em vencida nem em vence. Estado atual.",
   },
   cFollowups: {
     painel: "comercial",

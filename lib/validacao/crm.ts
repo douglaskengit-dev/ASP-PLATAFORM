@@ -159,16 +159,55 @@ export const TAM_OBS_PROPOSTA = 2000;
 
 /** Nova versão da proposta: data de envio (até hoje), valor e observação
  *  opcionais. O arquivo é conferido à parte (validarArquivoProposta). */
-export function validarProposta(b: Record<string, unknown>, hoje: string): { data: string; valor: number | null; observacao: string | null } | { erro: string } {
+export function validarProposta(b: Record<string, unknown>, hoje: string): { data: string; validade: string | null; valor: number | null; observacao: string | null } | { erro: string } {
   const data = typeof b.data === "string" ? b.data : "";
   if (!diaValido(data)) return { erro: "Informe a data da proposta." };
   if (data > hoje) return { erro: "A data da proposta não pode ser futura." };
+  const validade = typeof b.validade === "string" && b.validade.trim() ? b.validade.trim() : null;
+  if (validade !== null && !diaValido(validade)) return { erro: "Validade da proposta inválida." };
+  if (validade !== null && validade < data) return { erro: "A validade não pode ser antes do envio da proposta." };
   const valor = lerValorMonetario(b.valor);
   if (valor !== null && (Number.isNaN(valor) || valor < 0 || valor > VALOR_MAXIMO)) return { erro: "Valor da proposta inválido." };
   const observacao = typeof b.observacao === "string" ? b.observacao.trim() : "";
   if (observacao.length > TAM_OBS_PROPOSTA) return { erro: `Observação muito longa (máximo ${TAM_OBS_PROPOSTA} caracteres).` };
   if (valor === null && !observacao && !b.temArquivo) return { erro: "Informe o valor, anexe o arquivo ou escreva uma observação." };
-  return { data, valor, observacao: observacao || null };
+  return { data, validade, valor, observacao: observacao || null };
+}
+
+/** Situação de uma versão da proposta. "vencida" e "substituida" não são
+ *  gravadas: saem da validade e de existir versão mais nova. */
+export const SITUACOES_PROPOSTA = [
+  { valor: "enviada", rotulo: "Enviada" },
+  { valor: "aceita", rotulo: "Aceita" },
+  { valor: "recusada", rotulo: "Recusada" },
+] as const;
+export type SituacaoProposta = (typeof SITUACOES_PROPOSTA)[number]["valor"];
+export type SituacaoPropostaVista = SituacaoProposta | "vencida" | "substituida";
+
+export function ehSituacaoProposta(v: unknown): v is SituacaoProposta {
+  return SITUACOES_PROPOSTA.some((x) => x.valor === v);
+}
+
+/** O que a tela mostra para a versão: aceita/recusada como gravado; enviada
+ *  vira "substituida" se há versão mais nova e "vencida" se a validade passou. */
+export function situacaoPropostaVista(
+  p: { situacao?: string | null; validade?: string | null },
+  maisNova: boolean,
+  hoje: string,
+): SituacaoPropostaVista {
+  const s = ehSituacaoProposta(p.situacao) ? p.situacao : "enviada";
+  if (s !== "enviada") return s;
+  if (!maisNova) return "substituida";
+  if (p.validade && p.validade.slice(0, 10) < hoje) return "vencida";
+  return "enviada";
+}
+
+/** Dias até a validade (negativo = vencida há N dias); nulo sem validade. */
+export function diasParaValidade(validade: string | null | undefined, hoje: string): number | null {
+  if (!validade || !diaValido(validade.slice(0, 10))) return null;
+  const a = Date.UTC(+hoje.slice(0, 4), +hoje.slice(5, 7) - 1, +hoje.slice(8, 10));
+  const v = Date.UTC(+validade.slice(0, 4), +validade.slice(5, 7) - 1, +validade.slice(8, 10));
+  return Math.round((v - a) / 86400000);
 }
 
 export function validarArquivoProposta(nome: string, tamanho: number): string | null {
