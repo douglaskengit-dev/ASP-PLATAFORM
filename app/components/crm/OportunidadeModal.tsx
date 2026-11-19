@@ -8,6 +8,7 @@ import Link from "next/link";
 import Modal from "@/app/components/Modal";
 import Propostas from "./Propostas";
 import CampoTitulo from "./CampoTitulo";
+import FecharGanho from "./FecharGanho";
 import { MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
 import { dataBr, moeda, valorParaCampo, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "./tipos";
@@ -32,6 +33,8 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
 }) {
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  /** Formulário "Fechar ganho" aberto (data do ganho escolhida na ficha). */
+  const [ganho, setGanho] = useState<{ data?: string } | null>(null);
   const nomeEtapa = etapas[op.etapa]?.nome || "—";
   const responsavel = usuarios.find((u) => u.id === op.responsavel_id)?.nome;
 
@@ -59,12 +62,17 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
         )}
         {erro && <p className={s.erro} role="alert">{erro}</p>}
 
-        <Situacao op={op} etapas={etapas} hoje={hoje} ocupado={ocupado} acao={acao} />
+        <Situacao op={op} etapas={etapas} hoje={hoje} ocupado={ocupado} acao={acao} onFecharGanho={(d) => setGanho({ data: d })} />
         <ProximaAcao op={op} hoje={hoje} ocupado={ocupado} acao={acao} />
         <Atividades op={op} hoje={hoje} />
         <Propostas processoId={op.id} hoje={hoje} onValorMudou={onMudou} />
         <Dados op={op} orgaos={orgaos} usuarios={usuarios} procedimentos={procedimentos} ocupado={ocupado} acao={acao} />
         <Historico op={op} etapas={etapas} usuarios={usuarios} />
+        {ganho && (
+          <FecharGanho op={op} procedimentos={procedimentos} hoje={hoje} dataInicial={ganho.data}
+            onFechar={() => setGanho(null)}
+            onConcluido={async () => { setGanho(null); await onMudou(); }} />
+        )}
 
         <div className={s.rodapeFicha}>
           <button type="button" className="btn-doc" disabled={ocupado} style={{ color: "var(--cor-erro, #b91c1c)" }}
@@ -136,7 +144,9 @@ function LigarProjeto({ op, ocupado, acao }: { op: Oportunidade; ocupado: boolea
   );
 }
 
-function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapas: EtapaFluxo[]; hoje: string; ocupado: boolean; acao: Acao }) {
+function Situacao({ op, etapas, hoje, ocupado, acao, onFecharGanho }: {
+  op: Oportunidade; etapas: EtapaFluxo[]; hoje: string; ocupado: boolean; acao: Acao; onFecharGanho: (data?: string) => void;
+}) {
   const [modo, setModo] = useState<"" | "ganha" | "perdida">("");
   const [etapa, setEtapa] = useState(op.etapa);
   const [data, setData] = useState(hoje);
@@ -159,6 +169,8 @@ function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapa
           {op.resultado === "ganha" && (op.projeto ? (
             <>
               <Link className="btn-dl btn-sec" href={`/projetos/${op.projeto.id}`}>📁 Projeto {op.projeto.codigo || ""}</Link>
+              <button type="button" className="btn-doc" disabled={ocupado} onClick={() => onFecharGanho()}
+                title="Cria mais uma OS neste projeto, já com as datas da inspeção e da execução">📅 Nova OS e datas</button>
               <button type="button" className="btn-doc" disabled={ocupado} title="Soltar o vínculo com este projeto (o projeto não é apagado)"
                 onClick={() => {
                   if (!confirm(`Desligar o projeto ${op.projeto?.codigo || ""} desta oportunidade?\n\nO projeto continua existindo.`)) return;
@@ -169,9 +181,8 @@ function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapa
             </>
           ) : op.migrado && (
             <>
-              <Link className="btn-azul" style={{ textDecoration: "none" }}
-                href={`/projetos?novo=1${op.orgao?.id ? `&cliente=${op.orgao.id}` : ""}&processo=${op.id}`}
-                title="Abrir o projeto desta oportunidade, com o cliente já escolhido">📁 Abrir projeto</Link>
+              <button type="button" className="btn-azul" disabled={ocupado} onClick={() => onFecharGanho()}
+                title="Cria o projeto, a OS e os agendamentos da inspeção e da execução">📁 Abrir projeto e agendar</button>
               <LigarProjeto op={op} ocupado={ocupado} acao={acao} />
             </>
           ))}
@@ -226,13 +237,26 @@ function Situacao({ op, etapas, hoje, ocupado, acao }: { op: Oportunidade; etapa
                 </label>
               )}
               <div className={s.linhaForm}>
-                <button type="button" className="btn-azul" disabled={ocupado}
-                  onClick={() => acao(() => enviar(`/api/processos/${op.id}/resultado`, "POST", { resultado: modo, data, motivo, detalhe }))}>
-                  Confirmar {modo === "ganha" ? "ganho" : "perda"}
-                </button>
+                {modo === "ganha" && op.migrado ? (
+                  <>
+                    <button type="button" className="btn-azul" disabled={ocupado || !data} onClick={() => onFecharGanho(data)}>
+                      Fechar ganho: projeto e datas da Operação
+                    </button>
+                    <button type="button" className="btn-doc" disabled={ocupado}
+                      title="Marca como ganha sem criar o projeto agora (dá para abrir depois pela ficha)"
+                      onClick={() => acao(() => enviar(`/api/processos/${op.id}/resultado`, "POST", { resultado: modo, data }))}>
+                      Só marcar como ganha
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn-azul" disabled={ocupado}
+                    onClick={() => acao(() => enviar(`/api/processos/${op.id}/resultado`, "POST", { resultado: modo, data, motivo, detalhe }))}>
+                    Confirmar {modo === "ganha" ? "ganho" : "perda"}
+                  </button>
+                )}
                 <button type="button" className="btn-doc" onClick={() => setModo("")}>Cancelar</button>
               </div>
-              {modo === "ganha" && <p className="detalhe" style={{ margin: 0 }}>Depois do ganho, abra o projeto em Projetos para seguir com as OSs.</p>}
+              {modo === "ganha" && <p className="detalhe" style={{ margin: 0 }}>Fechar o ganho cria o projeto, a OS e os agendamentos da inspeção e da execução, que já entram na agenda da Operação.</p>}
             </div>
           )}
         </>
