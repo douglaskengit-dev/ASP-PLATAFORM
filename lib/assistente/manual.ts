@@ -402,7 +402,7 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 - **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.
 - **Filtros**: busca, cliente, procedimento (ou "Outros"), responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
 - **Propostas**: em **+ Nova versão**, informe a data de envio, o valor, uma observação e, se quiser, o arquivo (PDF, Word ou Excel, até 20 MB). A versão mais nova com valor passa a ser o valor da oportunidade.
-- **Ganho → projeto**: na oportunidade ganha, **Abrir projeto** abre o cadastro do projeto com o cliente já escolhido. Depois de salvar, a ficha mostra o link para o projeto.
+- **Ganho → projeto**: na oportunidade ganha, **Abrir projeto** abre o cadastro do projeto com o cliente já escolhido. Depois de salvar, a ficha mostra o link para o projeto. Se o projeto já foi aberto antes (ganhas antigas), use **🔗 Ligar a projeto existente** e escolha o projeto do cliente; **Desligar** solta um vínculo errado sem apagar o projeto.
 
 **Arquivos**: reúne os documentos de todos os projetos (medições, relatórios, versões assinadas, laudos, RDOs). Filtre por tipo e baixe um ZIP organizado em pastas por cliente, projeto e OS.
 
