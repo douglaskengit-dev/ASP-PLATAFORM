@@ -10,7 +10,8 @@ export type ChaveDef =
   | "aDefinir" | "conflitos" | "rdo" | "fotos" | "medicoes" | "laudos" | "clientes" | "recorrencia"
   | "gConcluidas" | "gPrazoTotal" | "gCarteira" | "gRetrabalho" | "gPendencias" | "gOcupacao" | "gCalibracao" | "gAgua"
   | "gDiasCampo" | "gMaisAntigas"
-  | "cRenovacoes" | "cInativos" | "cPrazoEntrega" | "cAndamento" | "cFunil" | "cConversao" | "cParados" | "cProjetosNovos" | "cRecompra";
+  | "cRenovacoes" | "cInativos" | "cPrazoEntrega" | "cAndamento" | "cFunil" | "cConversao" | "cParados" | "cProjetosNovos" | "cRecompra"
+  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup";
 
 /** `painel` = o Dashboard em cujo glossário a definição aparece (sem ele, Operações). */
 export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; painel?: PainelId }> = {
@@ -198,6 +199,31 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
     painel: "comercial",
     titulo: "Taxa de recompra",
     texto: "Dos clientes cujo primeiro projeto foi aberto há pelo menos 12 meses, a parte que abriu outro projeto em até 12 meses depois do primeiro. Não depende do período.",
+  },
+  cPipeline: {
+    painel: "comercial",
+    titulo: "Pipeline em aberto",
+    texto: "Soma do valor das oportunidades em aberto no Follow-up agora (o valor da oportunidade, ou o da versão mais nova da proposta). Oportunidade sem valor conta na quantidade, não na soma. “Previsto em 30 dias” = as que têm previsão de fechamento até daqui a 30 dias, incluindo as já atrasadas. Estado atual.",
+  },
+  cTaxaGanho: {
+    painel: "comercial",
+    titulo: "Taxa de ganho",
+    texto: "Das oportunidades fechadas no período (pela data do resultado), a parte que foi ganha: ganhas ÷ (ganhas + perdidas). Mostra também o valor ganho, o ticket médio (média das ganhas que têm valor) e o ciclo de venda (mediana de dias entre a abertura e o ganho).",
+  },
+  cMotivosPerda: {
+    painel: "comercial",
+    titulo: "Motivos de perda",
+    texto: "Oportunidades perdidas no período (pela data do resultado), agrupadas pelo motivo informado ao marcar a perda, com o valor que deixou de entrar.",
+  },
+  cOrigens: {
+    painel: "comercial",
+    titulo: "Origem das oportunidades",
+    texto: "Oportunidades abertas no período, por origem (Licitação, Indicação, Cliente recorrente…). Ganhas e perdidas = o desfecho dessas mesmas oportunidades até agora; a taxa é ganhas ÷ (ganhas + perdidas). Oportunidade ainda em aberto não entra na taxa.",
+  },
+  cProjetosFollowup: {
+    painel: "comercial",
+    titulo: "Projetos vindos do Follow-up",
+    texto: "Histórico de todas as oportunidades ganhas (qualquer data) e o projeto aberto a partir de cada uma pelo botão “Abrir projeto” da ficha. Situação do projeto: concluído (projeto concluído ou todas as OSs encerradas), em andamento (alguma OS aberta) ou sem OS. Ganha sem projeto ligado aparece com o atalho para abrir. Não depende do período; respeita os filtros de cliente e procedimento.",
   },
 };
 
