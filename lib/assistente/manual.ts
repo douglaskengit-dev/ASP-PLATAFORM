@@ -16,14 +16,29 @@ A Plataforma ASP organiza todo o trabalho de inspeção e limpeza de tanques: do
 ### Perfis de acesso (definem o que cada pessoa pode fazer)
 
 - **Perfil** — **Atua principalmente em**
-- Comercial — Clientes, projetos, agendamentos, entregas e encerramento
+- Comercial — Follow-up (vendas), clientes, projetos, agendamentos, entregas e encerramento
 - Operações — Coleta de dados, relatórios, execução em campo e RDO
 - Gerência — Aprovações, versão assinada e acompanhamento geral
 - Administrador — Tudo, incluindo usuários, funções e permissões
 
-**Funções** (cargo da pessoa na equipe): Coordenador, Engenheiro, Técnico, Auxiliar e Supervisor. Algumas permissões vêm da função — por exemplo, Técnicos e Auxiliares registram medições, fotos e RDO durante a execução. O Administrador ajusta isso na aba **Permissões por função** (seção 14).
+**Funções** (cargo da pessoa na equipe): Coordenador, Engenheiro, Técnico, Auxiliar e Supervisor. Algumas permissões vêm da função — por exemplo, Técnicos e Auxiliares registram medições, fotos e RDO durante a execução. O Administrador ajusta isso na aba **Permissões por função** (seção 15).
 
 **Avisos do sistema**: o símbolo ⛔ indica algo que impede salvar ou avançar; o símbolo ⚠️ é apenas um alerta e não bloqueia nada. As mensagens aparecem ao lado do campo com problema.
+
+### A história de um projeto (quem faz cada parte)
+
+Todo projeto passa pelos mesmos capítulos, do primeiro contato com o cliente à renovação do serviço. A tabela mostra quem conduz cada um; no começo de cada capítulo deste manual, a linha **Quem faz** repete isso.
+
+- **Capítulo da história** — **O que acontece** — **Quem faz**
+- 1. O cliente chega — Cadastro do cliente e oportunidade no Follow-up — Comercial
+- 2. A proposta — Versões da proposta, negociação, próxima ação — Comercial
+- 3. O ganho vira projeto — Fechar ganho: projeto, OS e datas da Operação — Comercial
+- 4. A visita de inspeção — Agendamento (fase 2) e medição do tanque (fase 3) — Comercial agenda · Operações mede · Gerência aprova a medição
+- 5. O relatório de inspeção — Relatório (fase 4) e aprovação (fase 5) — Operações escreve · Gerência aprova
+- 6. A execução em campo — Agendamento (fase 6) e execução com fotos, RDO e checklist (fase 7) — Comercial agenda · Operações executa
+- 7. O relatório final — Relatório com laudos (fase 8) e aprovação (fase 9) — Operações escreve · Gerência aprova
+- 8. Entrega e encerramento — Entrega ao cliente e encerramento da OS (fase 10) — Comercial · Gerência reabre se precisar
+- 9. O ciclo recomeça — Renovação vira oportunidade sozinha; Dashboards — Comercial · Gerência acompanha
 
 ## 2. Acesso ao sistema
 
@@ -63,7 +78,7 @@ Todas as áreas ficam na barra azul do topo; no celular, elas ficam no botão de
 - **💬 Feedback**: envie erros e sugestões para a equipe do sistema.
 - **🔔 Notificações**: avisos de agendamentos, remarcações, relatórios e lembretes. O número mostra quantas estão sem ler.
 - **☀️ / 🌙 Tema**: alterna entre claro e escuro.
-- **🤖 Robô ASP**: o assistente, que fica flutuando no canto inferior direito da tela. Tira dúvidas de uso e consulta clientes, projetos e OS (veja a seção 16).
+- **🤖 Robô ASP**: o assistente, que fica flutuando no canto inferior direito da tela. Tira dúvidas de uso e consulta clientes, projetos e OS (veja a seção 17).
 - **Seu nome**: abre Meu perfil. Ao lado fica o botão **Sair**.
 
 ### Instalar como aplicativo (recomendado no celular)
@@ -79,6 +94,8 @@ asp-plataform.vercel.app
 **Sem internet (offline)**: em campo, você pode continuar registrando medições, fotos e RDOs. Os dados ficam numa fila no aparelho e são enviados sozinhos quando a conexão volta. O indicador ⏳ na barra mostra quantos itens estão pendentes — não feche o app nem limpe os dados do navegador enquanto houver pendências.
 
 ## 4. Clientes e contatos
+
+**Quem faz:** Comercial (cadastra e mantém). Gerência e Administrador também podem.
 
 Todo projeto começa por um cliente cadastrado; cadastre-o uma vez e reaproveite em todos os projetos.
 
@@ -105,7 +122,54 @@ O sistema bloqueia CNPJ inválido ou já cadastrado e avisa quando a razão soci
 
 **Excluir cliente**: não é possível enquanto houver projetos em andamento. O cliente vai para a Lixeira e pode ser restaurado em até 30 dias.
 
-## 5. Projetos
+## 5. Follow-up (CRM): da oportunidade ao ganho
+
+**Quem faz:** Comercial (conduz as vendas). Gerência e Administração acompanham e também podem editar.
+
+O Follow-up é o quadro de vendas: cada card é uma oportunidade com um cliente. Ela anda pelas etapas comerciais até ser ganha (e virar projeto) ou perdida (com o motivo). É aqui que começam os capítulos 1 a 3 da história do projeto.
+
+### O quadro e as etapas
+
+- **Etapas**: Prospecção, Qualificação, Visita técnica, Proposta e Negociação, mais as colunas Ganhas e Perdidas.
+- **+ Nova oportunidade**: cliente, título, valor, origem (licitação, indicação, cliente recorrente, site, prospecção ativa ou outro), responsável e previsão de fechamento.
+- **Título**: escolha o Procedimento do Catálogo (o título fica com o nome dele) ou "Outros" para escrever outra descrição.
+- **Mover**: arraste o card para outra coluna e informe a data. Em Ganhas, informe a data do fechamento; em Perdidas, o motivo da perda. Arrastar uma oportunidade fechada para uma etapa a reabre.
+- **Filtros**: busca, cliente, procedimento (ou "Outros"), responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
+
+### A ficha da oportunidade
+
+- **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades, as versões da proposta e o histórico.
+- **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.
+- **Atividades**: registre cada contato (ligação, e-mail, WhatsApp, reunião, visita ou anotação). Elas formam a linha do tempo da oportunidade e aparecem também na ficha do cliente.
+
+### Propostas
+
+Em **+ Nova versão**, informe a data de envio, o valor, uma observação e, se quiser, o arquivo (PDF, Word ou Excel, até 20 MB). A versão mais nova com valor passa a ser o valor da oportunidade. Só quem registrou a versão, ou o Administrador, pode apagá-la.
+
+### Fechar o ganho: projeto e datas da Operação
+
+Em **✓ Ganha**, **Fechar ganho** abre um formulário só:
+
+- **Projeto**: data do ganho, código sugerido e pedido de compra.
+- **OS**: identificação, procedimento (já vem o do título), se haverá inspeção e o tanque.
+- **Datas da Operação**: data da inspeção, período da execução e a equipe.
+
+Ao confirmar, o sistema cria o projeto ligado à oportunidade, a OS e os dois agendamentos, que entram direto na agenda da Operação (a equipe é avisada; equipamentos e checklist a Operação completa na OS), e marca a oportunidade como ganha. Se algum passo for recusado, os anteriores ficam feitos e **Tentar de novo** continua de onde parou.
+
+- **Só marcar como ganha**: fecha sem criar nada; depois, **📁 Abrir projeto e agendar** na ficha faz o mesmo formulário.
+- **📅 Nova OS e datas**: com o projeto já ligado, cria mais uma OS nele, já agendada.
+- **🔗 Ligar a projeto existente**: para ganhas antigas cujo projeto já foi aberto; escolha o projeto do cliente. **Desligar** solta um vínculo errado sem apagar o projeto.
+
+### Perda e renovação
+
+- **✕ Perdida**: informe a data e o motivo (preço, prazo, concorrente, sem orçamento, licitação, desistência, sem retorno ou outro, com detalhe). Os motivos aparecem no Dashboard Comercial.
+- **Renovação automática**: para o cliente recorrente, o sistema abre a oportunidade de renovação junto com o aviso de 30 dias (veja o capítulo 4).
+
+## 6. Projetos
+
+**Quem faz:** Comercial abre o projeto (pelo Fechar ganho do Follow-up ou direto aqui). Gerência e Administrador também podem.
+
+Quando a venda é fechada no Follow-up, **Fechar ganho** já cria o projeto ligado à oportunidade, com a OS e as datas da Operação (capítulo 5). O caminho abaixo abre o projeto direto, sem passar pelo Follow-up.
 
 Um projeto corresponde a um pedido de compra do cliente e reúne as OSs (tanques) atendidas nele. Quem abre projetos: Comercial, Gerência e Administrador.
 
@@ -122,7 +186,9 @@ Um projeto corresponde a um pedido de compra do cliente e reúne as OSs (tanques
 
 **Editar projeto**: na página do projeto, use **Editar**. As mesmas regras valem na edição. Mudar "Haverá inspeção?" no projeto só afeta as OSs criadas depois.
 
-## 6. Ordens de Serviço (OS) e fases
+## 7. Ordens de Serviço (OS) e fases
+
+**Quem faz:** Comercial cria a OS; daí em diante, cada fase tem a sua área (veja a Figura 1).
 
 Cada tanque ou ponto atendido é uma OS, e ela avança por fases de 2 a 10; uma OS sem inspeção começa direto na fase 6.
 
@@ -148,7 +214,9 @@ Figura 1 — Fluxo das fases da OS
 
 Com inspeção, a OS passa pelas fases 2 a 5 antes da execução; uma reprovação na fase 5 ou 9 devolve a OS à fase do relatório.
 
-## 7. Agendamento (fases 2 e 6)
+## 8. Agendamento (fases 2 e 6)
+
+**Quem faz:** Comercial (também Gerência e Administrador). A Operação completa equipe, equipamentos e checklist.
 
 O Comercial agenda a visita de inspeção na fase 2 e a execução na fase 6; a equipe agendada recebe notificação, e-mail e convite de calendário.
 
@@ -174,7 +242,9 @@ O Comercial agenda a visita de inspeção na fase 2 e a execução na fase 6; a 
 
 Duas pessoas ou equipamentos no **mesmo local** (vários tanques do mesmo cliente) não geram aviso.
 
-## 8. Coleta de dados da inspeção (fase 3)
+## 9. Coleta de dados da inspeção (fase 3)
+
+**Quem faz:** Operações registra a medição; Gerência (ou função com permissão) aprova.
 
 Na fase 3 a equipe registra a medição de sedimento do tanque; uma medição aprovada alimenta o relatório. Registram: Operações e as funções com a permissão (Técnico, Auxiliar e outras liberadas).
 
@@ -193,7 +263,9 @@ Na fase 3 a equipe registra a medição de sedimento do tanque; uma medição ap
 
 **Aprovar a medição**: Gerência, Administrador e funções com a permissão (ex.: Coordenador) clicam em **Aprovar medição**. Só uma fica aprovada por OS. Editar uma medição aprovada retira a aprovação, e é preciso aprovar de novo.
 
-## 9. Relatórios (fases 4 e 8)
+## 10. Relatórios (fases 4 e 8)
+
+**Quem faz:** Operações.
 
 O relatório é gerado no próprio sistema a partir do modelo do procedimento: relatório de inspeção na fase 4 e de execução na fase 8.
 
@@ -248,9 +320,11 @@ O modal **Gerar Relatório Técnico** mostra as seções **na mesma ordem e com 
 - **Conclusão das Análises Laboratoriais** (seção Análise): **preenchida automaticamente** a cada laudo anexado ("✍ Preenchida automaticamente… revise"), com frases prontas pelo cloro, pH e laudos — sempre dizendo de qual amostra fala e só afirmando conformidade com dado completo. Se você já escreveu no campo, o seu texto é mantido e aparece "há uma sugestão nova"; **Sugerir texto** refaz quando quiser. Vazio, o título não sai no documento.
 - **Fotos da coleta**: entram sozinhas nas vagas do modelo, contando a história da operação — **Preparação** (higienização e robô) › **Antes da limpeza** (coleta de água, envio para análise, fundo do tanque) › **Durante a limpeza** › **Após a limpeza** (fundo limpo, coleta de água, envio para análise).
 - **Fotos da coleta dentro de cada tópico**: cada tópico mostra, no bloco **Fotos da coleta de execução**, as fotos que entram nele — nas vagas do modelo, no fim da seção ou num subtópico (ex.: "Higienização do robô") —, com miniatura (toque para ampliar), escolha da vaga ou **Fora das vagas** (com legenda) e **Remover**. No topo do modal fica só um aviso curto: as pendências da coleta, as fotos que não entraram (ex.: repetidas) e as que caíram em tópico desmarcado.
-- **Limpeza sem modelo próprio no Catálogo**: a **Análise Físico Química e Laboratorial** vira um tópico próprio, **antes da Conclusão**, com o texto padrão do POP 001 (já preenchido e editável), as tabelas **Valores medidos em campo**, **Amostras enviadas ao laboratório** e **Resultados das análises laboratoriais**, a **Conclusão das Análises Laboratoriais** e as páginas dos laudos (prints). Para usar o modelo completo do POP 001, anexe o .docx no Catálogo (seção 13).
+- **Limpeza sem modelo próprio no Catálogo**: a **Análise Físico Química e Laboratorial** vira um tópico próprio, **antes da Conclusão**, com o texto padrão do POP 001 (já preenchido e editável), as tabelas **Valores medidos em campo**, **Amostras enviadas ao laboratório** e **Resultados das análises laboratoriais**, a **Conclusão das Análises Laboratoriais** e as páginas dos laudos (prints). Para usar o modelo completo do POP 001, anexe o .docx no Catálogo (seção 14).
 
-## 10. Aprovação e versão assinada (fases 5 e 9)
+## 11. Aprovação e versão assinada (fases 5 e 9)
+
+**Quem faz:** Gerência (e Administrador).
 
 A Gerência aprova ou reprova a versão do relatório que está em aprovação; depois de aprovada, Comercial ou Gerência enviam a versão assinada em PDF.
 
@@ -268,7 +342,9 @@ A Gerência aprova ou reprova a versão do relatório que está em aprovação; 
 
 Se duas pessoas aprovarem ao mesmo tempo, só a primeira vale; a segunda vê "Já aprovado por … em …".
 
-## 11. Execução em campo (fase 7)
+## 12. Execução em campo (fase 7)
+
+**Quem faz:** Operações: a equipe agendada registra fotos, RDO e checklist.
 
 Durante a execução, a equipe registra pelo celular três coisas: a coleta de fotos, um RDO por dia e o checklist de equipamentos. Técnicos e Auxiliares podem registrar; aprovar, excluir e avançar fase continuam com Operações, Gerência e Administrador.
 
@@ -301,7 +377,9 @@ O RDO bloqueia pessoa repetida, atividade repetida, ordem impossível (saída an
 - No widget, **📷 Enviar fotos que faltam** mostra só as vagas pendentes, com Foto e Galeria ali mesmo; **📝 Preparar RDO de hoje** abre a OS na seção de RDOs.
 - **Não avisar mais hoje** (na notificação, no Android, ou no widget) desliga os avisos só até o fim do dia.
 
-## 12. Encerramento e entregas (fase 10)
+## 13. Encerramento e entregas (fase 10)
+
+**Quem faz:** Comercial entrega e encerra (também Gerência e Administrador); só Gerência e Administrador reabrem.
 
 Na fase 10, registre a entrega dos documentos ao cliente e encerre a OS; quando todas as OSs de um projeto são encerradas, o projeto fica Concluído sozinho.
 
@@ -322,7 +400,9 @@ Na fase 10, registre a entrega dos documentos ao cliente e encerre a OS; quando 
 
 **Reabrir**: Gerência ou Administrador, com motivo. A OS volta a aceitar edições e o projeto deixa de ser Concluído.
 
-## 13. Catálogo
+## 14. Catálogo
+
+**Quem faz:** Operações, Gerência e Administrador editam; todos consultam.
 
 O Catálogo guarda os procedimentos e os equipamentos usados em todo o sistema; quem edita: Administrador, Operações e Gerência.
 
@@ -346,7 +426,9 @@ O Catálogo guarda os procedimentos e os equipamentos usados em todo o sistema; 
 
 Use as setas ↑↓ para ordenar a lista.
 
-## 14. Administração (somente Administrador)
+## 15. Administração (somente Administrador)
+
+**Quem faz:** Administrador.
 
 A tela Administração de usuários tem três abas: Usuários, Funções e Permissões por função.
 
@@ -374,9 +456,11 @@ Proteções: e-mail não se repete; você não pode rebaixar, desativar ou exclu
 
 Administrador e Gerência (e Operações, nas três últimas) já têm esses direitos pelo perfil.
 
-**Robô ASP — Avaliações**: o acompanhamento do assistente fica no link **Avaliações**, no rodapé do chat do robô (veja a seção 16).
+**Robô ASP — Avaliações**: o acompanhamento do assistente fica no link **Avaliações**, no rodapé do chat do robô (veja a seção 17).
 
-## 15. Dashboards, Arquivos e Lixeira
+## 16. Dashboards, Arquivos e Lixeira
+
+**Quem faz:** cada área vê o seu Dashboard: Operações (Operações, Gerência e Administrador), Gerência (Gerência e Administrador) e Comercial (Comercial e Administrador).
 
 **Quem vê cada Dashboard**: Administração vê os três (Operações, Gerência e Comercial); Gerência vê o de Gerência e o de Operações; Operações vê o de Operações; Comercial vê só o Comercial. Quem vê mais de um troca pelas abas no topo da página.
 
@@ -388,27 +472,19 @@ Administrador e Gerência (e Operações, nas três últimas) já têm esses dir
 - **Qualidade de campo**: RDOs faltando, fotos incompletas, medições sem aprovação e laudos fora do limite.
 - **Próximos serviços recorrentes**: clientes perto do vencimento, com **+ Novo projeto**.
 - Cada gráfico tem **Ver tabela**.
-- **Pendências de campo — hoje**: no topo, para quem está na equipe de uma execução hoje, as fotos e o RDO que faltam em cada OS (veja a seção 11).
+- **Pendências de campo — hoje**: no topo, para quem está na equipe de uma execução hoje, as fotos e o RDO que faltam em cada OS (veja a seção 12).
 
 **Dashboard de Gerência**: resultado da operação, com filtros de período, cliente e procedimento. Mostra serviços concluídos (comparados ao período anterior e, mês a mês, ao mesmo mês do ano anterior), prazo total da OS até a entrega do relatório, carteira em aberto, retrabalho de relatórios e seus motivos, água conforme após a limpeza, dias em campo por OS, ocupação média da equipe e dos equipamentos, pendências de campo e calibrações vencidas ou a vencer.
 
 **Dashboard Comercial**: clientes e vendas, com filtros de período, cliente e procedimento (no Follow-up, vale o procedimento do título da oportunidade). Mostra renovações vencidas ou a vencer em 30, 60 e 90 dias, clientes sem serviço há mais de 12 meses, prazo de entrega ao cliente, OSs em andamento por cliente, o funil do Follow-up (processos por etapa, conversão, tempo por etapa e processos parados há mais de 30 dias), projetos novos de clientes novos e recorrentes e a taxa de recompra. Do Follow-up, mostra também os follow-ups atrasados (próximas ações vencidas, para hoje e oportunidades sem próxima ação, com o resumo por responsável), o pipeline em aberto (em R$, com o previsto para fechar em 30 dias), a taxa de ganho das fechadas no período (com valor ganho, ticket médio e ciclo de venda), os motivos de perda, a origem das oportunidades e o histórico **Projetos vindos do Follow-up**: cada oportunidade ganha com o projeto aberto a partir dela e a situação desse projeto.
 
-**Follow-up (CRM do Comercial)**: as oportunidades de venda num quadro com uma coluna por etapa — Prospecção, Qualificação, Visita técnica, Proposta e Negociação — e as colunas Ganhas e Perdidas. Usado pelo Comercial, pela Gerência e pela Administração.
-
-- **Título**: escolha o Procedimento do Catálogo (o título fica com o nome dele) ou "Outros" para escrever outra descrição.
-- **Mover**: arraste o card para outra coluna e informe a data. Em Ganhas, informe a data do fechamento; em Perdidas, o motivo da perda. Arrastar uma oportunidade fechada para uma etapa a reabre.
-- **Ficha**: toque no card para ver e editar valor, origem, responsável, contato, previsão de fechamento, a próxima ação, as atividades (ligação, e-mail, WhatsApp, reunião, visita, anotação), as versões da proposta e o histórico.
-- **Próxima ação**: o que fazer e quando. No dia, o responsável recebe um aviso. O topo mostra quantas estão atrasadas e quantas oportunidades estão sem próxima ação.
-- **Filtros**: busca, cliente, procedimento (ou "Outros"), responsável ("Minhas"), situação da próxima ação e período das ganhas e perdidas.
-- **Propostas**: em **+ Nova versão**, informe a data de envio, o valor, uma observação e, se quiser, o arquivo (PDF, Word ou Excel, até 20 MB). A versão mais nova com valor passa a ser o valor da oportunidade.
-- **Ganho → projeto e agenda**: em **✓ Ganha**, **Fechar ganho** abre um formulário só: pedido de compra (o código do projeto vem sugerido), a OS (identificação, procedimento, se haverá inspeção e o tanque), a data da inspeção, o período da execução e a equipe. Ao confirmar, o sistema cria o projeto ligado à oportunidade, a OS e os dois agendamentos, que entram direto na agenda da Operação (a equipe é avisada; equipamentos e checklist a Operação completa na OS), e marca a oportunidade como ganha. Se algum passo for recusado, os anteriores ficam feitos e **Tentar de novo** continua de onde parou. **Só marcar como ganha** fecha sem criar nada; depois, **📁 Abrir projeto e agendar** na ficha faz o mesmo formulário. Com o projeto já ligado, **📅 Nova OS e datas** cria mais uma OS nele, já agendada. Se o projeto já foi aberto antes (ganhas antigas), use **🔗 Ligar a projeto existente** e escolha o projeto do cliente; **Desligar** solta um vínculo errado sem apagar o projeto.
-
 **Arquivos**: reúne os documentos de todos os projetos (medições, relatórios, versões assinadas, laudos, RDOs). Filtre por tipo e baixe um ZIP organizado em pastas por cliente, projeto e OS.
 
 **Lixeira**: projetos, OSs, clientes, medições e relatórios excluídos ficam aqui por **30 dias** e podem ser restaurados. Depois disso são apagados de vez. Restaurar um item que duplicaria outro ativo é bloqueado.
 
-## 16. Robô ASP (assistente)
+## 17. Robô ASP (assistente)
+
+**Quem faz:** Todos.
 
 O Robô ASP responde dúvidas de uso da plataforma e consulta os dados do sistema: clientes, projetos, OS, agenda, coletas e relatórios. Ele **só consulta** — não altera nada — e só vê o que você tem permissão de ver.
 
@@ -448,7 +524,7 @@ O Robô ASP responde dúvidas de uso da plataforma e consulta os dados do sistem
 - **Respostas do robô**: filtre as 👎, as recusas e as respostas de reserva. Em qualquer uma, **Virar exemplo** (ou **Escrever a resposta certa como exemplo**) grava a resposta ideal, que ensina o tom e o formato ao robô para **todos** — tire do texto o que nem todos podem ver.
 - **Respostas guardadas**: dúvidas de uso repetidas são respondidas sem gastar a cota. Um 👎 tira a resposta da memória; **apagar todas** limpa tudo.
 
-## 17. Perguntas frequentes
+## 18. Perguntas frequentes
 
 - **Situação** — **O que fazer**
 - O botão Salvar está desativado — Procure o ⛔ ao lado dos campos; o resumo junto ao botão lista o que falta
