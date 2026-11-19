@@ -99,6 +99,12 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
   const linhas = await todas<any>(() => supabase.from("gp_processos")
     // "*": resultado/resultado_em sem quebrar antes da migração do CRM.
     .select("*, orgao:gp_orgaos(razao_social)").order("id"));
+  // Nomes dos responsáveis — complementar: se falhar, os follow-ups saem sem nome.
+  const nomes = new Map<string, string>();
+  try {
+    const perfis = await todas<any>(() => supabase.from("gp_profiles").select("id, nome_completo, email").order("id"));
+    perfis.forEach((u: any) => nomes.set(u.id, u.nome_completo || u.email || "Usuário"));
+  } catch { /* segue sem nomes */ }
   return linhas.map((p: any) => ({
     id: p.id, titulo: p.titulo || "Processo sem título", orgao_id: p.orgao_id || null, orgao_nome: p.orgao?.razao_social || null,
     etapa: Number(p.etapa) || 0, created_at: p.created_at,
@@ -108,5 +114,7 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     valor: p.valor == null ? null : Number(p.valor), origem: p.origem || null,
     motivo_perda: p.motivo_perda || null, previsao_fechamento: p.previsao_fechamento || null,
     projeto_id: p.projeto_id || null,
+    responsavel_id: p.responsavel_id || null, responsavel_nome: p.responsavel_id ? nomes.get(p.responsavel_id) || null : null,
+    proxima_acao: p.proxima_acao || null, proxima_acao_em: p.proxima_acao_em || null,
   }));
 }

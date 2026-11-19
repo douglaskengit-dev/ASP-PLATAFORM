@@ -11,7 +11,7 @@ export type ChaveDef =
   | "gConcluidas" | "gPrazoTotal" | "gCarteira" | "gRetrabalho" | "gPendencias" | "gOcupacao" | "gCalibracao" | "gAgua"
   | "gDiasCampo" | "gMaisAntigas"
   | "cRenovacoes" | "cInativos" | "cPrazoEntrega" | "cAndamento" | "cFunil" | "cConversao" | "cParados" | "cProjetosNovos" | "cRecompra"
-  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup";
+  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup" | "cFollowups";
 
 /** `painel` = o Dashboard em cujo glossário a definição aparece (sem ele, Operações). */
 export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; painel?: PainelId }> = {
@@ -219,6 +219,11 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
     painel: "comercial",
     titulo: "Origem das oportunidades",
     texto: "Oportunidades abertas no período, por origem (Licitação, Indicação, Cliente recorrente…). Ganhas e perdidas = o desfecho dessas mesmas oportunidades até agora; a taxa é ganhas ÷ (ganhas + perdidas). Oportunidade ainda em aberto não entra na taxa.",
+  },
+  cFollowups: {
+    painel: "comercial",
+    titulo: "Follow-ups atrasados",
+    texto: "Oportunidades em aberto cuja próxima ação tem data anterior a hoje. O KPI mostra também as que têm ação para hoje e as que estão sem próxima ação marcada. O quadro lista as atrasadas (a mais antiga primeiro) e o resumo por responsável. Estado atual.",
   },
   cProjetosFollowup: {
     painel: "comercial",
