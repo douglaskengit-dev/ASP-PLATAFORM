@@ -85,6 +85,8 @@ function Conteudo({ p }: { p: PainelComercial }) {
         <Kpi def="cAndamento" valor={num(k.andamento.oss)} sub={<>em {plural(k.andamento.clientes, "cliente", "clientes")}</>} />
         <Kpi def="cFunil" valor={num(k.funil.ativos)} alerta={k.parados > 0}
           sub={<>oportunidades em aberto · {plural(k.parados, "parado", "parados")} · {num(k.funil.ganhasPeriodo)} {k.funil.ganhasPeriodo === 1 ? "ganha" : "ganhas"} e {num(k.funil.perdidasPeriodo)} {k.funil.perdidasPeriodo === 1 ? "perdida" : "perdidas"} no período</>} />
+        <Kpi def="cFollowups" valor={num(k.followups.atrasadas)} alerta={k.followups.atrasadas > 0}
+          sub={<>{num(k.followups.hoje)} para hoje · {num(k.followups.semAcao)} sem próxima ação · de {plural(k.followups.abertas, "oportunidade aberta", "oportunidades abertas")}</>} />
         <Kpi def="cPipeline" valor={moeda(k.pipeline.valor)}
           sub={<>{plural(k.pipeline.abertas, "oportunidade", "oportunidades")}{k.pipeline.semValor ? ` (${num(k.pipeline.semValor)} sem valor)` : ""} · {moeda(k.pipeline.previsto30)} previsto em 30 dias ({num(k.pipeline.qtdPrevisto30)})</>} />
         <Kpi def="cTaxaGanho" periodo valor={pct(k.ganho.taxa)}
@@ -109,6 +111,7 @@ function Conteudo({ p }: { p: PainelComercial }) {
         <Funil p={p} />
         <Parados p={p} />
       </div>
+      <div className={s.cheio}><Followups p={p} /></div>
       <div className={s.grade2}>
         <MotivosPerda p={p} />
         <Origens p={p} />
@@ -230,6 +233,39 @@ function Parados({ p }: { p: PainelComercial }) {
             <span className={`${s.chip} ${s.chipAlerta}`}>{dias(x.dias)}</span>
           </div>
         )} />
+      )}
+    </Secao>
+  );
+}
+
+function Followups({ p }: { p: PainelComercial }) {
+  const f = p.kpis.followups;
+  const resp = p.followupsPorResponsavel.filter((r) => r.atrasadas || r.semAcao);
+  return (
+    <Secao def="cFollowups" contador={f.atrasadas}>
+      {f.abertas === 0 ? <Vazio>Nenhuma oportunidade em aberto.</Vazio> : (
+        <>
+          {resp.length > 0 && (
+            <p className={s.sub} style={{ margin: "0 0 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {resp.map((r) => (
+                <span key={r.responsavelId || "sem"} className={`${s.chip}${r.atrasadas ? ` ${s.chipAlerta}` : ""}`}>
+                  {r.nome}: {num(r.atrasadas)} atrasada{r.atrasadas === 1 ? "" : "s"}{r.semAcao ? ` · ${num(r.semAcao)} sem ação` : ""}
+                </span>
+              ))}
+            </p>
+          )}
+          {p.followupsAtrasados.length === 0 ? <Vazio>Nenhuma próxima ação atrasada.</Vazio> : (
+            <ListaCurta itens={p.followupsAtrasados} inicial={8} total={f.atrasadas} chave={(x) => x.id} render={(x) => (
+              <div className={s.linha}>
+                <span>
+                  <Link className={s.link} href={`/followup?processo=${x.id}`}>{x.titulo}</Link>
+                  <span className={s.sub}>{[x.cliente, x.acao, x.responsavel].filter(Boolean).join(" · ")}{" · "}era para {ddmmaa(x.em)}</span>
+                </span>
+                <span className={`${s.chip} ${s.chipAlerta}`}>{dias(x.dias)}</span>
+              </div>
+            )} />
+          )}
+        </>
       )}
     </Secao>
   );

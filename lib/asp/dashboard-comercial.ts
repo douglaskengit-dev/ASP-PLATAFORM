@@ -11,7 +11,7 @@
  * aberto, ganha ou perdida (resultado_em = dia do fechamento).
  * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
-import { rotuloMotivoPerda, rotuloOrigem } from "../validacao/crm";
+import { rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao } from "../validacao/crm";
 import { diaBrasilia, fimDaOS } from "../validacao";
 import {
   diferencaDias, estatistica, intervaloDoPeriodo, montarRecorrencia, noIntervalo, porChave,
@@ -39,6 +39,10 @@ export interface ProcessoBruto {
   previsao_fechamento?: string | null;
   /** Projeto aberto a partir da oportunidade ganha (Abrir projeto). */
   projeto_id?: string | null;
+  responsavel_id?: string | null;
+  responsavel_nome?: string | null;
+  proxima_acao?: string | null;
+  proxima_acao_em?: string | null;
 }
 
 const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
@@ -69,10 +73,16 @@ export interface PainelComercial {
     projetosNovos: { periodo: number; anterior: number; variacao: number | null; clientesNovos: number; recorrentes: number };
     recompra: { base: number; recompraram: number; taxa: number | null };
     /** Em aberto agora: soma dos valores; previsto30 = previsão de fechamento até hoje + 30 dias (inclui as atrasadas). */
+    /** Em aberto agora, pela próxima ação: atrasada (data < hoje), para hoje ou sem próxima ação. */
+    followups: { abertas: number; atrasadas: number; hoje: number; semAcao: number };
     pipeline: { valor: number; abertas: number; semValor: number; previsto30: number; qtdPrevisto30: number };
     /** Fechadas no período (data do resultado). taxa = ganhas / (ganhas + perdidas). */
     ganho: { ganhas: number; perdidas: number; taxa: number | null; valorGanho: number; valorPerdido: number; ticketMedio: number | null; cicloMediano: number | null };
   };
+  /** Próximas ações atrasadas (a mais antiga primeiro). */
+  followupsAtrasados: { id: string; titulo: string; cliente: string | null; responsavel: string | null; acao: string | null; em: string; dias: number }[];
+  /** Por responsável: abertas, atrasadas e sem próxima ação (mais atrasadas primeiro). */
+  followupsPorResponsavel: { responsavelId: string | null; nome: string; abertas: number; atrasadas: number; semAcao: number }[];
   /** Perdidas no período, por motivo (mais frequente primeiro). */
   motivosPerda: { motivo: string; rotulo: string; n: number; valor: number }[];
   /** Abertas no período, por origem; ganhas/perdidas = desfecho dessas mesmas oportunidades. */
@@ -273,6 +283,24 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
       taxa: g.length + pe ? g.length / (g.length + pe) : null, valorGanho: soma(g) };
   }).sort((a, b) => b.criadas - a.criadas || b.ganhas - a.ganhas || a.rotulo.localeCompare(b.rotulo, "pt-BR"));
 
+  // ── Follow-ups (próxima ação) ─────────────────────────────────────────────
+  const sit = new Map(emAberto.map((p) => [p.id, situacaoProximaAcao({ resultado: "aberta", proxima_acao_em: p.proxima_acao_em?.slice(0, 10) || null }, hoje)]));
+  const followupsAtrasados = emAberto.filter((p) => sit.get(p.id) === "atrasada").map((p) => ({
+    id: p.id, titulo: p.titulo, cliente: p.orgao_nome, responsavel: p.responsavel_nome || null, acao: p.proxima_acao || null,
+    em: p.proxima_acao_em!.slice(0, 10), dias: diferencaDias(p.proxima_acao_em!.slice(0, 10), hoje),
+  })).sort((a, b) => b.dias - a.dias || a.titulo.localeCompare(b.titulo, "pt-BR"));
+  const porResp = new Map<string, { responsavelId: string | null; nome: string; abertas: number; atrasadas: number; semAcao: number }>();
+  for (const p of emAberto) {
+    const k = p.responsavel_id || "__sem";
+    const r = porResp.get(k) || { responsavelId: p.responsavel_id || null, nome: p.responsavel_id ? p.responsavel_nome || "Usuário" : "Sem responsável", abertas: 0, atrasadas: 0, semAcao: 0 };
+    r.abertas++;
+    if (sit.get(p.id) === "atrasada") r.atrasadas++;
+    if (sit.get(p.id) === "sem_acao") r.semAcao++;
+    porResp.set(k, r);
+  }
+  const followupsPorResponsavel = Array.from(porResp.values())
+    .sort((a, b) => b.atrasadas - a.atrasadas || b.semAcao - a.semAcao || b.abertas - a.abertas || a.nome.localeCompare(b.nome, "pt-BR"));
+
   // ── Histórico: ganhas → projeto ───────────────────────────────────────────
   const ossPorProjeto = porChave(d.oss, (o) => o.projeto_id);
   const historico = procs.filter((p) => p.resultado === "ganha").map((p) => {
@@ -343,6 +371,11 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
         clientesNovos: noPer.filter(ehNovo).length, recorrentes: noPer.filter((p) => !ehNovo(p)).length,
       },
       recompra: { base: baseRecompra, recompraram, taxa: baseRecompra ? recompraram / baseRecompra : null },
+      followups: {
+        abertas: emAberto.length, atrasadas: followupsAtrasados.length,
+        hoje: emAberto.filter((p) => sit.get(p.id) === "hoje").length,
+        semAcao: emAberto.filter((p) => sit.get(p.id) === "sem_acao").length,
+      },
       pipeline: {
         valor: soma(emAberto), abertas: emAberto.length, semValor: emAberto.filter((p) => !(valorDe(p) > 0)).length,
         previsto30: soma(previstas), qtdPrevisto30: previstas.length,
@@ -357,6 +390,8 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     },
     motivosPerda,
     origens,
+    followupsAtrasados: followupsAtrasados.slice(0, 30),
+    followupsPorResponsavel,
     projetosFollowup: { total: historico.length, comProjeto: comProjetoHist, semProjeto: historico.length - comProjetoHist, itens: historico.slice(0, 100) },
     renovacoes: renovacoes.slice(0, 30),
     inativos: inativos.slice(0, 30),
