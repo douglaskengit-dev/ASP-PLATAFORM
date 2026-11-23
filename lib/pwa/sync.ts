@@ -9,7 +9,7 @@
  * Quem precisa (ex.: /api/coletas) usa a chave para não duplicar o registro
  * em reenvio ou duplo clique; o chamador pode passar a sua (ex.: o id da
  * coleta gerado no clique). */
-import { adicionar, listar, remover, contar, ItemFila } from "./fila";
+import { adicionar, listar, remover, contar } from "./fila";
 
 export interface ResultadoEnvio {
   ok: boolean;

@@ -64,7 +64,7 @@ import { useSecoes } from "@/lib/asp/useSecoes";
 import SecaoRecolhivel from "@/app/components/SecaoRecolhivel";
 import { enviarJson, enviarArquivo, novoId } from "@/lib/pwa/sync";
 import {
-  podeAprovarColeta, podeEditarRevisao, podePrepararRdo, podeRegistrarFotos, podeRegistrarMedicao,
+  podeAprovarColeta, podeEditarRevisao, podePrepararRdo, podeRegistrarMedicao,
 } from "@/lib/asp/permissoes";
 import { carregarPermissoesFuncao } from "@/lib/asp/funcoes";
 import type { FuncaoRef, PermissoesFuncao } from "@/lib/validacao/funcao";

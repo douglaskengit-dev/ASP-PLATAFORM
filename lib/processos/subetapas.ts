@@ -56,8 +56,6 @@ export interface GrupoSubetapas {
  * assim "Relatório" e "Relatório de Limpeza" têm progresso independente. */
 export type SubetapasProcesso = Record<string, GrupoSubetapas>;
 
-export const GRUPO_VAZIO: GrupoSubetapas = { atual: null, historico: [] };
-
 export type AcaoSubetapa = "enviar" | "revisar_aprovar" | "revisar_reprovar" | "aprovar";
 
 const PERMISSAO_ACAO: Record<AcaoSubetapa, Array<"admin" | "editor">> = {

@@ -27,7 +27,7 @@ import { AbaFuncoes, AbaPermissoes, opcoesFuncao, useFuncoesAdmin } from "@/app/
 import {
   addAviso, addErro, checarAlteracaoAcesso, dataHoraCurta, ehPerfilLegado, mesclar, nomeCompletoValido,
   normalizarEspacos, novoResultado, ROTULOS_USUARIO, SENHA_MINIMA, temErros, validarUsuario, VALIDADE_LINK_TEXTO,
-  type FuncaoRef, type ResultadoValidacao, type TipoLinkAcesso,
+  type FuncaoRef, type ResultadoValidacao, type TipoLinkAcesso, lerJson, resultadoDaApi,
 } from "@/lib/validacao";
 
 interface Profile {
@@ -159,18 +159,7 @@ function AvisoEnvio({ envio, email, onReenviar, reenviando }: {
   );
 }
 
-async function lerJson(resp: Response): Promise<any> {
-  try { return await resp.json(); } catch { return {}; }
-}
 
-/** Erros/avisos da resposta da API → resultado por campo. */
-function resultadoDaApi(dados: any, campoPadrao: string): ResultadoValidacao {
-  const r = novoResultado();
-  if (dados?.erros) Object.entries(dados.erros as Record<string, string[]>).forEach(([c, l]) => l.forEach((m) => addErro(r, c, m)));
-  if (dados?.avisos) Object.entries(dados.avisos as Record<string, string[]>).forEach(([c, l]) => l.forEach((m) => addAviso(r, c, m)));
-  if (dados?.erro && !temErros(r)) addErro(r, campoPadrao, dados.erro);
-  return r;
-}
 
 function textoRemocao(ag: any): string {
   if (!ag || !ag.alterados) return "";

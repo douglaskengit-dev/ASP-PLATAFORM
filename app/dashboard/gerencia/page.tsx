@@ -10,11 +10,10 @@ import TituloPagina from "@/app/components/TituloPagina";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import type { PainelGerencia } from "@/lib/asp/dashboard-gerencia";
 import { AbasDashboard, CamposPeriodo, ColunasMensais, FILTROS_PADRAO, Glossario, usePainel } from "../painel-comum";
-import { ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, num, pct, plural, Secao, Tabela, useVisao, Vazio } from "../componentes";
+import { ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, num, pct, plural, sinal, Secao, Tabela, useVisao, Vazio } from "../componentes";
 import { GradeKpis, Personalizacao } from "../personalizar";
 import s from "../dashboard.module.css";
 
-const sinal = (v: number | null) => (v == null ? "" : `${v > 0 ? "+" : ""}${pct(v)}`);
 
 export default function DashboardGerenciaPage() {
   const h = usePainel<PainelGerencia>("/api/dashboard/gerencia");

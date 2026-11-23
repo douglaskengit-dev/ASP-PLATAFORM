@@ -8,7 +8,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ThemeToggle from "@/app/components/ThemeToggle";
-import { CHAVE_EMAIL_ESQUECI, SENHA_MINIMA, tokenDoLink, validarNovaSenha } from "@/lib/validacao";
+import { CHAVE_EMAIL_ESQUECI, SENHA_MINIMA, tokenDoLink, validarNovaSenha, lerJson } from "@/lib/validacao";
 
 type Estado =
   | { fase: "carregando" }
@@ -16,9 +16,6 @@ type Estado =
   | { fase: "erro"; estado: "expirado" | "usado" | "invalido" | "falha"; mensagem: string; email?: string }
   | { fase: "pronto"; destino: string; entrou: boolean };
 
-async function lerJson(resp: Response): Promise<any> {
-  try { return await resp.json(); } catch { return {}; }
-}
 
 function DefinirSenhaForm() {
   const router = useRouter();

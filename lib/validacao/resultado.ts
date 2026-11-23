@@ -34,10 +34,6 @@ export function temErros(r: ResultadoValidacao): boolean {
   return Object.values(r.erros).some((l) => l.length > 0);
 }
 
-export function temAvisos(r: ResultadoValidacao): boolean {
-  return Object.values(r.avisos).some((l) => l.length > 0);
-}
-
 /** Junta vários resultados (ex.: cliente + cada contato). */
 export function mesclar(...rs: ResultadoValidacao[]): ResultadoValidacao {
   const out = novoResultado();
@@ -73,4 +69,19 @@ export function resumoValidacao(
 /** Primeira mensagem de erro — vira o `erro` da resposta da API. */
 export function primeiroErro(r: ResultadoValidacao, rotulos: Record<string, string> = {}): string | null {
   return resumoValidacao(r, rotulos).erros[0] || null;
+}
+
+/** Erros e avisos que a API devolveu ({ erros, avisos } por campo, ou só
+ *  { erro }, que vai para campoPadrao) como ResultadoValidacao da tela. */
+export function resultadoDaApi(dados: any, campoPadrao: string): ResultadoValidacao {
+  const r = novoResultado();
+  if (dados?.erros) Object.entries(dados.erros as Record<string, string[]>).forEach(([c, l]) => l.forEach((m) => addErro(r, c, m)));
+  if (dados?.avisos) Object.entries(dados.avisos as Record<string, string[]>).forEach(([c, l]) => l.forEach((m) => addAviso(r, c, m)));
+  if (dados?.erro && !temErros(r)) addErro(r, campoPadrao, dados.erro);
+  return r;
+}
+
+/** Corpo JSON da resposta; {} se não for JSON. */
+export async function lerJson(resp: Response): Promise<any> {
+  try { return await resp.json(); } catch { return {}; }
 }

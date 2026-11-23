@@ -312,15 +312,6 @@ export function semConclusaoNoLimite(g: string[][] | null | undefined): { linha:
   });
 }
 
-/** Parágrafos a acrescentar na Conclusão (HTML do editor), sem repetir
- *  frase que já está lá. */
-export function sugestaoConclusao(itens: ForaDoLimite[], conclusao: string | null | undefined): string {
-  const atual = normalizarTexto(textoDoHtml(conclusao));
-  return itens.map(fraseForaDoLimite)
-    .filter((f) => !atual.includes(normalizarTexto(f)))
-    .map((f) => `<p>${f.replace(/</g, "&lt;")}</p>`).join("");
-}
-
 /** Cloro livre: máximo permitido (Portaria GM/MS nº 888/2021, Anexo 9). */
 export const CLORO_MAXIMO = 5;
 /** pH recomendado no sistema de distribuição (Portaria GM/MS nº 888/2021). */

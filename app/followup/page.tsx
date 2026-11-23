@@ -17,20 +17,12 @@ import CampoTitulo from "@/app/components/crm/CampoTitulo";
 import Termometro, { corPorPct, fundoPorPct } from "@/app/components/crm/Termometro";
 import { dataCurta, iniciais, moeda, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "@/app/components/crm/tipos";
 import { infoTemperatura, MOTIVOS_PERDA, ORIGENS, PERFIS_CRM, rotuloPct, situacaoProximaAcao, temperaturaDe, valorPonderado } from "@/lib/validacao/crm";
+import { hojeBrasil, somarDias } from "@/lib/validacao";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
 import s from "@/app/components/crm/crm.module.css";
 
 type Coluna = { chave: string; titulo: string; etapa?: number; resultado?: "ganha" | "perdida" };
 type Movimento = { op: Oportunidade; destino: Coluna };
-
-function hojeLocal() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-}
-function somarDias(dia: string, n: number) {
-  const d = new Date(dia + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
 
 function FollowupConteudo() {
   const router = useRouter();
@@ -44,7 +36,7 @@ function FollowupConteudo() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [procedimentos, setProcedimentos] = useState<Procedimento[]>([]);
   const [eu, setEu] = useState("");
-  const [hoje, setHoje] = useState(hojeLocal());
+  const [hoje, setHoje] = useState(hojeBrasil());
   const [migrado, setMigrado] = useState(true);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");

@@ -39,7 +39,6 @@ export default function OportunidadeModal({ op, etapas, orgaos, usuarios, proced
   const [ocupado, setOcupado] = useState(false);
   /** Formulário "Fechar ganho" aberto (data do ganho escolhida na ficha). */
   const [ganho, setGanho] = useState<{ data?: string } | null>(null);
-  const nomeEtapa = etapas[op.etapa]?.nome || "—";
   const responsavel = usuarios.find((u) => u.id === op.responsavel_id)?.nome;
 
   async function acao(fn: () => Promise<string | null>) {

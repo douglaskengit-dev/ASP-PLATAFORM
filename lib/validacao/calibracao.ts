@@ -62,15 +62,6 @@ export interface UnidadeEquipamento extends CalibracaoDados {
   atualizado_em?: string | null;
 }
 
-export interface RegistroCalibracao extends CalibracaoDados {
-  id: string;
-  unidade_id: string;
-  calibrado_em: string;
-  vence_em: string;
-  registrado_por?: string | null;
-  registrado_em?: string | null;
-}
-
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export function dataIsoCalibracao(s: unknown): s is string {

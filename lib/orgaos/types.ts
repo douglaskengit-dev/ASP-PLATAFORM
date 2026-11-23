@@ -4,7 +4,7 @@
  * e "orgaos_contatos").
  */
 
-import { cnpjValido, somenteDigitos, telefoneValido } from "@/lib/mascaras";
+import { somenteDigitos, telefoneValido } from "@/lib/mascaras";
 
 export type TipoEnte = "Município" | "Estado";
 
@@ -88,29 +88,6 @@ export interface OrgaoComAcoes extends Orgao {
   processos?: AcaoOrgao[];
 }
 
-/** Payload para cadastrar/editar um órgão. */
-export interface OrgaoInput {
-  tipoEnte: TipoEnte;
-  razaoSocial: string;
-  cnpj: string;
-  cidade: string;
-  uf: string;
-}
-
-export function orgaoValido(o: OrgaoInput): string[] {
-  const faltando: string[] = [];
-  if (!o.tipoEnte) faltando.push("Tipo do ente");
-  if (!o.razaoSocial?.trim()) faltando.push("Razão social");
-  if (!o.cidade?.trim()) faltando.push("Cidade");
-  if (!o.uf?.trim()) faltando.push("UF");
-  if (!o.cnpj?.trim()) {
-    faltando.push("CNPJ");
-  } else if (!cnpjValido(o.cnpj)) {
-    faltando.push("CNPJ (número inválido)");
-  }
-  return faltando;
-}
-
 /** Payload para criar um contato (usado tanto no cadastro inicial do órgão
  * quanto no botão "Adicionar contato" nas telas de análise/proposta). */
 export interface NovoContatoInput {
@@ -118,6 +95,11 @@ export interface NovoContatoInput {
   cargo: string;
   telefone: string;
   email: string;
+}
+
+/** Contato em branco para os formulários. */
+export function novoContatoVazio(): NovoContatoInput {
+  return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
 }
 
 export function contatoValido(c: NovoContatoInput): string[] {

@@ -10,7 +10,7 @@
  * "Serviço recorrente": periodicidade (3, 6 ou 12 meses) obrigatória quando
  * marcado (lib/validacao/recorrencia.ts) — ver CamposRecorrencia. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NovoContatoInput, OrgaoComAcoes, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
+import { NovoContatoInput, OrgaoComAcoes, TipoEnte, UFS_BRASIL, novoContatoVazio } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
 import { MensagensCampo, ResumoValidacao } from "@/app/components/MensagensCampo";
 import {
@@ -127,9 +127,6 @@ export function SugestoesCidade({ cidade, cidades, onUsar }: { cidade: string; c
   );
 }
 
-function novoContatoVazio(): NovoContatoInput {
-  return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
-}
 
 export default function FormularioOrgao({
   onSucesso,

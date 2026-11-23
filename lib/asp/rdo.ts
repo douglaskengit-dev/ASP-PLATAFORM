@@ -22,6 +22,7 @@
  *              — a linha da tabela que tem o marcador é clonada por item.
  */
 
+import { dataIsoValida as dataIsoValidaTexto } from "@/lib/validacao/formatos";
 import {
   addAviso, addErro, novoResultado, type ResultadoValidacao,
 } from "../validacao/resultado";
@@ -303,9 +304,7 @@ export function hojeIso(): string {
 }
 
 export function dataIsoValida(s: unknown): s is string {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  return typeof s === "string" && dataIsoValidaTexto(s);
 }
 
 /** Nome do arquivo no padrão dos RDOs da ASP: "Guardian - VRO - 25.09.26.docx".

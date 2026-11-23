@@ -3,8 +3,6 @@
 
 export type ResultadoProcesso = "aberta" | "ganha" | "perdida";
 
-export const ROTULO_RESULTADO: Record<ResultadoProcesso, string> = { aberta: "Em aberto", ganha: "Ganha", perdida: "Perdida" };
-
 export const ORIGENS = [
   { valor: "licitacao", rotulo: "Licitação" },
   { valor: "indicacao", rotulo: "Indicação" },
@@ -25,7 +23,6 @@ export const MOTIVOS_PERDA = [
   { valor: "sem_retorno", rotulo: "Sem retorno do cliente" },
   { valor: "outro", rotulo: "Outro" },
 ] as const;
-export type MotivoPerda = (typeof MOTIVOS_PERDA)[number]["valor"];
 
 export const TIPOS_ATIVIDADE = [
   { valor: "ligacao", rotulo: "Ligação", icone: "📞" },
@@ -60,20 +57,6 @@ export function lerValorMonetario(v: unknown): number | null {
   else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
   const n = Number(s);
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
-}
-
-export interface DadosOportunidade {
-  titulo?: string;
-  /** Procedimento do Catálogo; vazio = "Outros" (título livre). */
-  procedimentoId?: string | null;
-  orgaoId?: string;
-  contatoId?: string | null;
-  valor?: number | null;
-  origem?: string | null;
-  responsavelId?: string | null;
-  previsaoFechamento?: string | null;
-  proximaAcao?: string | null;
-  proximaAcaoEm?: string | null;
 }
 
 /** Valida e normaliza os campos enviados (só os presentes). Devolve as

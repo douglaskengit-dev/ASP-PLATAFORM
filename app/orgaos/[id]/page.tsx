@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Contato, NovoContatoInput, OrgaoComContatos, TipoEnte, UFS_BRASIL } from "@/lib/orgaos/types";
+import { Contato, NovoContatoInput, OrgaoComContatos, TipoEnte, UFS_BRASIL, novoContatoVazio } from "@/lib/orgaos/types";
 import { mascaraCnpj, mascaraTelefone } from "@/lib/mascaras";
 import { progressoFase } from "@/lib/asp/fases";
 import {
@@ -46,9 +46,6 @@ const dataBr = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/$
 /** Formulário de contato: novo (sem id) ou edição de um existente. */
 type FormContato = NovoContatoInput & { id?: string; versao?: string };
 
-function novoContatoVazio(): FormContato {
-  return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
-}
 
 type Msg = { tipo: "ok" | "erro"; texto: string; recarregar?: boolean };
 

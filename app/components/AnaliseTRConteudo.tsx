@@ -7,15 +7,12 @@
  * assim que a análise termina — fechar e reabrir o modal não perde o
  * resultado nem roda a IA de novo; "Gerar relatório" finaliza esse rascunho. */
 import { useEffect, useMemo, useState } from "react";
-import { Achado, AchadoEstado, ResultadoAnaliseTR } from "@/lib/tr/types";
+import { AchadoEstado, ResultadoAnaliseTR } from "@/lib/tr/types";
 import { gerarAchados, itensSemAchados } from "@/lib/tr/regras";
-import { NovoContatoInput, OrgaoComContatos, contatoValido } from "@/lib/orgaos/types";
+import { NovoContatoInput, OrgaoComContatos, contatoValido, novoContatoVazio } from "@/lib/orgaos/types";
 import { contatosAtivos } from "@/lib/validacao";
 import { mascaraTelefone } from "@/lib/mascaras";
 
-function novoContatoVazio(): NovoContatoInput {
-  return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
-}
 
 export default function AnaliseTRConteudo({
   orgaoId,
