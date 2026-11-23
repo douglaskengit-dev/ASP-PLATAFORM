@@ -4,6 +4,7 @@
  * para reativar, prazo de entrega, OSs em andamento) e o funil do Follow-up.
  * Dados agregados em /api/dashboard/comercial (lib/asp/dashboard-comercial.ts).
  * Admin e Comercial (lib/asp/dashboard-acesso.ts). */
+import { useState } from "react";
 import Link from "next/link";
 import TituloPagina from "@/app/components/TituloPagina";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
@@ -317,46 +318,66 @@ function Previsao({ p }: { p: PainelComercial }) {
   );
 }
 
-/** Quem está na previsão ponderada: cada cliente com as oportunidades, a
- *  temperatura (cor da escala), o valor ponderado e a última observação. */
+/** Quem está na previsão ponderada, uma linha por oportunidade (maior valor
+ *  ponderado primeiro): cliente, valor, procedimento, temperatura (na cor da
+ *  escala) e a última observação da temperatura. */
 function ClientesPrevisao({ p }: { p: PainelComercial }) {
+  const [todas, setTodas] = useState(false);
+  const linhas = p.previsaoClientes
+    .flatMap((c) => c.oportunidades.map((o) => ({ ...o, clienteId: c.clienteId, cliente: c.cliente })))
+    .sort((a, b) => b.ponderado - a.ponderado || b.pct - a.pct || a.cliente.localeCompare(b.cliente, "pt-BR"));
+  const vis = todas ? linhas : linhas.slice(0, 10);
   const corT = (t: string) => `var(--temp-${t})`;
+  const nomeT = (t: string) => (t === "frio" ? "❄️ Frio" : t === "morno" ? "🌤️ Morno" : "🔥 Quente");
   return (
     <div style={{ marginTop: 12 }}>
-      <h3 className={s.grupoTitulo} style={{ margin: "0 0 6px" }}>Clientes da previsão</h3>
-      <ListaCurta itens={p.previsaoClientes} inicial={6} chave={(c) => c.clienteId || "sem"} render={(c) => (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
-          <div className={s.linha}>
-            <span>
-              {c.clienteId ? <Link className={s.link} href={`/orgaos/${c.clienteId}`}>{c.cliente}</Link> : <strong>{c.cliente}</strong>}
-              <span className={s.sub}>{plural(c.oportunidades.length, "oportunidade", "oportunidades")} · {moeda(c.valor)} em aberto</span>
-            </span>
-            <strong>{moeda(c.ponderado)}</strong>
-          </div>
-          <ul style={{ listStyle: "none", margin: 0, padding: "0 0 0 10px", display: "flex", flexDirection: "column", gap: 4 }}>
-            {c.oportunidades.map((o) => (
-              <li key={o.id} style={{ borderLeft: `3px solid ${corT(o.temperatura)}`, paddingLeft: 8 }}>
-                <div className={s.linha}>
-                  <span>
-                    <Link className={s.link} style={{ fontWeight: 500 }} href={`/followup?processo=${o.id}`}>{o.titulo}</Link>
-                    <span className={s.sub}>
-                      <span style={{ color: corT(o.temperatura), fontWeight: 700 }}>
-                        {o.temperatura === "frio" ? "❄️ Frio" : o.temperatura === "morno" ? "🌤️ Morno" : "🔥 Quente"} {pct(o.pct)}
-                      </span>
-                      {o.automatica ? " (automática)" : o.percentualProprio ? " (percentual próprio)" : " (escolhida)"}
-                      {o.valor != null ? ` · ${moeda(o.valor)} × ${pct(o.pct)}` : " · sem valor"}
-                      {o.previsaoFechamento ? ` · fecha ${ddmmaa(o.previsaoFechamento)}` : ""}
-                      {o.responsavel ? ` · ${o.responsavel}` : ""}
-                    </span>
-                    {o.observacao && <span className={s.sub} style={{ fontStyle: "italic" }}>“{o.observacao.texto}” ({ddmmaa(o.observacao.data)})</span>}
+      <div className={s.tabelaWrap}>
+        <table className={`${s.tabela} ${s.tabelaPrevisao}`}>
+          <caption>Clientes da previsão ponderada (maior valor ponderado primeiro)</caption>
+          <thead>
+            <tr>
+              <th scope="col">Cliente</th>
+              <th scope="col">Valor</th>
+              <th scope="col">Procedimento</th>
+              <th scope="col">Temperatura</th>
+              <th scope="col">Observação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vis.map((o) => (
+              <tr key={o.id} style={{ boxShadow: `inset 3px 0 0 ${corT(o.temperatura)}` }}>
+                <th scope="row">
+                  {o.clienteId ? <Link className={s.link} href={`/orgaos/${o.clienteId}`}>{o.cliente}</Link> : <strong>{o.cliente}</strong>}
+                  <span className={s.sub}>
+                    <Link className={s.link} style={{ fontWeight: 400 }} href={`/followup?processo=${o.id}`}>abrir oportunidade</Link>
+                    {o.previsaoFechamento ? ` · fecha ${ddmmaa(o.previsaoFechamento)}` : ""}{o.responsavel ? ` · ${o.responsavel}` : ""}
                   </span>
-                  <span>{moeda(o.ponderado)}</span>
-                </div>
-              </li>
+                </th>
+                <td>
+                  <strong>{moeda(o.ponderado)}</strong>
+                  <span className={s.sub}>{o.valor != null ? `de ${moeda(o.valor)}` : "sem valor"}</span>
+                </td>
+                <td>
+                  {o.procedimento.nome}
+                  <span className={s.sub}>{o.procedimento.outros ? "Outros" : o.procedimento.codigo}</span>
+                </td>
+                <td>
+                  <span style={{ color: corT(o.temperatura), fontWeight: 700 }}>{nomeT(o.temperatura)} {pct(o.pct)}</span>
+                  <span className={s.sub}>{o.automatica ? "automática" : o.percentualProprio ? "percentual próprio" : "escolhida"}</span>
+                </td>
+                <td>
+                  {o.observacao ? <>“{o.observacao.texto}”<span className={s.sub}>{ddmmaa(o.observacao.data)}</span></> : <span className={s.sub}>—</span>}
+                </td>
+              </tr>
             ))}
-          </ul>
-        </div>
-      )} />
+          </tbody>
+        </table>
+      </div>
+      {linhas.length > 10 && (
+        <button type="button" className={s.botaoSec} style={{ marginTop: 6, padding: "3px 10px", fontSize: 12 }} aria-expanded={todas} onClick={() => setTodas((v) => !v)}>
+          {todas ? "Mostrar menos" : `Ver todas (${num(linhas.length)})`}
+        </button>
+      )}
     </div>
   );
 }
