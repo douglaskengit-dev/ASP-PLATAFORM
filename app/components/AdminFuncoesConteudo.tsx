@@ -17,8 +17,8 @@ import { useEffect, useMemo, useState } from "react";
 import Modal from "@/app/components/Modal";
 import { MensagensCampo } from "@/app/components/MensagensCampo";
 import {
-  addErro, chaveFuncao, mesclar, nomeRdoPadrao, normalizarEspacos, novoResultado, ordenarFuncoes, PERMISSOES_FUNCAO,
-  temErros, textoUsuarios, validarFuncao, type ChavePermissaoFuncao, type FuncaoRef, type ResultadoValidacao,
+  chaveFuncao, mesclar, nomeRdoPadrao, normalizarEspacos, novoResultado, ordenarFuncoes, PERMISSOES_FUNCAO,
+  temErros, textoUsuarios, validarFuncao, type ChavePermissaoFuncao, type FuncaoRef, type ResultadoValidacao, lerJson, resultadoDaApi,
 } from "@/lib/validacao";
 
 export interface FuncaoAdmin extends FuncaoRef {
@@ -26,16 +26,7 @@ export interface FuncaoAdmin extends FuncaoRef {
   usuarios: number;
 }
 
-async function lerJson(resp: Response): Promise<any> {
-  try { return await resp.json(); } catch { return {}; }
-}
 
-function resultadoDaApi(dados: any, campoPadrao: string): ResultadoValidacao {
-  const r = novoResultado();
-  if (dados?.erros) Object.entries(dados.erros as Record<string, string[]>).forEach(([c, l]) => l.forEach((m) => addErro(r, c, m)));
-  if (dados?.erro && !temErros(r)) addErro(r, campoPadrao, dados.erro);
-  return r;
-}
 
 /** Carrega /api/admin/funcoes (com o nº de usuários de cada função) quando
  * `habilitado` (só administradores; a 1ª vez que uma das abas abre). */

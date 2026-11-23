@@ -29,7 +29,6 @@ import {
   dataPorExtenso,
   moedaComExtenso,
   numeroComExtenso,
-  formatarMoeda,
 } from "./extenso";
 
 const PAGE_WIDTH = 11910;

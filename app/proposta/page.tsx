@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Etapa, PropostaFormData, Tratamento } from "@/lib/types";
 import { ETAPAS_PADRAO } from "@/lib/etapasPadrao";
-import { Contato, NovoContatoInput, OrgaoComContatos } from "@/lib/orgaos/types";
+import { Contato, NovoContatoInput, OrgaoComContatos, novoContatoVazio } from "@/lib/orgaos/types";
 import { contatosAtivos } from "@/lib/validacao";
 import { mascaraTelefone } from "@/lib/mascaras";
 
@@ -20,9 +20,6 @@ function novaEtapaVazia(): Etapa {
   return { titulo: "", atividades: "", periodo: "" };
 }
 
-function novoContatoVazio(): NovoContatoInput {
-  return { nomeCompleto: "", cargo: "", telefone: "", email: "" };
-}
 
 /** Aplica máscara de moeda brasileira (milhar com ".", decimais com ",")
  * conforme o usuário digita, no estilo dos campos de valor de apps bancários. */

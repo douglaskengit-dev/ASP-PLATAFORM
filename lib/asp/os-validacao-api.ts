@@ -27,11 +27,6 @@ export async function codigosDoCatalogoComStatus(): Promise<{ todos: string[]; i
   };
 }
 
-/** Códigos de procedimento do Catálogo (ativos e desativados). */
-export async function codigosDoCatalogo(): Promise<string[]> {
-  return (await codigosDoCatalogoComStatus()).todos;
-}
-
 /** Valida no servidor. Devolve o resultado e, se a identificação repetiu,
  *  a OS que já a usa (para a resposta 409 mostrar qual é). */
 export async function validarOSNoServidor(

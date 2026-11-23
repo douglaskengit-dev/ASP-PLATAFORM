@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { diaBrasilia } from "@/lib/validacao";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { chaveDaPergunta } from "@/lib/assistente/cache";
 import { hojeBrasil } from "@/lib/validacao/formatos";
@@ -15,7 +16,6 @@ const FILTROS: Record<string, (q: any) => any> = {
 };
 
 const COLUNAS_USO = "criado_em, pergunta, provedor, usuario_id, avaliacao, fora_do_escopo, reserva, usuario:gp_profiles(nome_completo)";
-const diaBrasilia = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
 
 /** Uso no período: perguntas e chamadas à IA por dia, hoje, perguntas e
  *  pessoas que mais usam, provedores e tempo médio. */

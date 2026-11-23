@@ -9,12 +9,12 @@
  * só mostra. Filtros ficam na URL (?periodo=&cliente=&procedimento=&pessoa=)
  * para o link poder ser compartilhado. Cada indicador tem a definição exata
  * no botão (i) e no glossário do fim. */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import TituloPagina from "@/app/components/TituloPagina";
 import CalendarioAgenda from "@/app/components/CalendarioAgenda";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
-import type { ChavePeriodo, Dashboard, FiltrosDashboard } from "@/lib/asp/dashboard";
+import type { Dashboard } from "@/lib/asp/dashboard";
 import {
   Base, ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, Mais, num, pct, plural, ROT_TIPO, Secao, Tabela, useVisao, Vazio,
 } from "./componentes";
@@ -23,88 +23,12 @@ import { ROTULO_STATUS_RECORRENCIA } from "@/lib/validacao";
 import s from "./dashboard.module.css";
 import PendenciasCampo from "@/app/components/PendenciasCampo";
 import CalibracoesPainel from "@/app/components/CalibracoesPainel";
-import { useRouter } from "next/navigation";
-import type { PainelId } from "@/lib/asp/dashboard-acesso";
-import { AbasDashboard, Glossario } from "./painel-comum";
-
-const PERIODOS: { chave: ChavePeriodo; rotulo: string }[] = [
-  { chave: "7", rotulo: "Últimos 7 dias" },
-  { chave: "30", rotulo: "Últimos 30 dias" },
-  { chave: "90", rotulo: "Últimos 90 dias" },
-  { chave: "ano", rotulo: "Este ano" },
-  { chave: "personalizado", rotulo: "Personalizado" },
-];
-
-const FILTROS_PADRAO: FiltrosDashboard = { periodo: "30", de: null, ate: null, cliente: null, procedimento: null, pessoa: null };
-
-function filtrosDaUrl(): FiltrosDashboard {
-  if (typeof window === "undefined") return FILTROS_PADRAO;
-  const sp = new URLSearchParams(window.location.search);
-  const p = sp.get("periodo") as ChavePeriodo | null;
-  return {
-    periodo: p && PERIODOS.some((x) => x.chave === p) ? p : "30",
-    de: sp.get("de"), ate: sp.get("ate"),
-    cliente: sp.get("cliente"), procedimento: sp.get("procedimento"), pessoa: sp.get("pessoa"),
-  };
-}
-
-function query(f: FiltrosDashboard): string {
-  const sp = new URLSearchParams();
-  if (f.periodo !== "30") sp.set("periodo", f.periodo);
-  if (f.periodo === "personalizado") { if (f.de) sp.set("de", f.de); if (f.ate) sp.set("ate", f.ate); }
-  if (f.cliente) sp.set("cliente", f.cliente);
-  if (f.procedimento) sp.set("procedimento", f.procedimento);
-  if (f.pessoa) sp.set("pessoa", f.pessoa);
-  return sp.toString();
-}
+import { AbasDashboard, CamposPeriodo, FILTROS_PADRAO, Glossario, usePainel } from "./painel-comum";
 
 const SECAO_FILA = "relatorios";
 
 export default function DashboardPage() {
-  const [f, setF] = useState<FiltrosDashboard>(FILTROS_PADRAO);
-  const [pronto, setPronto] = useState(false);
-  const [painel, setPainel] = useState<Dashboard | null>(null);
-  const [carregando, setCarregando] = useState(true);
-  const [erro, setErro] = useState<string | null>(null);
-  const [paineis, setPaineis] = useState<PainelId[]>([]);
-  const router = useRouter();
-
-  useEffect(() => { setF(filtrosDaUrl()); setPronto(true); }, []);
-
-  const personalizadoIncompleto = f.periodo === "personalizado" && (!f.de || !f.ate);
-
-  const carregar = useCallback(async (filtros: FiltrosDashboard, sinal?: AbortSignal) => {
-    setCarregando(true);
-    setErro(null);
-    try {
-      const q = query(filtros);
-      const r = await fetch(`/api/dashboard${q ? `?${q}` : ""}`, { signal: sinal, cache: "no-store" });
-      if (r.status === 401) { window.location.href = "/login"; return; }
-      const d = await r.json().catch(() => ({}));
-      // Perfil sem acesso a Operações (ex.: Comercial): vai para o seu Dashboard.
-      if (r.status === 403 && d.destino && d.destino !== window.location.pathname) { router.replace(d.destino); return; }
-      if (!r.ok) throw new Error(d.erro || `Erro ${r.status}`);
-      setPainel(d.painel);
-      setPaineis(Array.isArray(d.paineis) ? d.paineis : []);
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setErro(e?.message || "Falha ao carregar.");
-    } finally {
-      if (!sinal?.aborted) setCarregando(false);
-    }
-  }, [router]);
-
-  useEffect(() => {
-    if (!pronto || personalizadoIncompleto) return;
-    const q = query(f);
-    window.history.replaceState(null, "", `${window.location.pathname}${q ? `?${q}` : ""}`);
-    const ctl = new AbortController();
-    carregar(f, ctl.signal);
-    return () => ctl.abort();
-  }, [f, pronto, personalizadoIncompleto, carregar]);
-
-  const muda = (k: keyof FiltrosDashboard) => (e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>) =>
-    setF((v) => ({ ...v, [k]: e.target.value || null }));
+  const { f, setF, muda, pronto, painel, paineis, carregando, erro, carregar, personalizadoIncompleto } = usePainel<Dashboard>("/api/dashboard");
   const temFiltro = f.periodo !== "30" || !!(f.cliente || f.procedimento || f.pessoa);
   const op = painel?.opcoes;
 
@@ -117,24 +41,7 @@ export default function DashboardPage() {
       <CalibracoesPainel />
 
       <form className={s.filtros} onSubmit={(e) => e.preventDefault()} aria-label="Filtros do Dashboard">
-        <div className={s.campo}>
-          <label htmlFor="f-periodo">Período</label>
-          <select id="f-periodo" value={f.periodo} onChange={(e) => setF((v) => ({ ...v, periodo: e.target.value as ChavePeriodo }))}>
-            {PERIODOS.map((p) => <option key={p.chave} value={p.chave}>{p.rotulo}</option>)}
-          </select>
-        </div>
-        {f.periodo === "personalizado" && (
-          <>
-            <div className={s.campo}>
-              <label htmlFor="f-de">De</label>
-              <input id="f-de" type="date" value={f.de || ""} onChange={muda("de")} />
-            </div>
-            <div className={s.campo}>
-              <label htmlFor="f-ate">Até</label>
-              <input id="f-ate" type="date" value={f.ate || ""} onChange={muda("ate")} />
-            </div>
-          </>
-        )}
+        <CamposPeriodo f={f} setF={setF} muda={muda} />
         <div className={s.campo}>
           <label htmlFor="f-cliente">Cliente</label>
           <select id="f-cliente" value={f.cliente || ""} onChange={muda("cliente")}>

@@ -12,7 +12,7 @@
  * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
 import { diasParaValidade, historicoTemperatura, rotuloMotivoPerda, rotuloOrigem, situacaoPropostaVista, situacaoProximaAcao, TEMPERATURAS, temperaturaDe, valorPonderado, type Temperatura } from "../validacao/crm";
-import { diaBrasilia, fimDaOS } from "../validacao";
+import { diaBrasilia, fimDaOS, somarDias, somarMeses } from "../validacao";
 import {
   diferencaDias, estatistica, intervaloDoPeriodo, montarRecorrencia, noIntervalo, porChave,
   type ChavePeriodo, type DadosDashboard, type Estatistica, type FiltrosDashboard, type Intervalo, type ItemRecorrencia,
@@ -94,16 +94,14 @@ export interface PainelComercial {
   followupsAtrasados: { id: string; titulo: string; cliente: string | null; responsavel: string | null; acao: string | null; em: string; dias: number }[];
   /** Previsão ponderada por temperatura (Frio, Morno, Quente e "sem temperatura", 0%). */
   previsaoTemperatura: { temperatura: Temperatura | null; rotulo: string; pct: number; n: number; valor: number; ponderado: number; semValor: number; proprios: number }[];
-  /** Quem está na previsão: por cliente (maior valor ponderado primeiro), com as oportunidades. */
-  previsaoClientes: {
-    clienteId: string | null; cliente: string; valor: number; ponderado: number;
-    oportunidades: {
-      id: string; titulo: string; temperatura: Temperatura; pct: number; automatica: boolean; percentualProprio: boolean;
-      valor: number | null; ponderado: number; previsaoFechamento: string | null; responsavel: string | null;
-      /** Do Catálogo (nome e código) ou "Outros" (a descrição é o título). */
-      procedimento: { nome: string; codigo: string | null; outros: boolean };
-      observacao: { texto: string; data: string } | null;
-    }[];
+  /** Quem está na previsão: uma linha por oportunidade (maior valor ponderado primeiro). */
+  previsaoOportunidades: {
+    id: string; titulo: string; clienteId: string | null; cliente: string;
+    temperatura: Temperatura; pct: number; automatica: boolean; percentualProprio: boolean;
+    valor: number | null; ponderado: number; previsaoFechamento: string | null; responsavel: string | null;
+    /** Do Catálogo (nome e código) ou "Outros" (a descrição é o título). */
+    procedimento: { nome: string; codigo: string | null; outros: boolean };
+    observacao: { texto: string; data: string } | null;
   }[];
   /** Previsão ponderada pelo mês da previsão de fechamento (atrasadas e sem data à parte). */
   previsaoMes: { chave: string; rotulo: string; n: number; valor: number; ponderado: number }[];
@@ -360,26 +358,20 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     const x = p.procedimento_id ? procPorId.get(p.procedimento_id) : undefined;
     return x ? { nome: x.nome || x.codigo, codigo: x.codigo, outros: false } : { nome: p.titulo, codigo: null, outros: true };
   };
-  const porCliente = new Map<string, PainelComercial["previsaoClientes"][number]>();
+  const previsaoOportunidades: PainelComercial["previsaoOportunidades"] = [];
   for (const p of emAberto) {
     const t = tempOp.get(p.id)!;
     if (!t.temperatura || t.pct == null) continue;
-    const k = p.orgao_id || "__sem";
-    const c = porCliente.get(k) || { clienteId: p.orgao_id, cliente: p.orgao_nome || "Sem cliente", valor: 0, ponderado: 0, oportunidades: [] };
-    const pond = pondDe(p);
     const obs = historicoTemperatura(p.historico_etapas).find((h) => h.observacao);
-    c.valor += valorDe(p); c.ponderado += pond;
-    c.oportunidades.push({
-      id: p.id, titulo: p.titulo, temperatura: t.temperatura, pct: t.pct, automatica: t.automatica, percentualProprio: t.percentualProprio,
-      valor: p.valor ?? null, ponderado: pond, previsaoFechamento: p.previsao_fechamento?.slice(0, 10) || null,
+    previsaoOportunidades.push({
+      id: p.id, titulo: p.titulo, clienteId: p.orgao_id, cliente: p.orgao_nome || "Sem cliente",
+      temperatura: t.temperatura, pct: t.pct, automatica: t.automatica, percentualProprio: t.percentualProprio,
+      valor: p.valor ?? null, ponderado: pondDe(p), previsaoFechamento: p.previsao_fechamento?.slice(0, 10) || null,
       responsavel: p.responsavel_nome || null, procedimento: procedimentoDe(p),
       observacao: obs ? { texto: obs.observacao!, data: obs.data } : null,
     });
-    porCliente.set(k, c);
   }
-  const previsaoClientes = Array.from(porCliente.values())
-    .map((c) => ({ ...c, oportunidades: c.oportunidades.sort((a, b) => b.ponderado - a.ponderado || b.pct - a.pct) }))
-    .sort((a, b) => b.ponderado - a.ponderado || b.valor - a.valor || a.cliente.localeCompare(b.cliente, "pt-BR"));
+  previsaoOportunidades.sort((a, b) => b.ponderado - a.ponderado || b.pct - a.pct || a.cliente.localeCompare(b.cliente, "pt-BR"));
 
   // ── Propostas (versão mais nova de cada oportunidade em aberto) ──────────
   const propostasAcao: PainelComercial["propostasAcao"] = [];
@@ -503,7 +495,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     followupsPorResponsavel,
     propostasAcao: propostasAcao.slice(0, 40),
     previsaoTemperatura,
-    previsaoClientes: previsaoClientes.slice(0, 50),
+    previsaoOportunidades: previsaoOportunidades.slice(0, 100),
     previsaoMes,
     projetosFollowup: { total: historico.length, comProjeto: comProjetoHist, semProjeto: historico.length - comProjetoHist, itens: historico.slice(0, 100) },
     renovacoes: renovacoes.slice(0, 30),
@@ -516,21 +508,6 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
 }
 
 // ── Auxiliares ───────────────────────────────────────────────────────────────
-
-/** Soma dias a um dia AAAA-MM-DD. */
-function somarDias(dia: string, n: number): string {
-  const d = new Date(`${dia}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Soma meses a um dia AAAA-MM-DD (dia que não existe vira o último do mês). */
-function somarMeses(dia: string, meses: number): string {
-  const a = Number(dia.slice(0, 4)), m = Number(dia.slice(5, 7)) - 1 + meses, dd = Number(dia.slice(8, 10));
-  const ano = a + Math.floor(m / 12), mes = ((m % 12) + 12) % 12;
-  const ultimo = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate();
-  return `${ano}-${String(mes + 1).padStart(2, "0")}-${String(Math.min(dd, ultimo)).padStart(2, "0")}`;
-}
 
 function mesesEntre(de: string, ate: string): number {
   let n = (Number(ate.slice(0, 4)) - Number(de.slice(0, 4))) * 12 + Number(ate.slice(5, 7)) - Number(de.slice(5, 7));

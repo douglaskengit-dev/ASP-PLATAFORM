@@ -22,6 +22,3 @@ export const ETAPAS_FLUXO: EtapaFluxo[] = [
   { nome: "Negociação", tipo: "manual" },
 ];
 
-/** Documentos essenciais anexáveis manualmente ao processo. */
-export const DOCS_FOLLOWUP = ["oficio"] as const;
-

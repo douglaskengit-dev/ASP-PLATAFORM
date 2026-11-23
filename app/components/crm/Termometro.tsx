@@ -1,7 +1,7 @@
 /** Escala de cores da temperatura: degradê contínuo Frio (azul) → Morno
  * (laranja) → Quente (vermelho), com o marcador no percentual atual. As cores
  * vêm dos tokens --temp-* (globals.css), com tema escuro. */
-import { rotuloPct, TEMPERATURAS, type Temperatura } from "@/lib/validacao/crm";
+import { rotuloPct, TEMPERATURAS } from "@/lib/validacao/crm";
 import s from "./crm.module.css";
 
 /** Cor na escala contínua para um percentual (fração 0 a 1). Âncoras nos
@@ -37,4 +37,3 @@ export default function Termometro({ pct, compacto = false }: { pct?: number | n
   );
 }
 
-export type { Temperatura };

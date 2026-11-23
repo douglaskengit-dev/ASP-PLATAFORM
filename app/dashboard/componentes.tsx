@@ -27,6 +27,8 @@ export const ddmm = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 1
 export const ddmmaa = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "—");
 export const dias = (n: number | null | undefined) => (n == null ? "—" : `${num(n)} dia${n === 1 ? "" : "s"}`);
 export const plural = (n: number, um: string, varios: string) => `${num(n)} ${n === 1 ? um : varios}`;
+/** Variação com sinal ("+12,5%"); vazio sem base. */
+export const sinal = (v: number | null) => (v == null ? "" : `${v > 0 ? "+" : ""}${pct(v)}`);
 
 export const ROT_TIPO: Record<string, string> = { inspecao: "inspeção", execucao: "execução" };
 

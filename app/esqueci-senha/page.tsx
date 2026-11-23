@@ -5,11 +5,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ThemeToggle from "@/app/components/ThemeToggle";
-import { CHAVE_EMAIL_ESQUECI, emailValido, MSG_ESQUECI_NEUTRA, normalizarEmail } from "@/lib/validacao";
+import { CHAVE_EMAIL_ESQUECI, emailValido, MSG_ESQUECI_NEUTRA, normalizarEmail, lerJson } from "@/lib/validacao";
 
-async function lerJson(resp: Response): Promise<any> {
-  try { return await resp.json(); } catch { return {}; }
-}
 
 function EsqueciForm() {
   const params = useSearchParams();

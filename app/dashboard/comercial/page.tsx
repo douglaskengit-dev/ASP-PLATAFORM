@@ -9,12 +9,12 @@ import Link from "next/link";
 import TituloPagina from "@/app/components/TituloPagina";
 import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import type { PainelComercial } from "@/lib/asp/dashboard-comercial";
+import { infoTemperatura } from "@/lib/validacao/crm";
 import { AbasDashboard, CamposPeriodo, ColunasMensais, FILTROS_PADRAO, Glossario, usePainel } from "../painel-comum";
-import { ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, ListaCurta, moeda, num, pct, plural, Secao, Tabela, useVisao, Vazio } from "../componentes";
+import { ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, ListaCurta, moeda, num, pct, plural, sinal, Secao, Tabela, useVisao, Vazio } from "../componentes";
 import { GradeKpis, Personalizacao } from "../personalizar";
 import s from "../dashboard.module.css";
 
-const sinal = (v: number | null) => (v == null ? "" : `${v > 0 ? "+" : ""}${pct(v)}`);
 const ROT_FAIXA: Record<PainelComercial["renovacoes"][number]["faixa"], string> = { vencido: "Vencido", "30": "Até 30 dias", "60": "31 a 60 dias", "90": "61 a 90 dias" };
 
 export default function DashboardComercialPage() {
@@ -310,7 +310,7 @@ function Previsao({ p }: { p: PainelComercial }) {
             <Tabela legenda="Previsão ponderada pelo mês da previsão de fechamento" colunas={["Fechamento previsto", "Oportunidades", "Valor", "Valor ponderado"]}
               linhas={p.previsaoMes.map((m) => [m.rotulo, num(m.n), moeda(m.valor), moeda(m.ponderado)])} />
           )}
-          {p.previsaoClientes.length > 0 && <ClientesPrevisao p={p} />}
+          {p.previsaoOportunidades.length > 0 && <ClientesPrevisao p={p} />}
           {k.manuais > 0 && <p className={s.sub} style={{ margin: "6px 0 0" }}>{plural(k.manuais, "oportunidade com temperatura ou percentual escolhido na ficha", "oportunidades com temperatura ou percentual escolhido na ficha")}{k.proprios ? ` (${num(k.proprios)} com percentual próprio)` : ""}; as demais usam a automática.</p>}
         </>
       )}
@@ -323,12 +323,9 @@ function Previsao({ p }: { p: PainelComercial }) {
  *  escala) e a última observação da temperatura. */
 function ClientesPrevisao({ p }: { p: PainelComercial }) {
   const [todas, setTodas] = useState(false);
-  const linhas = p.previsaoClientes
-    .flatMap((c) => c.oportunidades.map((o) => ({ ...o, clienteId: c.clienteId, cliente: c.cliente })))
-    .sort((a, b) => b.ponderado - a.ponderado || b.pct - a.pct || a.cliente.localeCompare(b.cliente, "pt-BR"));
+  const linhas = p.previsaoOportunidades;
   const vis = todas ? linhas : linhas.slice(0, 10);
   const corT = (t: string) => `var(--temp-${t})`;
-  const nomeT = (t: string) => (t === "frio" ? "❄️ Frio" : t === "morno" ? "🌤️ Morno" : "🔥 Quente");
   return (
     <div style={{ marginTop: 12 }}>
       <div className={s.tabelaWrap}>
@@ -362,7 +359,7 @@ function ClientesPrevisao({ p }: { p: PainelComercial }) {
                   <span className={s.sub}>{o.procedimento.outros ? "Outros" : o.procedimento.codigo}</span>
                 </td>
                 <td>
-                  <span style={{ color: corT(o.temperatura), fontWeight: 700 }}>{nomeT(o.temperatura)} {pct(o.pct)}</span>
+                  <span style={{ color: corT(o.temperatura), fontWeight: 700 }}>{infoTemperatura(o.temperatura).icone} {infoTemperatura(o.temperatura).rotulo} {pct(o.pct)}</span>
                   <span className={s.sub}>{o.automatica ? "automática" : o.percentualProprio ? "percentual próprio" : "escolhida"}</span>
                 </td>
                 <td>

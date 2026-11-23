@@ -527,44 +527,6 @@ export function textoRenomeacao(tipo: TipoCatalogo, u: UsoCatalogo | null | unde
     "Agendamentos passados e relatórios já gerados ficam com o nome antigo; procedimentos e relatórios apontam pelo identificador, que não muda.";
 }
 
-/** Linhas que o renomear do procedimento altera — espelho de
- *  gp_renomear_procedimento (para conferência e testes). */
-export function planoRenomeacaoProcedimento(
-  antigo: string, novo: string,
-  linhas: {
-    inspecoes?: { id: string; procedimento: string | null }[];
-    checklists?: { id: string; procedimento: string | null }[];
-    relatorios?: { id: string; status: string; excluido?: boolean; procedimento?: string | null }[];
-  }
-): { inspecoes: string[]; checklists: string[]; relatorios: string[] } {
-  if (antigo === novo) return { inspecoes: [], checklists: [], relatorios: [] };
-  return {
-    inspecoes: (linhas.inspecoes || []).filter((x) => x.procedimento === antigo).map((x) => x.id),
-    checklists: (linhas.checklists || []).filter((x) => x.procedimento === antigo).map((x) => x.id),
-    relatorios: (linhas.relatorios || []).filter((x) => !x.excluido && x.status === "rascunho" && x.procedimento === antigo).map((x) => x.id),
-  };
-}
-
-/** Espelho de gp_renomear_equipamento: checklists (item com o slug, OS não
- *  encerrada) e agendamentos ativos de hoje em diante ou a definir. */
-export function planoRenomeacaoEquipamento(
-  slug: string, antigo: string, novo: string, hoje: string,
-  linhas: {
-    checklists?: { id: string; encerrada?: boolean; itens: { slug?: string | null; nome: string }[] }[];
-    agendamentos?: { id: string; substituido?: boolean; a_definir?: boolean; data_visita?: string | null; equipamentos: string[] }[];
-  }
-): { checklists: string[]; agendamentos: string[] } {
-  if (antigo === novo) return { checklists: [], agendamentos: [] };
-  const k = chaveNome(antigo);
-  return {
-    checklists: (linhas.checklists || []).filter((c) => !c.encerrada && c.itens.some((i) => i.slug === slug)).map((c) => c.id),
-    agendamentos: (linhas.agendamentos || []).filter((a) =>
-      !a.substituido && (a.a_definir || (!!a.data_visita && a.data_visita >= hoje))
-      && a.equipamentos.some((e) => chaveNome(e) === k)
-    ).map((a) => a.id),
-  };
-}
-
 // ── Concorrência ─────────────────────────────────────────────────────────────
 
 /** "Outra pessoa salvou este item às 14:05 — recarregue." (hora de Brasília) */

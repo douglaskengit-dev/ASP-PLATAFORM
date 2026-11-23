@@ -5,7 +5,7 @@
  * valor define o valor da oportunidade. Cada versão tem situação: enviada,
  * aceita ou recusada (vencida e substituída são calculadas). */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { diasParaValidade, situacaoPropostaVista, type SituacaoProposta, type SituacaoPropostaVista } from "@/lib/validacao";
+import { diasParaValidade, situacaoPropostaVista, somarDias, type SituacaoProposta, type SituacaoPropostaVista } from "@/lib/validacao";
 import { dataBr, moeda } from "./tipos";
 import s from "./crm.module.css";
 
@@ -31,13 +31,6 @@ function textoValidade(validade: string, hoje: string, vista: SituacaoPropostaVi
   if (n === 0) return `${base} · vence hoje`;
   if (n > 0) return `${base} · ${n === 1 ? "falta 1 dia" : `faltam ${n} dias`}`;
   return `${base} · venceu há ${-n === 1 ? "1 dia" : `${-n} dias`}`;
-}
-
-/** Soma dias a AAAA-MM-DD. */
-function somarDias(dia: string, n: number): string {
-  const d = new Date(`${dia}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
 }
 
 export default function Propostas({ processoId, hoje, aberta, onValorMudou }: {

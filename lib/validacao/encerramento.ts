@@ -303,8 +303,6 @@ export const MEIOS_ENTREGA = [
   { valor: "outro", rotulo: "Outro" },
 ] as const;
 
-export type MeioEntrega = (typeof MEIOS_ENTREGA)[number]["valor"];
-
 export function rotuloMeio(meio: string | null | undefined, outro?: string | null): string {
   if (meio === "outro") return outro ? `Outro — ${outro}` : "Outro";
   return MEIOS_ENTREGA.find((m) => m.valor === meio)?.rotulo || meio || "";
