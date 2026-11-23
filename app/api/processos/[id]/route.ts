@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProfileAtual, getSupabaseRouteClient } from "@/lib/supabase/route";
 import { removerArquivos } from "@/lib/processos/arquivos";
 import { aplicarProcedimento, faltaColunaProcedimento, faltaMigracaoCrm, MSG_MIGRACAO_CRM } from "@/lib/processos/crm-api";
-import { hojeBrasil, podeUsarCrm, validarOportunidade } from "@/lib/validacao";
+import { ehTemperatura, hojeBrasil, podeUsarCrm, TAM_OBS_TEMPERATURA, validarOportunidade } from "@/lib/validacao";
 
 export const runtime = "nodejs";
 
 /** Edita a oportunidade: só os campos enviados (título/procedimento, cliente, contato,
- * valor, origem, responsável, previsão de fechamento e próxima ação). */
+ * valor, origem, responsável, previsão de fechamento, próxima ação e
+ * temperatura). Mudar a temperatura (ou mandar observacaoTemperatura) grava
+ * um evento "temperatura" no historico_etapas, com a observação e a data. */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const profile = await getProfileAtual();
   if (!profile) {
@@ -18,11 +20,36 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const corpo = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const v = validarOportunidade(corpo, hojeBrasil());
+  const hoje = hojeBrasil();
+  const v = validarOportunidade(corpo, hoje);
   if ("erro" in v) return NextResponse.json({ erro: v.erro }, { status: 400 });
-  if (!Object.keys(v.colunas).length) return NextResponse.json({ erro: "Nada para salvar." }, { status: 400 });
+  const obsTemp = typeof corpo.observacaoTemperatura === "string" ? corpo.observacaoTemperatura.trim() : "";
+  if (obsTemp.length > TAM_OBS_TEMPERATURA) {
+    return NextResponse.json({ erro: `Observação da temperatura muito longa (máximo ${TAM_OBS_TEMPERATURA} caracteres).` }, { status: 400 });
+  }
+  if (!Object.keys(v.colunas).length && !obsTemp) return NextResponse.json({ erro: "Nada para salvar." }, { status: 400 });
 
   const supabase = getSupabaseRouteClient();
+  // Temperatura: evento no histórico quando a escolha muda ou vem observação.
+  const mexeTemp = "temperatura" in v.colunas || "probabilidade" in v.colunas;
+  if (mexeTemp || obsTemp) {
+    const { data: atual } = await supabase.from("gp_processos").select("*").eq("id", params.id).maybeSingle();
+    if (!atual) return NextResponse.json({ erro: "Oportunidade não encontrada." }, { status: 404 });
+    const antes = { temperatura: ehTemperatura(atual.temperatura) ? atual.temperatura : null, probabilidade: atual.probabilidade == null ? null : Number(atual.probabilidade) };
+    const depois = {
+      temperatura: "temperatura" in v.colunas ? (v.colunas.temperatura as any) ?? null : antes.temperatura,
+      probabilidade: "probabilidade" in v.colunas ? (v.colunas.probabilidade as number | null) ?? null : antes.probabilidade,
+    };
+    const mudou = antes.temperatura !== depois.temperatura || antes.probabilidade !== depois.probabilidade;
+    if (mudou || obsTemp) {
+      const historico = Array.isArray(atual.historico_etapas) ? atual.historico_etapas : [];
+      v.colunas.historico_etapas = [...historico, {
+        evento: "temperatura", ...depois, anterior: mudou ? antes : null, observacao: obsTemp || null,
+        data: hoje, alterado_em: new Date().toISOString(), alterado_por: profile.id,
+      }];
+    }
+  }
+  if (!Object.keys(v.colunas).length) return NextResponse.json({ ok: true });
   const erroProc = await aplicarProcedimento(supabase, v.colunas);
   if (erroProc) return NextResponse.json({ erro: erroProc }, { status: 400 });
   // Trocou o cliente: o contato antigo não vale mais.

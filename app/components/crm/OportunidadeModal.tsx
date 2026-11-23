@@ -11,7 +11,7 @@ import CampoTitulo from "./CampoTitulo";
 import FecharGanho from "./FecharGanho";
 import Termometro from "./Termometro";
 import {
-  infoTemperatura, MOTIVOS_PERDA, probabilidadePropria, rotuloPct, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, temperaturaAutomatica, temperaturaDe,
+  historicoTemperatura, infoTemperatura, MOTIVOS_PERDA, probabilidadePropria, rotuloEscolhaTemperatura, rotuloPct, TAM_OBS_TEMPERATURA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, temperaturaAutomatica, temperaturaDe,
   TEMPERATURAS, TIPOS_ATIVIDADE, valorPonderado,
 } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
@@ -406,6 +406,7 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
     // "pct" = percentual próprio (campo probabilidade).
     temperatura: op.probabilidade != null ? "pct" : op.temperatura || "",
     probabilidade: op.probabilidade != null ? String(op.probabilidade).replace(".", ",") : "",
+    observacaoTemperatura: "",
   }), [op]);
   const [f, setF] = useState(inicial);
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -435,6 +436,7 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
     const ini = inicial();
     const c: Record<string, string> = { ...f };
     delete c.temperatura; delete c.probabilidade;
+    if (!f.observacaoTemperatura.trim()) delete c.observacaoTemperatura;
     if (f.temperatura !== ini.temperatura || f.probabilidade !== ini.probabilidade) {
       c.temperatura = f.temperatura === "pct" ? "" : f.temperatura;
       c.probabilidade = f.temperatura === "pct" ? f.probabilidade : "";
@@ -500,6 +502,18 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
             </small>
           </label>
         )}
+        {op.resultado === "aberta" && (
+          <label className={s.campo} style={{ gridColumn: "1 / -1" }}>
+            <span>Observação da temperatura</span>
+            <textarea rows={2} value={f.observacaoTemperatura} maxLength={TAM_OBS_TEMPERATURA}
+              onChange={(e) => setF((v) => ({ ...v, observacaoTemperatura: e.target.value }))}
+              placeholder="Por que esta temperatura? Ex.: aprovação verbal do diretor; assinatura prevista para a próxima semana" />
+            <small className="detalhe">Fica no histórico abaixo, com a data. Dá para registrar só a observação, sem trocar a temperatura.</small>
+          </label>
+        )}
+        {historicoTemperatura(op.historico_etapas).length > 0 && (
+          <HistoricoTemperatura op={op} usuarios={usuarios} />
+        )}
       </div>
       <div className={s.linhaForm}>
         <button type="button" className="btn-azul" disabled={ocupado || !mudou}
@@ -508,6 +522,34 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
         {!mudou && op.origem && <span className="detalhe">Origem: {rotuloOrigem(op.origem)}</span>}
       </div>
     </section>
+  );
+}
+
+/** Linha do tempo da temperatura: escolha, anterior e observação, por data. */
+function HistoricoTemperatura({ op, usuarios }: { op: Oportunidade; usuarios: Usuario[] }) {
+  const eventos = historicoTemperatura(op.historico_etapas);
+  const [todos, setTodos] = useState(false);
+  const vis = todos ? eventos : eventos.slice(0, 3);
+  const quem = (id?: string | null) => usuarios.find((u) => u.id === id)?.nome;
+  return (
+    <div style={{ gridColumn: "1 / -1" }}>
+      <span className="detalhe" style={{ fontWeight: 700 }}>Histórico da temperatura</span>
+      <ul className={s.historico}>
+        {vis.map((h, i) => (
+          <li key={i}>
+            <span className="detalhe">{dataBr(h.data)}</span>{" "}
+            {h.anterior
+              ? <>{rotuloEscolhaTemperatura(h.temperatura, h.probabilidade)} <span className="detalhe">(antes: {rotuloEscolhaTemperatura(h.anterior.temperatura, h.anterior.probabilidade)})</span></>
+              : <>Observação <span className="detalhe">({rotuloEscolhaTemperatura(h.temperatura, h.probabilidade)})</span></>}
+            {quem(h.alterado_por) ? <span className="detalhe"> · {quem(h.alterado_por)}</span> : null}
+            {h.observacao && <div className={s.timelineTexto}>“{h.observacao}”</div>}
+          </li>
+        ))}
+      </ul>
+      {eventos.length > 3 && (
+        <button type="button" className={s.botaoTexto} onClick={() => setTodos((v) => !v)}>{todos ? "mostrar menos" : `ver todas (${eventos.length})`}</button>
+      )}
+    </div>
   );
 }
 
@@ -521,7 +563,9 @@ function Historico({ op, etapas, usuarios }: { op: Oportunidade; etapas: EtapaFl
         {eventos.map((h, i) => (
           <li key={i}>
             <span className="detalhe">{dataBr(h.data_autenticacao || h.data || h.alterado_em?.slice(0, 10))}</span>{" "}
-            {h.evento === "resultado"
+            {h.evento === "temperatura"
+              ? <>Temperatura: {rotuloEscolhaTemperatura(h.temperatura, h.probabilidade)}{h.observacao ? <span className="detalhe"> — “{h.observacao}”</span> : null}</>
+              : h.evento === "resultado"
               ? <>{h.resultado === "ganha" ? "Marcada como ganha" : h.resultado === "perdida" ? `Marcada como perdida${h.motivo ? ` (${rotuloMotivoPerda(h.motivo)})` : ""}` : "Reaberta"}</>
               : <>Etapa: {etapas[h.etapa ?? -1]?.nome || h.nome || "—"}{h.etapa_antiga != null && h.nome ? <span className="detalhe"> (antes: {h.nome})</span> : null}</>}
             {quem(h.alterado_por) ? <span className="detalhe"> · {quem(h.alterado_por)}</span> : null}

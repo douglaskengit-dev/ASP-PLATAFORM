@@ -247,6 +247,38 @@ export function valorPonderado(valor: number | null | undefined, p: Temperatura 
   return Math.round(Number(valor) * pct * 100) / 100;
 }
 
+export const TAM_OBS_TEMPERATURA = 500;
+
+/** Evento de temperatura no historico_etapas da oportunidade: a escolha
+ *  (temperatura ou percentual próprio; os dois nulos = automática), a
+ *  anterior e a observação de quem escolheu. */
+export interface EventoTemperatura {
+  evento: "temperatura";
+  temperatura: Temperatura | null;
+  probabilidade: number | null;
+  anterior?: { temperatura: Temperatura | null; probabilidade: number | null } | null;
+  observacao: string | null;
+  data: string;
+  alterado_em: string;
+  alterado_por?: string | null;
+}
+
+/** "Quente · 85%", "🔥 72% (percentual próprio)" ou "Automática". */
+export function rotuloEscolhaTemperatura(t: string | null | undefined, probabilidade: number | string | null | undefined): string {
+  const p = probabilidadePropria(probabilidade);
+  if (p != null) { const f = infoTemperatura(faixaTemperatura(p)); return `${f.icone} ${rotuloPct(p)} (percentual próprio)`; }
+  if (ehTemperatura(t)) { const i = infoTemperatura(t); return `${i.icone} ${i.rotulo} · ${rotuloPct(i.pct)}`; }
+  return "Automática";
+}
+
+/** Eventos de temperatura do histórico, do mais novo ao mais antigo. */
+export function historicoTemperatura(historico: unknown): EventoTemperatura[] {
+  return (Array.isArray(historico) ? historico : [])
+    .filter((h: any): h is EventoTemperatura => h && h.evento === "temperatura")
+    .slice()
+    .sort((a, b) => String(b.alterado_em || b.data).localeCompare(String(a.alterado_em || a.data)));
+}
+
 /** "15%" ou "72,5%". */
 export const rotuloPct = (pct: number) => `${(Math.round(pct * 1000) / 10).toLocaleString("pt-BR")}%`;
 
