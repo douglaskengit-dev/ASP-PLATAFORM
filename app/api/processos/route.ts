@@ -49,6 +49,21 @@ export async function GET(req: NextRequest) {
       if (x) p.projeto = { id: x.id, codigo: x.codigo_projeto || x.pedido_compra || null };
     }
   }
+  // Versão mais nova da proposta de cada oportunidade: temperatura automática.
+  // Complementar: sem permissão ou sem a migração, segue sem.
+  if (processos.length) {
+    const { data: versoes } = await supabase.from("gp_processo_propostas").select("*")
+      .in("processo_id", processos.map((p) => p.id));
+    const maisNova = new Map<string, any>();
+    for (const v of (versoes || []) as any[]) {
+      const a = maisNova.get(v.processo_id);
+      if (!a || v.versao > a.versao) maisNova.set(v.processo_id, v);
+    }
+    for (const p of processos) {
+      const v = maisNova.get(p.id);
+      if (v) p.proposta_situacao = v.situacao || "enviada";
+    }
+  }
   return NextResponse.json({
     ok: true, processos, etapas: ETAPAS_FLUXO, souAdmin: ehAdmin, perfil: profile.perfil, eu: profile.id,
     hoje: hojeBrasil(), migrado: processos.length === 0 || processos.every((p) => p.migrado),

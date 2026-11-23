@@ -129,5 +129,6 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     responsavel_id: p.responsavel_id || null, responsavel_nome: p.responsavel_id ? nomes.get(p.responsavel_id) || null : null,
     proxima_acao: p.proxima_acao || null, proxima_acao_em: p.proxima_acao_em || null,
     proposta: propostas.get(p.id) || null,
+    temperatura: p.temperatura || null,
   }));
 }

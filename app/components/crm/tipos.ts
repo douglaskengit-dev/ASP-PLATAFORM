@@ -27,6 +27,10 @@ export interface Oportunidade {
   responsavel_id: string | null;
   contato_id: string | null;
   previsao_fechamento: string | null;
+  /** Escolhida na ficha; nula = automática. */
+  temperatura: string | null;
+  /** Situação da versão mais nova da proposta (nula sem proposta). */
+  proposta_situacao: string | null;
   proxima_acao: string | null;
   proxima_acao_em: string | null;
   procedimento_id: string | null;
