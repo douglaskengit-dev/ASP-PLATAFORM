@@ -44,6 +44,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (error && "temperatura" in v.colunas && faltaMigracaoCrm(error) && /temperatura/i.test(error.message || "")) {
     return NextResponse.json({ erro: "A temperatura precisa da migração 20261123100000_asp_crm_temperatura no Supabase. Peça ao administrador para rodá-la." }, { status: 409 });
   }
+  if (error && "probabilidade" in v.colunas && faltaMigracaoCrm(error) && /probabilidade/i.test(error.message || "")) {
+    return NextResponse.json({ erro: "O percentual próprio precisa da migração 20261124100000_asp_crm_probabilidade no Supabase. Peça ao administrador para rodá-la." }, { status: 409 });
+  }
   if (error && faltaMigracaoCrm(error)) return NextResponse.json({ erro: MSG_MIGRACAO_CRM }, { status: 409 });
   if (error) return NextResponse.json({ erro: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ erro: "Oportunidade não encontrada." }, { status: 404 });

@@ -47,6 +47,8 @@ export interface ProcessoBruto {
   proposta?: { versao: number; validade: string | null; situacao: string } | null;
   /** Escolhida na ficha (nula = automática). */
   temperatura?: string | null;
+  /** Percentual próprio (0 a 100); nulo = o da temperatura. */
+  probabilidade?: number | null;
 }
 
 const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
@@ -84,14 +86,14 @@ export interface PainelComercial {
     propostas: { aguardando: number; vencidas: number; vencem7: number; aceitas: number };
     pipeline: { valor: number; abertas: number; semValor: number; previsto30: number; qtdPrevisto30: number };
     /** Previsão de Vendas Ponderada: soma de valor × probabilidade da temperatura (em aberto agora). */
-    previsao: { ponderado: number; valor: number; comTemperatura: number; semTemperatura: number; manuais: number };
+    previsao: { ponderado: number; valor: number; comTemperatura: number; semTemperatura: number; manuais: number; proprios: number };
     /** Fechadas no período (data do resultado). taxa = ganhas / (ganhas + perdidas). */
     ganho: { ganhas: number; perdidas: number; taxa: number | null; valorGanho: number; valorPerdido: number; ticketMedio: number | null; cicloMediano: number | null };
   };
   /** Próximas ações atrasadas (a mais antiga primeiro). */
   followupsAtrasados: { id: string; titulo: string; cliente: string | null; responsavel: string | null; acao: string | null; em: string; dias: number }[];
   /** Previsão ponderada por temperatura (Frio, Morno, Quente e "sem temperatura", 0%). */
-  previsaoTemperatura: { temperatura: Temperatura | null; rotulo: string; pct: number; n: number; valor: number; ponderado: number; semValor: number }[];
+  previsaoTemperatura: { temperatura: Temperatura | null; rotulo: string; pct: number; n: number; valor: number; ponderado: number; semValor: number; proprios: number }[];
   /** Previsão ponderada pelo mês da previsão de fechamento (atrasadas e sem data à parte). */
   previsaoMes: { chave: string; rotulo: string; n: number; valor: number; ponderado: number }[];
   /** Propostas para agir: vencidas, que vencem em até 7 dias e aceitas sem Fechar ganho. */
@@ -315,13 +317,14 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     porResp.set(k, r);
   }
   // ── Previsão de Vendas Ponderada ──────────────────────────────────────────
-  const tempOp = new Map(emAberto.map((p) => [p.id, temperaturaDe({ temperatura: p.temperatura, etapa: p.etapa, propostaSituacao: p.proposta?.situacao || null })]));
-  const pondDe = (p: ProcessoBruto) => valorPonderado(p.valor ?? null, tempOp.get(p.id)!.temperatura) || 0;
+  const tempOp = new Map(emAberto.map((p) => [p.id, temperaturaDe({ temperatura: p.temperatura, probabilidade: p.probabilidade, etapa: p.etapa, propostaSituacao: p.proposta?.situacao || null })]));
+  const pondDe = (p: ProcessoBruto) => valorPonderado(p.valor ?? null, tempOp.get(p.id)!.pct) || 0;
   const previsaoTemperatura: PainelComercial["previsaoTemperatura"] = [...TEMPERATURAS.slice().reverse(), null].map((t) => {
     const l = emAberto.filter((p) => tempOp.get(p.id)!.temperatura === (t ? t.valor : null));
     return {
       temperatura: t ? t.valor : null, rotulo: t ? t.rotulo : "Sem temperatura (antes da proposta)", pct: t ? t.pct : 0,
       n: l.length, valor: soma(l), ponderado: l.reduce((a, p) => a + pondDe(p), 0), semValor: l.filter((p) => !(valorDe(p) > 0)).length,
+      proprios: l.filter((p) => tempOp.get(p.id)!.percentualProprio).length,
     };
   });
   const mesHoje = hoje.slice(0, 7);
@@ -442,6 +445,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
         comTemperatura: emAberto.filter((p) => tempOp.get(p.id)!.temperatura).length,
         semTemperatura: emAberto.filter((p) => !tempOp.get(p.id)!.temperatura).length,
         manuais: emAberto.filter((p) => !tempOp.get(p.id)!.automatica).length,
+        proprios: emAberto.filter((p) => tempOp.get(p.id)!.percentualProprio).length,
       },
       propostas: { aguardando, vencidas: contaTipo("vencida"), vencem7: contaTipo("vence"), aceitas: contaTipo("aceita") },
       pipeline: {

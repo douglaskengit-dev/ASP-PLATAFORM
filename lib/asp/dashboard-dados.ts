@@ -130,5 +130,6 @@ export async function carregarProcessosDashboard(supabase: any): Promise<Process
     proxima_acao: p.proxima_acao || null, proxima_acao_em: p.proxima_acao_em || null,
     proposta: propostas.get(p.id) || null,
     temperatura: p.temperatura || null,
+    probabilidade: p.probabilidade == null ? null : Number(p.probabilidade),
   }));
 }
