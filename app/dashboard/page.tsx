@@ -18,6 +18,7 @@ import type { ChavePeriodo, Dashboard, FiltrosDashboard } from "@/lib/asp/dashbo
 import {
   Base, ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, Mais, num, pct, plural, ROT_TIPO, Secao, Tabela, useVisao, Vazio,
 } from "./componentes";
+import { GradeKpis, Personalizacao } from "./personalizar";
 import { ROTULO_STATUS_RECORRENCIA } from "@/lib/validacao";
 import s from "./dashboard.module.css";
 import PendenciasCampo from "@/app/components/PendenciasCampo";
@@ -206,8 +207,8 @@ export default function DashboardPage() {
 function Conteudo({ p }: { p: Dashboard }) {
   const k = p.kpis;
   return (
-    <>
-      <div className={s.kpis}>
+    <Personalizacao painel="operacoes">
+      <GradeKpis>
         <Kpi def="osAndamento" valor={num(k.osAndamento)}
           sub={<>{plural(k.osAbertasPeriodo, "aberta", "abertas")} no período · {plural(k.paradas, "parada", "paradas")}{k.osSemInspecao ? <> · {num(k.osSemInspecao)} sem inspeção</> : null}</>} />
         <Kpi def="osEncerradas" periodo valor={num(k.osEncerradasPeriodo)}
@@ -224,7 +225,7 @@ function Conteudo({ p }: { p: Dashboard }) {
           sub={k.aguardandoAssinatura.total ? <>mais antigo há {dias(k.aguardandoAssinatura.maisAntigoDias)}</> : "nada esperando"} />
         <Kpi def="encerramento" valor={num(k.encerramento.comPendencia)} alerta={k.encerramento.comPendencia > 0}
           sub={<>de {plural(k.encerramento.naFase10, "OS", "OSs")} na fase 10</>} />
-      </div>
+      </GradeKpis>
 
       <h2 className={s.grupoTitulo}>Fluxo das OSs</h2>
       <div className={s.grade2}>
@@ -257,7 +258,7 @@ function Conteudo({ p }: { p: Dashboard }) {
       <h2 className={s.grupoTitulo}>Clientes</h2>
       <div className={s.cheio}><Recorrencia p={p} /></div>
       <div className={s.cheio}><Clientes p={p} /></div>
-    </>
+    </Personalizacao>
   );
 }
 

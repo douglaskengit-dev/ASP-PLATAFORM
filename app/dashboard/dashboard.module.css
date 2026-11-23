@@ -161,3 +161,43 @@
   .kpiValor { font-size: 22px; }
   .secao { padding: 12px; }
 }
+
+/* Personalização: faixa de KPIs, minimizar e lista "Personalizar". */
+.faixaKpis { display: flex; flex-direction: column; gap: 8px; }
+.faixaKpisTopo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.botaoMin {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; margin-left: -6px; border: 0; border-radius: 6px;
+  background: none; color: var(--texto); font: inherit; font-weight: 700; cursor: pointer;
+}
+.faixaKpisTopo > .botaoMin { font-size: 12px; color: var(--cinza); text-transform: uppercase; letter-spacing: .04em; }
+.botaoMin:hover { background: var(--bg-suave); }
+.botaoMin:focus-visible { outline: 2px solid var(--primaria); outline-offset: 2px; }
+.secaoTitulo > .botaoMin { margin-left: -4px; padding: 0 4px; color: var(--cinza); }
+.secaoMinimizada .secaoTopo { margin-bottom: 0; }
+.menuWrap { position: relative; }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(340px, calc(100vw - 32px));
+  max-height: min(70vh, 560px); overflow: auto; background: var(--bg-card); border: 1px solid var(--borda);
+  border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 10px 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.menuGrupo { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.menuGrupo legend { font-size: 12px; font-weight: 700; color: var(--cinza); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.menuItem { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 2px; border-radius: 6px; cursor: pointer; }
+.menuItem:hover { background: var(--bg-suave); }
+.menuItem input { width: 16px; height: 16px; accent-color: var(--primaria); }
+.menuAcoes { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--borda); padding-top: 8px; }
+.menuAcoes .botaoSec { padding: 4px 10px; font-size: 12px; }
+.menuLinha { display: flex; align-items: center; gap: 4px; }
+.menuLinha .menuItem { flex: 1; min-width: 0; }
+.botaoFixar {
+  border: 0; background: none; cursor: pointer; font-size: 13px; line-height: 1; padding: 3px 4px; border-radius: 6px;
+  filter: grayscale(1); opacity: .35;
+}
+.botaoFixar:hover { opacity: .8; background: var(--bg-suave); }
+.botaoFixarAtivo { filter: none; opacity: 1; }
+.botaoFixar:focus-visible { outline: 2px solid var(--primaria); outline-offset: 1px; }
+/* Quadros fixados no topo: grade de 2 colunas (1 no celular). */
+.fixados { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.fixados:empty { display: none; }
+@media (max-width: 760px) { .fixados { grid-template-columns: minmax(0, 1fr); } }
+.faixaKpis [hidden] { display: none !important; }

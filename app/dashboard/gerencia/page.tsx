@@ -11,6 +11,7 @@ import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import type { PainelGerencia } from "@/lib/asp/dashboard-gerencia";
 import { AbasDashboard, CamposPeriodo, ColunasMensais, FILTROS_PADRAO, Glossario, usePainel } from "../painel-comum";
 import { ddmmaa, dec, dias, Esqueleto, Kpi, LinkOS, ListaCurta, num, pct, plural, Secao, Tabela, useVisao, Vazio } from "../componentes";
+import { GradeKpis, Personalizacao } from "../personalizar";
 import s from "../dashboard.module.css";
 
 const sinal = (v: number | null) => (v == null ? "" : `${v > 0 ? "+" : ""}${pct(v)}`);
@@ -78,8 +79,8 @@ function Conteudo({ p }: { p: PainelGerencia }) {
   const k = p.kpis;
   const cal = k.calibracao;
   return (
-    <>
-      <div className={s.kpis}>
+    <Personalizacao painel="gerencia">
+      <GradeKpis>
         <Kpi def="gConcluidas" periodo valor={num(k.concluidas.periodo)}
           sub={<>{plural(k.concluidas.anterior, "no período anterior", "no período anterior")}{k.concluidas.variacao != null ? ` (${sinal(k.concluidas.variacao)})` : ""}</>} />
         <Kpi def="gPrazoTotal" periodo valor={k.prazoTotal ? dec(k.prazoTotal.mediana) : "—"} unidade={k.prazoTotal ? "dias" : undefined}
@@ -96,7 +97,7 @@ function Conteudo({ p }: { p: PainelGerencia }) {
           sub={<>equipe ({plural(k.ocupacao.pessoas, "pessoa", "pessoas")}) · equipamentos {pct(k.ocupacao.equipamentos)} ({num(k.ocupacao.nEquipamentos)})</>} />
         <Kpi def="gCalibracao" valor={cal.erro ? "—" : num(cal.vencidas)} alerta={cal.vencidas > 0}
           sub={cal.erro ? "calibração indisponível" : <>{cal.vencidas === 1 ? "vencida" : "vencidas"} · {num(cal.venceBreve)} vencem em 30 dias · de {plural(cal.total, "unidade", "unidades")}</>} />
-      </div>
+      </GradeKpis>
 
       <h2 className={s.grupoTitulo}>Resultado</h2>
       <div className={s.grade2}>
@@ -116,7 +117,7 @@ function Conteudo({ p }: { p: PainelGerencia }) {
         <Ocupacao p={p} />
       </div>
       <div className={s.cheio}><Calibracao p={p} /></div>
-    </>
+    </Personalizacao>
   );
 }
 

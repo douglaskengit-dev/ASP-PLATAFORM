@@ -6,6 +6,7 @@ import { ReactNode, useId, useState } from "react";
 import Link from "next/link";
 import type { RefOS } from "@/lib/asp/dashboard";
 import { DEFINICOES, type ChaveDef } from "./definicoes";
+import { BotaoFixar, NoTopoSeFixado, useItemPersonalizavel } from "./personalizar";
 import s from "./dashboard.module.css";
 
 // ── Formatação ───────────────────────────────────────────────────────────────
@@ -57,11 +58,17 @@ export function Kpi({ def, valor, unidade, sub, periodo, alerta }: {
   def: ChaveDef; valor: ReactNode; unidade?: string; sub?: ReactNode; periodo?: boolean; alerta?: boolean;
 }) {
   const { botao, texto } = useDefinicao(def);
+  const { visivel, fixado, ordemFixado, alternarFixado } = useItemPersonalizavel(def, "kpi");
+  if (!visivel) return null;
   return (
-    <div className={`${s.kpi}${alerta ? ` ${s.kpiAlerta}` : ""}`}>
+    // Fixado: vem primeiro na faixa (order negativo, na ordem em que foi fixado).
+    <div className={`${s.kpi}${alerta ? ` ${s.kpiAlerta}` : ""}`} style={fixado ? { order: ordemFixado - 100 } : undefined}>
       <div className={s.kpiTopo}>
         <span className={s.kpiNome}>{DEFINICOES[def].titulo}</span>
-        {botao}
+        <span className={s.secaoAcoes}>
+          {alternarFixado && <BotaoFixar fixado={fixado} nome={DEFINICOES[def].titulo} onClick={alternarFixado} />}
+          {botao}
+        </span>
       </div>
       <span className={s.kpiValor}>{valor}{unidade && <small>{unidade}</small>}</span>
       {sub && <span className={s.kpiSub}>{sub}</span>}
@@ -77,19 +84,34 @@ export function Secao({ def, titulo, periodo, acoes, children, contador }: {
   def: ChaveDef; titulo?: string; periodo?: boolean; acoes?: ReactNode; children: ReactNode; contador?: number;
 }) {
   const { botao, texto } = useDefinicao(def);
+  const { visivel, minimizada, alternarMinimizada, fixado, ordemFixado, alternarFixado, alvoFixados } = useItemPersonalizavel(def, "secao");
+  if (!visivel) return null;
+  const nome = titulo || DEFINICOES[def].titulo;
   return (
-    <section className={s.secao} aria-label={titulo || DEFINICOES[def].titulo}>
+    <NoTopoSeFixado fixado={fixado} ordem={ordemFixado} alvo={alvoFixados}>
+    <section className={`${s.secao}${minimizada ? ` ${s.secaoMinimizada}` : ""}`} aria-label={nome}>
       <div className={s.secaoTopo}>
         <h2 className={s.secaoTitulo}>
-          {titulo || DEFINICOES[def].titulo}
+          {alternarMinimizada && (
+            <button type="button" className={s.botaoMin} aria-expanded={!minimizada}
+              aria-label={`${minimizada ? "Expandir" : "Minimizar"} ${nome}`} title={minimizada ? "Expandir" : "Minimizar"} onClick={alternarMinimizada}>
+              <span aria-hidden="true">{minimizada ? "▸" : "▾"}</span>
+            </button>
+          )}
+          {nome}
           {contador != null && <span className={s.chip}>{num(contador)}</span>}
           <Base periodo={periodo} />
         </h2>
-        <div className={s.secaoAcoes}>{acoes}{botao}</div>
+        <div className={s.secaoAcoes}>
+          {!minimizada && acoes}
+          {alternarFixado && <BotaoFixar fixado={fixado} nome={nome} onClick={alternarFixado} />}
+          {!minimizada && botao}
+        </div>
       </div>
-      {texto}
-      {children}
+      {!minimizada && texto}
+      {!minimizada && children}
     </section>
+    </NoTopoSeFixado>
   );
 }
 
@@ -166,7 +188,7 @@ export function Esqueleto() {
     <div aria-busy="true" aria-live="polite">
       <span className={s.srOnly}>Carregando o Dashboard…</span>
       <div className={s.kpis}>
-        {Array.from({ length: 8 }, (_, i) => <div key={i} className={s.esqueleto} />)}
+        {Array.from({ length: 4 }, (_, i) => <div key={i} className={s.esqueleto} />)}
       </div>
       <div className={s.grade2}>
         <div className={`${s.esqueleto} ${s.esqueletoAlto}`} />

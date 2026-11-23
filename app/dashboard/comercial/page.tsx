@@ -10,6 +10,7 @@ import { BarrasHorizontais } from "@/app/components/DashboardCharts";
 import type { PainelComercial } from "@/lib/asp/dashboard-comercial";
 import { AbasDashboard, CamposPeriodo, ColunasMensais, FILTROS_PADRAO, Glossario, usePainel } from "../painel-comum";
 import { ddmm, ddmmaa, dec, dias, Esqueleto, Kpi, ListaCurta, moeda, num, pct, plural, Secao, Tabela, useVisao, Vazio } from "../componentes";
+import { GradeKpis, Personalizacao } from "../personalizar";
 import s from "../dashboard.module.css";
 
 const sinal = (v: number | null) => (v == null ? "" : `${v > 0 ? "+" : ""}${pct(v)}`);
@@ -74,8 +75,8 @@ function Conteudo({ p }: { p: PainelComercial }) {
   const k = p.kpis;
   const r = k.renovacoes;
   return (
-    <>
-      <div className={s.kpis}>
+    <Personalizacao painel="comercial">
+      <GradeKpis>
         <Kpi def="cRenovacoes" valor={num(r.vencidas + r.ate30 + r.ate60 + r.ate90)} alerta={r.vencidas > 0}
           sub={<>{plural(r.vencidas, "vencida", "vencidas")} · {num(r.ate30)} em 30 d · {num(r.ate60)} em 60 d · {num(r.ate90)} em 90 d</>} />
         <Kpi def="cInativos" valor={num(k.inativos.total)}
@@ -99,7 +100,7 @@ function Conteudo({ p }: { p: PainelComercial }) {
           sub={<>{plural(k.projetosNovos.clientesNovos, "cliente novo", "clientes novos")} · {num(k.projetosNovos.recorrentes)} recorrentes · antes {num(k.projetosNovos.anterior)}{k.projetosNovos.variacao != null ? ` (${sinal(k.projetosNovos.variacao)})` : ""}</>} />
         <Kpi def="cRecompra" valor={pct(k.recompra.taxa)}
           sub={k.recompra.base ? <>{num(k.recompra.recompraram)} de {plural(k.recompra.base, "cliente", "clientes")}</> : "nenhum cliente com 12 meses de histórico"} />
-      </div>
+      </GradeKpis>
 
       <h2 className={s.grupoTitulo}>Clientes</h2>
       <div className={s.cheio}><Renovacoes p={p} /></div>
@@ -122,7 +123,7 @@ function Conteudo({ p }: { p: PainelComercial }) {
       </div>
       <div className={s.cheio}><ProjetosFollowup p={p} /></div>
       <div className={s.cheio}><ProjetosMes p={p} /></div>
-    </>
+    </Personalizacao>
   );
 }
 
