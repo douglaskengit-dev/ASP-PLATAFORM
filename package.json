@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "manual:robo": "node scripts/gerar-manual-assistente.js",
-    "miniaturas:coleta": "node scripts/gerar-miniaturas-coleta.js"
+    "miniaturas:coleta": "node scripts/gerar-miniaturas-coleta.js",
+    "teste:dashboard": "node scripts/testar-dashboard-comercial.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
