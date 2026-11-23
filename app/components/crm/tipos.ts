@@ -5,7 +5,9 @@ export interface Procedimento { id: string; codigo: string; nome: string; ativo?
 export interface Usuario { id: string; nome: string; perfil: string }
 export interface EventoHistorico {
   etapa?: number; nome?: string; data_autenticacao?: string; alterado_em?: string; alterado_por?: string;
-  evento?: "resultado"; resultado?: "aberta" | "ganha" | "perdida"; anterior?: string; data?: string; motivo?: string | null;
+  evento?: "resultado" | "temperatura"; resultado?: "aberta" | "ganha" | "perdida"; anterior?: any; data?: string; motivo?: string | null;
+  /** Evento "temperatura": a escolha e a observação. */
+  temperatura?: string | null; probabilidade?: number | null; observacao?: string | null;
   etapa_antiga?: number;
 }
 

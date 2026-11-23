@@ -11,7 +11,7 @@
  * aberto, ganha ou perdida (resultado_em = dia do fechamento).
  * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
-import { diasParaValidade, rotuloMotivoPerda, rotuloOrigem, situacaoPropostaVista, situacaoProximaAcao, TEMPERATURAS, temperaturaDe, valorPonderado, type Temperatura } from "../validacao/crm";
+import { diasParaValidade, historicoTemperatura, rotuloMotivoPerda, rotuloOrigem, situacaoPropostaVista, situacaoProximaAcao, TEMPERATURAS, temperaturaDe, valorPonderado, type Temperatura } from "../validacao/crm";
 import { diaBrasilia, fimDaOS } from "../validacao";
 import {
   diferencaDias, estatistica, intervaloDoPeriodo, montarRecorrencia, noIntervalo, porChave,
@@ -26,7 +26,7 @@ export interface ProcessoBruto {
   orgao_nome: string | null;
   etapa: number;
   created_at: string;
-  historico_etapas: { etapa?: number | null; data_autenticacao?: string | null; alterado_em?: string | null }[] | null;
+  historico_etapas: { etapa?: number | null; data_autenticacao?: string | null; alterado_em?: string | null; evento?: string; observacao?: string | null; data?: string }[] | null;
   /** Antes da migração do CRM: ausente (= aberta). */
   resultado?: "aberta" | "ganha" | "perdida" | null;
   resultado_em?: string | null;
@@ -94,6 +94,15 @@ export interface PainelComercial {
   followupsAtrasados: { id: string; titulo: string; cliente: string | null; responsavel: string | null; acao: string | null; em: string; dias: number }[];
   /** Previsão ponderada por temperatura (Frio, Morno, Quente e "sem temperatura", 0%). */
   previsaoTemperatura: { temperatura: Temperatura | null; rotulo: string; pct: number; n: number; valor: number; ponderado: number; semValor: number; proprios: number }[];
+  /** Quem está na previsão: por cliente (maior valor ponderado primeiro), com as oportunidades. */
+  previsaoClientes: {
+    clienteId: string | null; cliente: string; valor: number; ponderado: number;
+    oportunidades: {
+      id: string; titulo: string; temperatura: Temperatura; pct: number; automatica: boolean; percentualProprio: boolean;
+      valor: number | null; ponderado: number; previsaoFechamento: string | null; responsavel: string | null;
+      observacao: { texto: string; data: string } | null;
+    }[];
+  }[];
   /** Previsão ponderada pelo mês da previsão de fechamento (atrasadas e sem data à parte). */
   previsaoMes: { chave: string; rotulo: string; n: number; valor: number; ponderado: number }[];
   /** Propostas para agir: vencidas, que vencem em até 7 dias e aceitas sem Fechar ganho. */
@@ -344,6 +353,26 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     return { chave: k, rotulo, n: l.length, valor: soma(l), ponderado: l.reduce((a, p) => a + pondDe(p), 0) };
   });
 
+  const porCliente = new Map<string, PainelComercial["previsaoClientes"][number]>();
+  for (const p of emAberto) {
+    const t = tempOp.get(p.id)!;
+    if (!t.temperatura || t.pct == null) continue;
+    const k = p.orgao_id || "__sem";
+    const c = porCliente.get(k) || { clienteId: p.orgao_id, cliente: p.orgao_nome || "Sem cliente", valor: 0, ponderado: 0, oportunidades: [] };
+    const pond = pondDe(p);
+    const obs = historicoTemperatura(p.historico_etapas).find((h) => h.observacao);
+    c.valor += valorDe(p); c.ponderado += pond;
+    c.oportunidades.push({
+      id: p.id, titulo: p.titulo, temperatura: t.temperatura, pct: t.pct, automatica: t.automatica, percentualProprio: t.percentualProprio,
+      valor: p.valor ?? null, ponderado: pond, previsaoFechamento: p.previsao_fechamento?.slice(0, 10) || null,
+      responsavel: p.responsavel_nome || null, observacao: obs ? { texto: obs.observacao!, data: obs.data } : null,
+    });
+    porCliente.set(k, c);
+  }
+  const previsaoClientes = Array.from(porCliente.values())
+    .map((c) => ({ ...c, oportunidades: c.oportunidades.sort((a, b) => b.ponderado - a.ponderado || b.pct - a.pct) }))
+    .sort((a, b) => b.ponderado - a.ponderado || b.valor - a.valor || a.cliente.localeCompare(b.cliente, "pt-BR"));
+
   // ── Propostas (versão mais nova de cada oportunidade em aberto) ──────────
   const propostasAcao: PainelComercial["propostasAcao"] = [];
   let aguardando = 0;
@@ -466,6 +495,7 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     followupsPorResponsavel,
     propostasAcao: propostasAcao.slice(0, 40),
     previsaoTemperatura,
+    previsaoClientes: previsaoClientes.slice(0, 50),
     previsaoMes,
     projetosFollowup: { total: historico.length, comProjeto: comProjetoHist, semProjeto: historico.length - comProjetoHist, itens: historico.slice(0, 100) },
     renovacoes: renovacoes.slice(0, 30),

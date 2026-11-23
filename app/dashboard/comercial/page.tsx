@@ -309,10 +309,55 @@ function Previsao({ p }: { p: PainelComercial }) {
             <Tabela legenda="Previsão ponderada pelo mês da previsão de fechamento" colunas={["Fechamento previsto", "Oportunidades", "Valor", "Valor ponderado"]}
               linhas={p.previsaoMes.map((m) => [m.rotulo, num(m.n), moeda(m.valor), moeda(m.ponderado)])} />
           )}
+          {p.previsaoClientes.length > 0 && <ClientesPrevisao p={p} />}
           {k.manuais > 0 && <p className={s.sub} style={{ margin: "6px 0 0" }}>{plural(k.manuais, "oportunidade com temperatura ou percentual escolhido na ficha", "oportunidades com temperatura ou percentual escolhido na ficha")}{k.proprios ? ` (${num(k.proprios)} com percentual próprio)` : ""}; as demais usam a automática.</p>}
         </>
       )}
     </Secao>
+  );
+}
+
+/** Quem está na previsão ponderada: cada cliente com as oportunidades, a
+ *  temperatura (cor da escala), o valor ponderado e a última observação. */
+function ClientesPrevisao({ p }: { p: PainelComercial }) {
+  const corT = (t: string) => `var(--temp-${t})`;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <h3 className={s.grupoTitulo} style={{ margin: "0 0 6px" }}>Clientes da previsão</h3>
+      <ListaCurta itens={p.previsaoClientes} inicial={6} chave={(c) => c.clienteId || "sem"} render={(c) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+          <div className={s.linha}>
+            <span>
+              {c.clienteId ? <Link className={s.link} href={`/orgaos/${c.clienteId}`}>{c.cliente}</Link> : <strong>{c.cliente}</strong>}
+              <span className={s.sub}>{plural(c.oportunidades.length, "oportunidade", "oportunidades")} · {moeda(c.valor)} em aberto</span>
+            </span>
+            <strong>{moeda(c.ponderado)}</strong>
+          </div>
+          <ul style={{ listStyle: "none", margin: 0, padding: "0 0 0 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+            {c.oportunidades.map((o) => (
+              <li key={o.id} style={{ borderLeft: `3px solid ${corT(o.temperatura)}`, paddingLeft: 8 }}>
+                <div className={s.linha}>
+                  <span>
+                    <Link className={s.link} style={{ fontWeight: 500 }} href={`/followup?processo=${o.id}`}>{o.titulo}</Link>
+                    <span className={s.sub}>
+                      <span style={{ color: corT(o.temperatura), fontWeight: 700 }}>
+                        {o.temperatura === "frio" ? "❄️ Frio" : o.temperatura === "morno" ? "🌤️ Morno" : "🔥 Quente"} {pct(o.pct)}
+                      </span>
+                      {o.automatica ? " (automática)" : o.percentualProprio ? " (percentual próprio)" : " (escolhida)"}
+                      {o.valor != null ? ` · ${moeda(o.valor)} × ${pct(o.pct)}` : " · sem valor"}
+                      {o.previsaoFechamento ? ` · fecha ${ddmmaa(o.previsaoFechamento)}` : ""}
+                      {o.responsavel ? ` · ${o.responsavel}` : ""}
+                    </span>
+                    {o.observacao && <span className={s.sub} style={{ fontStyle: "italic" }}>“{o.observacao.texto}” ({ddmmaa(o.observacao.data)})</span>}
+                  </span>
+                  <span>{moeda(o.ponderado)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )} />
+    </div>
   );
 }
 
