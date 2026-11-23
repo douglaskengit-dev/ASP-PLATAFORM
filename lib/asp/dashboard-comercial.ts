@@ -100,6 +100,8 @@ export interface PainelComercial {
     oportunidades: {
       id: string; titulo: string; temperatura: Temperatura; pct: number; automatica: boolean; percentualProprio: boolean;
       valor: number | null; ponderado: number; previsaoFechamento: string | null; responsavel: string | null;
+      /** Do Catálogo (nome e código) ou "Outros" (a descrição é o título). */
+      procedimento: { nome: string; codigo: string | null; outros: boolean };
       observacao: { texto: string; data: string } | null;
     }[];
   }[];
@@ -353,6 +355,11 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     return { chave: k, rotulo, n: l.length, valor: soma(l), ponderado: l.reduce((a, p) => a + pondDe(p), 0) };
   });
 
+  const procPorId = new Map(d.procedimentos.filter((x) => x.id).map((x) => [x.id!, x]));
+  const procedimentoDe = (p: ProcessoBruto) => {
+    const x = p.procedimento_id ? procPorId.get(p.procedimento_id) : undefined;
+    return x ? { nome: x.nome || x.codigo, codigo: x.codigo, outros: false } : { nome: p.titulo, codigo: null, outros: true };
+  };
   const porCliente = new Map<string, PainelComercial["previsaoClientes"][number]>();
   for (const p of emAberto) {
     const t = tempOp.get(p.id)!;
@@ -365,7 +372,8 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     c.oportunidades.push({
       id: p.id, titulo: p.titulo, temperatura: t.temperatura, pct: t.pct, automatica: t.automatica, percentualProprio: t.percentualProprio,
       valor: p.valor ?? null, ponderado: pond, previsaoFechamento: p.previsao_fechamento?.slice(0, 10) || null,
-      responsavel: p.responsavel_nome || null, observacao: obs ? { texto: obs.observacao!, data: obs.data } : null,
+      responsavel: p.responsavel_nome || null, procedimento: procedimentoDe(p),
+      observacao: obs ? { texto: obs.observacao!, data: obs.data } : null,
     });
     porCliente.set(k, c);
   }

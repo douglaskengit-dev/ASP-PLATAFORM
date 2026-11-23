@@ -201,3 +201,9 @@
 .fixados:empty { display: none; }
 @media (max-width: 760px) { .fixados { grid-template-columns: minmax(0, 1fr); } }
 .faixaKpis [hidden] { display: none !important; }
+/* Previsão ponderada: tabela por oportunidade (textos quebram, à esquerda). */
+.tabelaPrevisao th, .tabelaPrevisao td { text-align: left; white-space: normal; vertical-align: top; }
+.tabelaPrevisao td:nth-child(2) { white-space: nowrap; }
+.tabelaPrevisao td:nth-child(5) { min-width: 180px; max-width: 320px; }
+.tabelaPrevisao tbody th { font-weight: 600; padding-left: 10px; }
+.tabelaPrevisao .sub { display: block; }
