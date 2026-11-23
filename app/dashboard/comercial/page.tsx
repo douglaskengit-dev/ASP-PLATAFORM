@@ -283,16 +283,32 @@ function Previsao({ p }: { p: PainelComercial }) {
     <Secao def="cPrevisao" contador={k.comTemperatura}>
       {total.n === 0 ? <Vazio>Nenhuma oportunidade em aberto.</Vazio> : (
         <>
+          {k.ponderado > 0 && (
+            <div role="img" aria-label="Composição do valor ponderado por temperatura"
+              style={{ display: "flex", gap: 2, height: 12, borderRadius: 6, overflow: "hidden", margin: "0 0 10px" }}>
+              {p.previsaoTemperatura.filter((t) => t.temperatura && t.ponderado > 0).map((t) => (
+                <span key={t.temperatura} title={`${t.rotulo}: ${moeda(t.ponderado)}`}
+                  style={{ flex: t.ponderado, background: `var(--temp-${t.temperatura})` }} />
+              ))}
+            </div>
+          )}
           <Tabela legenda="Previsão ponderada por temperatura" colunas={["Temperatura", "Probabilidade", "Oportunidades", "Valor", "Valor ponderado"]}
             linhas={[
-              ...linhas.map((t) => [t.rotulo, pct(t.pct), `${num(t.n)}${t.semValor ? ` (${num(t.semValor)} sem valor)` : ""}`, moeda(t.valor), moeda(t.ponderado)]),
+              ...linhas.map((t) => [
+                <span key="r" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: 3, background: t.temperatura ? `var(--temp-${t.temperatura})` : "var(--temp-sem)" }} />
+                  {t.rotulo}
+                </span>,
+                // Com percentual próprio na faixa, mostra a média efetiva.
+                t.proprios && t.valor > 0 ? `${pct(t.pct)} (efetivo ${pct(t.ponderado / t.valor)})` : pct(t.pct),
+                `${num(t.n)}${t.semValor ? ` (${num(t.semValor)} sem valor)` : ""}`, moeda(t.valor), moeda(t.ponderado)]),
               [<strong key="t">Total</strong>, "", num(total.n), moeda(total.valor), <strong key="p">{moeda(k.ponderado)}</strong>],
             ]} />
           {p.previsaoMes.length > 0 && (
             <Tabela legenda="Previsão ponderada pelo mês da previsão de fechamento" colunas={["Fechamento previsto", "Oportunidades", "Valor", "Valor ponderado"]}
               linhas={p.previsaoMes.map((m) => [m.rotulo, num(m.n), moeda(m.valor), moeda(m.ponderado)])} />
           )}
-          {k.manuais > 0 && <p className={s.sub} style={{ margin: "6px 0 0" }}>{plural(k.manuais, "oportunidade com temperatura escolhida na ficha", "oportunidades com temperatura escolhida na ficha")}; as demais usam a automática.</p>}
+          {k.manuais > 0 && <p className={s.sub} style={{ margin: "6px 0 0" }}>{plural(k.manuais, "oportunidade com temperatura ou percentual escolhido na ficha", "oportunidades com temperatura ou percentual escolhido na ficha")}{k.proprios ? ` (${num(k.proprios)} com percentual próprio)` : ""}; as demais usam a automática.</p>}
         </>
       )}
     </Secao>

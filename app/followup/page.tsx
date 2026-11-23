@@ -14,8 +14,9 @@ import Modal from "@/app/components/Modal";
 import FormularioOrgao from "@/app/components/FormularioOrgao";
 import OportunidadeModal from "@/app/components/crm/OportunidadeModal";
 import CampoTitulo from "@/app/components/crm/CampoTitulo";
+import Termometro, { corPorPct, fundoPorPct } from "@/app/components/crm/Termometro";
 import { dataCurta, iniciais, moeda, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "@/app/components/crm/tipos";
-import { infoTemperatura, MOTIVOS_PERDA, ORIGENS, PERFIS_CRM, situacaoProximaAcao, temperaturaDe, valorPonderado } from "@/lib/validacao/crm";
+import { infoTemperatura, MOTIVOS_PERDA, ORIGENS, PERFIS_CRM, rotuloPct, situacaoProximaAcao, temperaturaDe, valorPonderado } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
 import s from "@/app/components/crm/crm.module.css";
 
@@ -127,9 +128,9 @@ function FollowupConteudo() {
   }, [procedimentos, ops]);
 
   const abertas = ops.filter((o) => o.resultado === "aberta");
-  const tempDe = (o: Oportunidade) => temperaturaDe({ temperatura: o.temperatura, etapa: o.etapa, propostaSituacao: o.proposta_situacao });
+  const tempDe = (o: Oportunidade) => temperaturaDe({ temperatura: o.temperatura, probabilidade: o.probabilidade, etapa: o.etapa, propostaSituacao: o.proposta_situacao });
   const resumo = {
-    ponderado: abertas.reduce((a, o) => a + (valorPonderado(o.valor, tempDe(o).temperatura) || 0), 0),
+    ponderado: abertas.reduce((a, o) => a + (valorPonderado(o.valor, tempDe(o).pct) || 0), 0),
     abertas: abertas.length,
     valorAberto: abertas.reduce((a, o) => a + (o.valor || 0), 0),
     atrasadas: abertas.filter((o) => situacaoProximaAcao(o, hoje) === "atrasada").length,
@@ -181,6 +182,7 @@ function FollowupConteudo() {
         <div className={s.resumoCard} title="Soma de valor × probabilidade da temperatura (Frio 15%, Morno 50%, Quente 85%) das oportunidades em aberto">
           <span className={s.resumoNum}>{moeda(resumo.ponderado)}</span>
           <span className="detalhe">Previsão ponderada</span>
+          <Termometro compacto />
         </div>
         <div className={s.resumoCard}>
           <span className={s.resumoNum}>{resumo.ganhas90.length}</span>
@@ -272,7 +274,8 @@ function FollowupConteudo() {
                     const resp = nomeDe(o.responsavel_id);
                     const temp = o.resultado === "aberta" ? tempDe(o) : null;
                     return (
-                      <button type="button" key={o.id} className={`${s.card} ${arrastando === o.id ? s.cardArrastando : ""}`}
+                      <button type="button" key={o.id} className={`${s.card} ${arrastando === o.id ? s.cardArrastando : ""} ${temp?.temperatura ? s.cardTemp : ""}`}
+                        style={temp?.temperatura ? ({ "--cor-temp": corPorPct(temp.pct) } as React.CSSProperties) : undefined}
                         draggable onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; setArrastando(o.id); }}
                         onDragEnd={() => { setArrastando(null); setSobre(null); }}
                         onClick={() => setAberta(o.id)} aria-label={`Abrir ${o.titulo}`}>
@@ -281,9 +284,9 @@ function FollowupConteudo() {
                         <span className={s.cardRodape}>
                           <span className={s.cardValor}>{o.valor != null ? moeda(o.valor) : ""}</span>
                           {temp?.temperatura && (
-                            <span className={`${s.temp} ${s["temp_" + temp.temperatura]}`}
-                              title={`${infoTemperatura(temp.temperatura).rotulo} · ${Math.round(infoTemperatura(temp.temperatura).pct * 100)}%${temp.automatica ? " (automática)" : ""}`}>
-                              {infoTemperatura(temp.temperatura).icone} {infoTemperatura(temp.temperatura).rotulo}
+                            <span className={s.temp} style={{ color: corPorPct(temp.pct), background: fundoPorPct(temp.pct) }}
+                              title={`${infoTemperatura(temp.temperatura).rotulo} · ${rotuloPct(temp.pct!)}${temp.automatica ? " (automática)" : temp.percentualProprio ? " (percentual próprio)" : ""}`}>
+                              {infoTemperatura(temp.temperatura).icone} {temp.percentualProprio ? rotuloPct(temp.pct!) : infoTemperatura(temp.temperatura).rotulo}
                             </span>
                           )}
                           {resp && <span className={s.avatar} title={`Responsável: ${resp}`}>{iniciais(resp)}</span>}

@@ -6,7 +6,7 @@
 .erro { background: var(--perigo-bg); color: var(--perigo); border-radius: var(--raio-sm, 8px); padding: 8px 10px; font-size: 13px; margin: 0; }
 
 /* Resumo */
-.resumo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.resumo { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
 .resumoCard {
   display: flex; flex-direction: column; gap: 2px; text-align: left; font: inherit; color: var(--texto);
   background: var(--bg-card); border: 1px solid var(--borda); border-radius: 12px; padding: 10px 12px;
@@ -50,10 +50,26 @@ button.resumoCard[aria-pressed="true"] { border-color: var(--primaria); backgrou
 .cardCliente { font-size: 12px; color: var(--texto-suave); overflow-wrap: anywhere; }
 .cardRodape { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-height: 22px; }
 .cardValor { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
-.temp { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-left: auto; white-space: nowrap; }
-.temp_frio { background: var(--primaria-claro); color: var(--primaria); }
-.temp_morno { background: var(--aviso-bg); color: var(--aviso); }
-.temp_quente { background: var(--perigo-bg); color: var(--perigo); }
+.temp { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: auto; white-space: nowrap; }
+/* Card: a cor da temperatura (escala contínua) vem em --cor-temp, na borda esquerda. */
+.cardTemp { border-left: 4px solid var(--cor-temp); }
+/* Escala (termômetro): degradê frio → morno → quente com marcador. */
+.termometro { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.termometroBarra {
+  position: relative; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--temp-frio) 15%, var(--temp-morno) 50%, var(--temp-quente) 85%);
+}
+.termometroMarca {
+  position: absolute; top: -7px; width: 0; height: 0; transform: translateX(-6px);
+  border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid;
+}
+.termometroMarca::after {
+  content: ""; position: absolute; left: -1px; top: 0; width: 2px; height: 8px; background: var(--texto); transform: translateY(0);
+}
+.termometroRotulos { position: relative; height: 16px; font-size: 11px; font-weight: 700; }
+.termometroRotulos > span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.termometroRotulos > span:first-child { transform: translateX(-20%); }
+.termometroRotulos > span:last-child { transform: translateX(-80%); }
 .avatar {
   display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
   background: var(--primaria-claro); color: var(--primaria); font-size: 10px; font-weight: 800;
@@ -92,6 +108,7 @@ details.bloco > summary { cursor: pointer; }
 
 @media (max-width: 760px) {
   .resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resumo > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .gradeForm { grid-template-columns: minmax(0, 1fr); }
   .coluna { flex-basis: 82vw; }
   .campo { min-width: 120px; }

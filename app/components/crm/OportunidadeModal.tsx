@@ -9,8 +9,9 @@ import Modal from "@/app/components/Modal";
 import Propostas from "./Propostas";
 import CampoTitulo from "./CampoTitulo";
 import FecharGanho from "./FecharGanho";
+import Termometro from "./Termometro";
 import {
-  infoTemperatura, MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, temperaturaAutomatica, temperaturaDe,
+  infoTemperatura, MOTIVOS_PERDA, probabilidadePropria, rotuloPct, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, temperaturaAutomatica, temperaturaDe,
   TEMPERATURAS, TIPOS_ATIVIDADE, valorPonderado,
 } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
@@ -402,7 +403,9 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
   const inicial = useCallback(() => ({
     titulo: op.titulo, procedimentoId: op.procedimento_id || "", orgaoId: op.orgao?.id || "", contatoId: op.contato_id || "", valor: valorParaCampo(op.valor),
     origem: op.origem || "", responsavelId: op.responsavel_id || "", previsaoFechamento: op.previsao_fechamento || "",
-    temperatura: op.temperatura || "",
+    // "pct" = percentual próprio (campo probabilidade).
+    temperatura: op.probabilidade != null ? "pct" : op.temperatura || "",
+    probabilidade: op.probabilidade != null ? String(op.probabilidade).replace(".", ",") : "",
   }), [op]);
   const [f, setF] = useState(inicial);
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -418,13 +421,24 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
   const mudou = JSON.stringify(f) !== JSON.stringify(inicial());
   const contato = contatos.find((c) => c.id === f.contatoId);
   const auto = temperaturaAutomatica({ etapa: op.etapa, propostaSituacao: op.proposta_situacao });
-  const temp = temperaturaDe({ temperatura: op.temperatura, etapa: op.etapa, propostaSituacao: op.proposta_situacao });
-  const ponderado = valorPonderado(op.valor, temp.temperatura);
-  // A temperatura só vai no corpo quando muda: antes da migração 20261123100000
-  // o resto dos dados continua salvando.
+  // Prévia com o que está no formulário (antes de salvar).
+  const pctDigitado = probabilidadePropria(f.probabilidade.replace("%", "").replace(",", ".").trim());
+  const temp = temperaturaDe({
+    temperatura: f.temperatura === "pct" ? null : f.temperatura || null,
+    probabilidade: f.temperatura === "pct" && pctDigitado != null ? pctDigitado * 100 : null,
+    etapa: op.etapa, propostaSituacao: op.proposta_situacao,
+  });
+  const ponderado = valorPonderado(op.valor, temp.pct);
+  // Temperatura e probabilidade só vão no corpo quando mudam: antes das
+  // migrações 20261123100000/20261124100000 o resto dos dados continua salvando.
   const corpo = () => {
+    const ini = inicial();
     const c: Record<string, string> = { ...f };
-    if (f.temperatura === inicial().temperatura) delete c.temperatura;
+    delete c.temperatura; delete c.probabilidade;
+    if (f.temperatura !== ini.temperatura || f.probabilidade !== ini.probabilidade) {
+      c.temperatura = f.temperatura === "pct" ? "" : f.temperatura;
+      c.probabilidade = f.temperatura === "pct" ? f.probabilidade : "";
+    }
     return c;
   };
 
@@ -471,11 +485,18 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
             <select value={f.temperatura} onChange={muda("temperatura")}>
               <option value="">Automática{auto ? ` (${infoTemperatura(auto).rotulo} · ${Math.round(infoTemperatura(auto).pct * 100)}%)` : " (antes da proposta: fora da previsão)"}</option>
               {TEMPERATURAS.map((t) => <option key={t.valor} value={t.valor}>{t.icone} {t.rotulo} · {Math.round(t.pct * 100)}% ({t.descricao})</option>)}
+              <option value="pct">✎ Percentual próprio…</option>
             </select>
+            {f.temperatura === "pct" && (
+              <input inputMode="decimal" value={f.probabilidade} onChange={muda("probabilidade")} placeholder="Ex.: 70" aria-label="Probabilidade de fechar (%)" />
+            )}
+            <Termometro pct={temp.pct} />
             <small className="detalhe">
-              {temp.temperatura
-                ? <>Valor ponderado: <strong>{ponderado != null ? moeda(ponderado) : "sem valor"}</strong>{ponderado != null ? ` (${moeda(op.valor)} × ${Math.round(infoTemperatura(temp.temperatura).pct * 100)}%)` : ""}</>
-                : "Sem temperatura: não entra na previsão ponderada."}
+              {f.temperatura === "pct" && pctDigitado == null
+                ? "Digite a probabilidade de 0 a 100%."
+                : temp.temperatura
+                  ? <>{temp.percentualProprio ? <>Faixa {infoTemperatura(temp.temperatura).rotulo}. </> : null}Valor ponderado: <strong>{ponderado != null ? moeda(ponderado) : "sem valor"}</strong>{ponderado != null ? ` (${moeda(op.valor)} × ${rotuloPct(temp.pct!)})` : ""}</>
+                  : "Sem temperatura: não entra na previsão ponderada."}
             </small>
           </label>
         )}

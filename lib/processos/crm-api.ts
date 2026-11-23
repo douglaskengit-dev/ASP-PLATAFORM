@@ -102,6 +102,8 @@ export function processoParaApi(p: any, ehAdmin: boolean) {
     previsao_fechamento: p.previsao_fechamento || null,
     /** Escolhida na ficha (nula = automática). */
     temperatura: p.temperatura || null,
+    /** Percentual próprio (0 a 100); nulo = o da temperatura. */
+    probabilidade: p.probabilidade == null ? null : Number(p.probabilidade),
     /** Situação da versão mais nova da proposta (preenchida pela lista). */
     proposta_situacao: null as string | null,
     proxima_acao: p.proxima_acao || null,

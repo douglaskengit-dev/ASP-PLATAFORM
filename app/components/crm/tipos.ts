@@ -29,6 +29,8 @@ export interface Oportunidade {
   previsao_fechamento: string | null;
   /** Escolhida na ficha; nula = automática. */
   temperatura: string | null;
+  /** Percentual próprio (0 a 100); nulo = o da temperatura. */
+  probabilidade: number | null;
   /** Situação da versão mais nova da proposta (nula sem proposta). */
   proposta_situacao: string | null;
   proxima_acao: string | null;

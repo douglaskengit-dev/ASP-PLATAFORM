@@ -45,6 +45,11 @@
   --aviso: #92400e;    --aviso-bg: #fef3c7;                                 /* 6.4:1 */
   --pendente: #c2410c; --pendente-bg: #fff1e6;                              /* 4.7:1 (5.2:1 no branco) */
   --perigo: #b3261e;   --perigo-bg: #fdecea;   --perigo-solido: #b3261e;    /* 5.7:1 · branco 6.5:1 */
+  /* Temperatura da oportunidade (Follow-up): escala fria → quente. */
+  --temp-frio: #1d63c4;   --temp-frio-bg: #e3eefc;
+  --temp-morno: #b45309;  --temp-morno-bg: #fdf0dc;
+  --temp-quente: #c0262d; --temp-quente-bg: #fde8e8;
+  --temp-sem: #6b7685;
   --info: var(--primaria); --info-bg: var(--primaria-claro);
   --destaque: #6d28d9; --destaque-bg: #f1ebfd;                              /* 6.1:1 */
   --teal: #0f766e;
@@ -95,6 +100,10 @@
   --aviso: #fbbf24;    --aviso-bg: #3b2f0b;                                 /* 7.9:1 */
   --pendente: #fb923c; --pendente-bg: #3a220f;                              /* 6.5:1 */
   --perigo: #f87171;   --perigo-bg: #3a1414;   --perigo-solido: #dc2626;    /* 5.9:1 · branco 4.8:1 */
+  --temp-frio: #7ab4f5;   --temp-frio-bg: #13263d;
+  --temp-morno: #f5a35a;  --temp-morno-bg: #3a2610;
+  --temp-quente: #f87171; --temp-quente-bg: #3a1414;
+  --temp-sem: #94a0ae;
   --destaque: #c4b5fd; --destaque-bg: #2a1f4a;                              /* 8.2:1 */
   --teal: #2dd4bf;
 

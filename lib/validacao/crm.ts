@@ -111,6 +111,15 @@ export function validarOportunidade(b: Record<string, unknown>, hoje: string): {
     if (t && !ehTemperatura(t)) return { erro: "Temperatura inválida." };
     c.temperatura = t || null;
   }
+  if (tem("probabilidade")) {
+    const bruto = texto(b.probabilidade).replace("%", "").replace(",", ".").trim();
+    if (!bruto) c.probabilidade = null;
+    else {
+      const n = Number(bruto);
+      if (!Number.isFinite(n) || n < 0 || n > 100) return { erro: "Probabilidade inválida: use de 0 a 100%." };
+      c.probabilidade = Math.round(n * 100) / 100;
+    }
+  }
   if (tem("previsaoFechamento")) {
     const d = texto(b.previsaoFechamento);
     if (d && !diaValido(d)) return { erro: "Previsão de fechamento inválida." };
@@ -208,18 +217,38 @@ export function temperaturaAutomatica(o: { etapa?: number | null; propostaSituac
   return null;
 }
 
-/** Temperatura que vale: a escolhida na ficha ou a automática. */
-export function temperaturaDe(o: { temperatura?: string | null; etapa?: number | null; propostaSituacao?: string | null }):
-  { temperatura: Temperatura | null; automatica: boolean } {
-  if (ehTemperatura(o.temperatura)) return { temperatura: o.temperatura, automatica: false };
-  return { temperatura: temperaturaAutomatica(o), automatica: true };
+/** Faixa de um percentual próprio: abaixo de 35% Frio, abaixo de 70% Morno,
+ *  daí para cima Quente. */
+export function faixaTemperatura(pct: number): Temperatura {
+  return pct < 0.35 ? "frio" : pct < 0.7 ? "morno" : "quente";
 }
 
-/** Valor × probabilidade; nulo sem valor ou sem temperatura. */
-export function valorPonderado(valor: number | null | undefined, t: Temperatura | null): number | null {
-  if (valor == null || !Number.isFinite(Number(valor)) || !t) return null;
-  return Math.round(Number(valor) * infoTemperatura(t).pct * 100) / 100;
+/** Probabilidade gravada (0 a 100) → fração; nula se ausente ou inválida. */
+export function probabilidadePropria(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n / 100 : null;
 }
+
+/** O que vale para a previsão, nesta ordem: percentual próprio da ficha;
+ *  temperatura escolhida na ficha; automática. pct = fração (0,15 = 15%). */
+export function temperaturaDe(o: { temperatura?: string | null; probabilidade?: number | string | null; etapa?: number | null; propostaSituacao?: string | null }):
+  { temperatura: Temperatura | null; pct: number | null; automatica: boolean; percentualProprio: boolean } {
+  const propria = probabilidadePropria(o.probabilidade);
+  if (propria != null) return { temperatura: faixaTemperatura(propria), pct: propria, automatica: false, percentualProprio: true };
+  const t = ehTemperatura(o.temperatura) ? o.temperatura : temperaturaAutomatica(o);
+  return { temperatura: t, pct: t ? infoTemperatura(t).pct : null, automatica: !ehTemperatura(o.temperatura), percentualProprio: false };
+}
+
+/** Valor × probabilidade (fração, ou a da temperatura); nulo sem valor ou sem probabilidade. */
+export function valorPonderado(valor: number | null | undefined, p: Temperatura | number | null): number | null {
+  const pct = typeof p === "number" ? p : p ? infoTemperatura(p).pct : null;
+  if (valor == null || !Number.isFinite(Number(valor)) || pct == null) return null;
+  return Math.round(Number(valor) * pct * 100) / 100;
+}
+
+/** "15%" ou "72,5%". */
+export const rotuloPct = (pct: number) => `${(Math.round(pct * 1000) / 10).toLocaleString("pt-BR")}%`;
 
 /** Situação de uma versão da proposta. "vencida" e "substituida" não são
  *  gravadas: saem da validade e de existir versão mais nova. */

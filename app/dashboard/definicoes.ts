@@ -223,7 +223,7 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
   cPrevisao: {
     painel: "comercial",
     titulo: "Previsão de vendas ponderada",
-    texto: "Valor ponderado = valor da oportunidade × probabilidade da temperatura: Frio 15% (proposta enviada, sem retorno), Morno 50% (em negociação) e Quente 85% (aprovação verbal ou proposta aceita). A temperatura é a escolhida na ficha da oportunidade; sem escolha, é automática: proposta aceita = Quente, etapa Negociação = Morno, etapa Proposta ou com proposta registrada = Frio. Antes da proposta, a oportunidade fica sem temperatura e não entra na soma. Só oportunidades em aberto; a tabela por mês usa a previsão de fechamento. Estado atual.",
+    texto: "Valor ponderado = valor da oportunidade × probabilidade da temperatura: Frio 15% (proposta enviada, sem retorno), Morno 50% (em negociação) e Quente 85% (aprovação verbal ou proposta aceita). Na ficha da oportunidade dá para escolher a temperatura ou digitar um percentual próprio (de 0 a 100%; ele entra na faixa Frio abaixo de 35%, Morno de 35% a 69% e Quente de 70% em diante, e a coluna Probabilidade mostra o percentual efetivo da faixa). Sem escolha, a temperatura é automática: proposta aceita = Quente, etapa Negociação = Morno, etapa Proposta ou com proposta registrada = Frio. Antes da proposta, a oportunidade fica sem temperatura e não entra na soma. Só oportunidades em aberto; a tabela por mês usa a previsão de fechamento. Estado atual.",
   },
   cPropostas: {
     painel: "comercial",
