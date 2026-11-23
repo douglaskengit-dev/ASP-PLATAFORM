@@ -89,6 +89,8 @@ function Conteudo({ p }: { p: PainelComercial }) {
           sub={<>{num(k.followups.hoje)} para hoje · {num(k.followups.semAcao)} sem próxima ação · de {plural(k.followups.abertas, "oportunidade aberta", "oportunidades abertas")}</>} />
         <Kpi def="cPipeline" valor={moeda(k.pipeline.valor)}
           sub={<>{plural(k.pipeline.abertas, "oportunidade", "oportunidades")}{k.pipeline.semValor ? ` (${num(k.pipeline.semValor)} sem valor)` : ""} · {moeda(k.pipeline.previsto30)} previsto em 30 dias ({num(k.pipeline.qtdPrevisto30)})</>} />
+        <Kpi def="cPrevisao" valor={moeda(k.previsao.ponderado)}
+          sub={<>de {moeda(k.previsao.valor)} em {plural(k.previsao.comTemperatura, "oportunidade com temperatura", "oportunidades com temperatura")}{k.previsao.semTemperatura ? ` · ${num(k.previsao.semTemperatura)} antes da proposta` : ""}</>} />
         <Kpi def="cTaxaGanho" periodo valor={pct(k.ganho.taxa)}
           sub={k.ganho.ganhas + k.ganho.perdidas ? <>{num(k.ganho.ganhas)} {k.ganho.ganhas === 1 ? "ganha" : "ganhas"} de {plural(k.ganho.ganhas + k.ganho.perdidas, "fechada", "fechadas")} · {moeda(k.ganho.valorGanho)} ganhos{k.ganho.ticketMedio != null ? ` · ticket médio ${moeda(k.ganho.ticketMedio)}` : ""}{k.ganho.cicloMediano != null ? ` · ciclo ${dias(k.ganho.cicloMediano)}` : ""}</> : "nenhuma oportunidade fechada no período"} />
         <Kpi def="cConversao" periodo valor={pct(k.conversao.taxa)}
@@ -113,6 +115,7 @@ function Conteudo({ p }: { p: PainelComercial }) {
       </div>
       <div className={s.cheio}><Followups p={p} /></div>
       <div className={s.cheio}><PropostasAcao p={p} /></div>
+      <div className={s.cheio}><Previsao p={p} /></div>
       <div className={s.grade2}>
         <MotivosPerda p={p} />
         <Origens p={p} />
@@ -266,6 +269,30 @@ function Followups({ p }: { p: PainelComercial }) {
               </div>
             )} />
           )}
+        </>
+      )}
+    </Secao>
+  );
+}
+
+function Previsao({ p }: { p: PainelComercial }) {
+  const k = p.kpis.previsao;
+  const linhas = p.previsaoTemperatura.filter((t) => t.temperatura || t.n);
+  const total = p.previsaoTemperatura.reduce((a, t) => ({ n: a.n + t.n, valor: a.valor + t.valor }), { n: 0, valor: 0 });
+  return (
+    <Secao def="cPrevisao" contador={k.comTemperatura}>
+      {total.n === 0 ? <Vazio>Nenhuma oportunidade em aberto.</Vazio> : (
+        <>
+          <Tabela legenda="Previsão ponderada por temperatura" colunas={["Temperatura", "Probabilidade", "Oportunidades", "Valor", "Valor ponderado"]}
+            linhas={[
+              ...linhas.map((t) => [t.rotulo, pct(t.pct), `${num(t.n)}${t.semValor ? ` (${num(t.semValor)} sem valor)` : ""}`, moeda(t.valor), moeda(t.ponderado)]),
+              [<strong key="t">Total</strong>, "", num(total.n), moeda(total.valor), <strong key="p">{moeda(k.ponderado)}</strong>],
+            ]} />
+          {p.previsaoMes.length > 0 && (
+            <Tabela legenda="Previsão ponderada pelo mês da previsão de fechamento" colunas={["Fechamento previsto", "Oportunidades", "Valor", "Valor ponderado"]}
+              linhas={p.previsaoMes.map((m) => [m.rotulo, num(m.n), moeda(m.valor), moeda(m.ponderado)])} />
+          )}
+          {k.manuais > 0 && <p className={s.sub} style={{ margin: "6px 0 0" }}>{plural(k.manuais, "oportunidade com temperatura escolhida na ficha", "oportunidades com temperatura escolhida na ficha")}; as demais usam a automática.</p>}
         </>
       )}
     </Secao>

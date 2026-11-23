@@ -100,6 +100,10 @@ export function processoParaApi(p: any, ehAdmin: boolean) {
     responsavel_id: p.responsavel_id || null,
     contato_id: p.contato_id || null,
     previsao_fechamento: p.previsao_fechamento || null,
+    /** Escolhida na ficha (nula = automática). */
+    temperatura: p.temperatura || null,
+    /** Situação da versão mais nova da proposta (preenchida pela lista). */
+    proposta_situacao: null as string | null,
     proxima_acao: p.proxima_acao || null,
     proxima_acao_em: p.proxima_acao_em || null,
     procedimento_id: p.procedimento_id || null,

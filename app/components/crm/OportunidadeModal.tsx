@@ -9,7 +9,10 @@ import Modal from "@/app/components/Modal";
 import Propostas from "./Propostas";
 import CampoTitulo from "./CampoTitulo";
 import FecharGanho from "./FecharGanho";
-import { MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, TIPOS_ATIVIDADE } from "@/lib/validacao/crm";
+import {
+  infoTemperatura, MOTIVOS_PERDA, ORIGENS, rotuloMotivoPerda, rotuloOrigem, situacaoProximaAcao, temperaturaAutomatica, temperaturaDe,
+  TEMPERATURAS, TIPOS_ATIVIDADE, valorPonderado,
+} from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
 import { dataBr, moeda, valorParaCampo, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "./tipos";
 import s from "./crm.module.css";
@@ -399,6 +402,7 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
   const inicial = useCallback(() => ({
     titulo: op.titulo, procedimentoId: op.procedimento_id || "", orgaoId: op.orgao?.id || "", contatoId: op.contato_id || "", valor: valorParaCampo(op.valor),
     origem: op.origem || "", responsavelId: op.responsavel_id || "", previsaoFechamento: op.previsao_fechamento || "",
+    temperatura: op.temperatura || "",
   }), [op]);
   const [f, setF] = useState(inicial);
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -413,6 +417,16 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
     setF((v) => ({ ...v, [k]: e.target.value, ...(k === "orgaoId" ? { contatoId: "" } : {}) }));
   const mudou = JSON.stringify(f) !== JSON.stringify(inicial());
   const contato = contatos.find((c) => c.id === f.contatoId);
+  const auto = temperaturaAutomatica({ etapa: op.etapa, propostaSituacao: op.proposta_situacao });
+  const temp = temperaturaDe({ temperatura: op.temperatura, etapa: op.etapa, propostaSituacao: op.proposta_situacao });
+  const ponderado = valorPonderado(op.valor, temp.temperatura);
+  // A temperatura só vai no corpo quando muda: antes da migração 20261123100000
+  // o resto dos dados continua salvando.
+  const corpo = () => {
+    const c: Record<string, string> = { ...f };
+    if (f.temperatura === inicial().temperatura) delete c.temperatura;
+    return c;
+  };
 
   return (
     <section className={s.bloco}>
@@ -451,10 +465,24 @@ function Dados({ op, orgaos, usuarios, procedimentos, ocupado, acao }: {
           </select>
         </label>
         <label className={s.campo}><span>Previsão de fechamento</span><input type="date" value={f.previsaoFechamento} onChange={muda("previsaoFechamento")} /></label>
+        {op.resultado === "aberta" && (
+          <label className={s.campo}>
+            <span>Temperatura (previsão ponderada)</span>
+            <select value={f.temperatura} onChange={muda("temperatura")}>
+              <option value="">Automática{auto ? ` (${infoTemperatura(auto).rotulo} · ${Math.round(infoTemperatura(auto).pct * 100)}%)` : " (antes da proposta: fora da previsão)"}</option>
+              {TEMPERATURAS.map((t) => <option key={t.valor} value={t.valor}>{t.icone} {t.rotulo} · {Math.round(t.pct * 100)}% ({t.descricao})</option>)}
+            </select>
+            <small className="detalhe">
+              {temp.temperatura
+                ? <>Valor ponderado: <strong>{ponderado != null ? moeda(ponderado) : "sem valor"}</strong>{ponderado != null ? ` (${moeda(op.valor)} × ${Math.round(infoTemperatura(temp.temperatura).pct * 100)}%)` : ""}</>
+                : "Sem temperatura: não entra na previsão ponderada."}
+            </small>
+          </label>
+        )}
       </div>
       <div className={s.linhaForm}>
         <button type="button" className="btn-azul" disabled={ocupado || !mudou}
-          onClick={() => acao(() => enviar(`/api/processos/${op.id}`, "PATCH", f))}>Salvar dados</button>
+          onClick={() => acao(() => enviar(`/api/processos/${op.id}`, "PATCH", corpo()))}>Salvar dados</button>
         {mudou && <button type="button" className="btn-doc" onClick={() => setF(inicial())}>Desfazer</button>}
         {!mudou && op.origem && <span className="detalhe">Origem: {rotuloOrigem(op.origem)}</span>}
       </div>

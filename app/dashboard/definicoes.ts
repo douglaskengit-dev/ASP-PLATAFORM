@@ -11,7 +11,7 @@ export type ChaveDef =
   | "gConcluidas" | "gPrazoTotal" | "gCarteira" | "gRetrabalho" | "gPendencias" | "gOcupacao" | "gCalibracao" | "gAgua"
   | "gDiasCampo" | "gMaisAntigas"
   | "cRenovacoes" | "cInativos" | "cPrazoEntrega" | "cAndamento" | "cFunil" | "cConversao" | "cParados" | "cProjetosNovos" | "cRecompra"
-  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup" | "cFollowups" | "cPropostas";
+  | "cPipeline" | "cTaxaGanho" | "cMotivosPerda" | "cOrigens" | "cProjetosFollowup" | "cFollowups" | "cPropostas" | "cPrevisao";
 
 /** `painel` = o Dashboard em cujo glossário a definição aparece (sem ele, Operações). */
 export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; painel?: PainelId }> = {
@@ -219,6 +219,11 @@ export const DEFINICOES: Record<ChaveDef, { titulo: string; texto: string; paine
     painel: "comercial",
     titulo: "Origem das oportunidades",
     texto: "Oportunidades abertas no período, por origem (Licitação, Indicação, Cliente recorrente…). Ganhas e perdidas = o desfecho dessas mesmas oportunidades até agora; a taxa é ganhas ÷ (ganhas + perdidas). Oportunidade ainda em aberto não entra na taxa.",
+  },
+  cPrevisao: {
+    painel: "comercial",
+    titulo: "Previsão de vendas ponderada",
+    texto: "Valor ponderado = valor da oportunidade × probabilidade da temperatura: Frio 15% (proposta enviada, sem retorno), Morno 50% (em negociação) e Quente 85% (aprovação verbal ou proposta aceita). A temperatura é a escolhida na ficha da oportunidade; sem escolha, é automática: proposta aceita = Quente, etapa Negociação = Morno, etapa Proposta ou com proposta registrada = Frio. Antes da proposta, a oportunidade fica sem temperatura e não entra na soma. Só oportunidades em aberto; a tabela por mês usa a previsão de fechamento. Estado atual.",
   },
   cPropostas: {
     painel: "comercial",

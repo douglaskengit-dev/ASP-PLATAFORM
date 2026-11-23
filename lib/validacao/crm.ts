@@ -106,6 +106,11 @@ export function validarOportunidade(b: Record<string, unknown>, hoje: string): {
     c.origem = o || null;
   }
   if (tem("responsavelId")) c.responsavel_id = texto(b.responsavelId) || null;
+  if (tem("temperatura")) {
+    const t = texto(b.temperatura);
+    if (t && !ehTemperatura(t)) return { erro: "Temperatura inválida." };
+    c.temperatura = t || null;
+  }
   if (tem("previsaoFechamento")) {
     const d = texto(b.previsaoFechamento);
     if (d && !diaValido(d)) return { erro: "Previsão de fechamento inválida." };
@@ -172,6 +177,48 @@ export function validarProposta(b: Record<string, unknown>, hoje: string): { dat
   if (observacao.length > TAM_OBS_PROPOSTA) return { erro: `Observação muito longa (máximo ${TAM_OBS_PROPOSTA} caracteres).` };
   if (valor === null && !observacao && !b.temArquivo) return { erro: "Informe o valor, anexe o arquivo ou escreva uma observação." };
   return { data, validade, valor, observacao: observacao || null };
+}
+
+/** Previsão de Vendas Ponderada: valor ponderado = valor × probabilidade da
+ *  temperatura. A temperatura é a escolhida na ficha ou, sem escolha, a
+ *  automática (pela proposta e pela etapa). */
+export const TEMPERATURAS = [
+  { valor: "frio", rotulo: "Frio", pct: 0.15, icone: "❄️", descricao: "proposta enviada, sem retorno" },
+  { valor: "morno", rotulo: "Morno", pct: 0.5, icone: "🌤️", descricao: "em negociação, dúvidas respondidas" },
+  { valor: "quente", rotulo: "Quente", pct: 0.85, icone: "🔥", descricao: "aprovação verbal ou proposta aceita, aguardando assinatura" },
+] as const;
+export type Temperatura = (typeof TEMPERATURAS)[number]["valor"];
+/** Índices em ETAPAS_FLUXO (lib/processos/etapas.ts). */
+export const ETAPA_PROPOSTA = 3;
+export const ETAPA_NEGOCIACAO = 4;
+
+export function ehTemperatura(v: unknown): v is Temperatura {
+  return TEMPERATURAS.some((x) => x.valor === v);
+}
+export const infoTemperatura = (t: Temperatura) => TEMPERATURAS.find((x) => x.valor === t)!;
+
+/** Automática: proposta aceita → quente; Negociação (ou depois) → morno;
+ *  Proposta, ou qualquer etapa com proposta registrada → frio; antes disso,
+ *  nula (fora da previsão). */
+export function temperaturaAutomatica(o: { etapa?: number | null; propostaSituacao?: string | null }): Temperatura | null {
+  if (o.propostaSituacao === "aceita") return "quente";
+  const etapa = Number(o.etapa) || 0;
+  if (etapa >= ETAPA_NEGOCIACAO) return "morno";
+  if (etapa === ETAPA_PROPOSTA || o.propostaSituacao) return "frio";
+  return null;
+}
+
+/** Temperatura que vale: a escolhida na ficha ou a automática. */
+export function temperaturaDe(o: { temperatura?: string | null; etapa?: number | null; propostaSituacao?: string | null }):
+  { temperatura: Temperatura | null; automatica: boolean } {
+  if (ehTemperatura(o.temperatura)) return { temperatura: o.temperatura, automatica: false };
+  return { temperatura: temperaturaAutomatica(o), automatica: true };
+}
+
+/** Valor × probabilidade; nulo sem valor ou sem temperatura. */
+export function valorPonderado(valor: number | null | undefined, t: Temperatura | null): number | null {
+  if (valor == null || !Number.isFinite(Number(valor)) || !t) return null;
+  return Math.round(Number(valor) * infoTemperatura(t).pct * 100) / 100;
 }
 
 /** Situação de uma versão da proposta. "vencida" e "substituida" não são

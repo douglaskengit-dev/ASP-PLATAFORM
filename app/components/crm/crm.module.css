@@ -50,6 +50,10 @@ button.resumoCard[aria-pressed="true"] { border-color: var(--primaria); backgrou
 .cardCliente { font-size: 12px; color: var(--texto-suave); overflow-wrap: anywhere; }
 .cardRodape { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-height: 22px; }
 .cardValor { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.temp { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-left: auto; white-space: nowrap; }
+.temp_frio { background: var(--primaria-claro); color: var(--primaria); }
+.temp_morno { background: var(--aviso-bg); color: var(--aviso); }
+.temp_quente { background: var(--perigo-bg); color: var(--perigo); }
 .avatar {
   display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
   background: var(--primaria-claro); color: var(--primaria); font-size: 10px; font-weight: 800;

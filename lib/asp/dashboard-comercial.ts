@@ -11,7 +11,7 @@
  * aberto, ganha ou perdida (resultado_em = dia do fechamento).
  * historico_etapas guarda cada troca com a data informada por quem trocou. */
 import { ETAPAS_FLUXO } from "../processos/etapas";
-import { diasParaValidade, rotuloMotivoPerda, rotuloOrigem, situacaoPropostaVista, situacaoProximaAcao } from "../validacao/crm";
+import { diasParaValidade, rotuloMotivoPerda, rotuloOrigem, situacaoPropostaVista, situacaoProximaAcao, TEMPERATURAS, temperaturaDe, valorPonderado, type Temperatura } from "../validacao/crm";
 import { diaBrasilia, fimDaOS } from "../validacao";
 import {
   diferencaDias, estatistica, intervaloDoPeriodo, montarRecorrencia, noIntervalo, porChave,
@@ -45,6 +45,8 @@ export interface ProcessoBruto {
   proxima_acao_em?: string | null;
   /** Versão mais nova da proposta (validade e situação). Nula sem proposta ou antes da migração. */
   proposta?: { versao: number; validade: string | null; situacao: string } | null;
+  /** Escolhida na ficha (nula = automática). */
+  temperatura?: string | null;
 }
 
 const aberta = (p: ProcessoBruto) => !p.resultado || p.resultado === "aberta";
@@ -81,11 +83,17 @@ export interface PainelComercial {
      *  inclui as vencidas), vencidas, que vencem em até 7 dias e aceitas ainda sem Fechar ganho. */
     propostas: { aguardando: number; vencidas: number; vencem7: number; aceitas: number };
     pipeline: { valor: number; abertas: number; semValor: number; previsto30: number; qtdPrevisto30: number };
+    /** Previsão de Vendas Ponderada: soma de valor × probabilidade da temperatura (em aberto agora). */
+    previsao: { ponderado: number; valor: number; comTemperatura: number; semTemperatura: number; manuais: number };
     /** Fechadas no período (data do resultado). taxa = ganhas / (ganhas + perdidas). */
     ganho: { ganhas: number; perdidas: number; taxa: number | null; valorGanho: number; valorPerdido: number; ticketMedio: number | null; cicloMediano: number | null };
   };
   /** Próximas ações atrasadas (a mais antiga primeiro). */
   followupsAtrasados: { id: string; titulo: string; cliente: string | null; responsavel: string | null; acao: string | null; em: string; dias: number }[];
+  /** Previsão ponderada por temperatura (Frio, Morno, Quente e "sem temperatura", 0%). */
+  previsaoTemperatura: { temperatura: Temperatura | null; rotulo: string; pct: number; n: number; valor: number; ponderado: number; semValor: number }[];
+  /** Previsão ponderada pelo mês da previsão de fechamento (atrasadas e sem data à parte). */
+  previsaoMes: { chave: string; rotulo: string; n: number; valor: number; ponderado: number }[];
   /** Propostas para agir: vencidas, que vencem em até 7 dias e aceitas sem Fechar ganho. */
   propostasAcao: { id: string; titulo: string; cliente: string | null; responsavel: string | null; versao: number;
     tipo: "vencida" | "vence" | "aceita"; validade: string | null; dias: number | null }[];
@@ -306,6 +314,33 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     if (sit.get(p.id) === "sem_acao") r.semAcao++;
     porResp.set(k, r);
   }
+  // ── Previsão de Vendas Ponderada ──────────────────────────────────────────
+  const tempOp = new Map(emAberto.map((p) => [p.id, temperaturaDe({ temperatura: p.temperatura, etapa: p.etapa, propostaSituacao: p.proposta?.situacao || null })]));
+  const pondDe = (p: ProcessoBruto) => valorPonderado(p.valor ?? null, tempOp.get(p.id)!.temperatura) || 0;
+  const previsaoTemperatura: PainelComercial["previsaoTemperatura"] = [...TEMPERATURAS.slice().reverse(), null].map((t) => {
+    const l = emAberto.filter((p) => tempOp.get(p.id)!.temperatura === (t ? t.valor : null));
+    return {
+      temperatura: t ? t.valor : null, rotulo: t ? t.rotulo : "Sem temperatura (antes da proposta)", pct: t ? t.pct : 0,
+      n: l.length, valor: soma(l), ponderado: l.reduce((a, p) => a + pondDe(p), 0), semValor: l.filter((p) => !(valorDe(p) > 0)).length,
+    };
+  });
+  const mesHoje = hoje.slice(0, 7);
+  const prevPorMes = new Map<string, ProcessoBruto[]>();
+  for (const p of emAberto) {
+    if (!tempOp.get(p.id)!.temperatura) continue;
+    const dia = p.previsao_fechamento?.slice(0, 10);
+    const k = !dia ? "sem" : dia < hoje ? "atrasada" : dia.slice(0, 7);
+    prevPorMes.set(k, [...(prevPorMes.get(k) || []), p]);
+  }
+  const chavesMes = Array.from(prevPorMes.keys()).filter((k) => k !== "sem" && k !== "atrasada").sort();
+  const previsaoMes: PainelComercial["previsaoMes"] = [
+    ...(prevPorMes.has("atrasada") ? ["atrasada"] : []), ...chavesMes, ...(prevPorMes.has("sem") ? ["sem"] : []),
+  ].map((k) => {
+    const l = prevPorMes.get(k)!;
+    const rotulo = k === "atrasada" ? "Previsão já passou" : k === "sem" ? "Sem previsão de fechamento" : `${rotuloMes(k)}${k === mesHoje ? " (este mês)" : ""}`;
+    return { chave: k, rotulo, n: l.length, valor: soma(l), ponderado: l.reduce((a, p) => a + pondDe(p), 0) };
+  });
+
   // ── Propostas (versão mais nova de cada oportunidade em aberto) ──────────
   const propostasAcao: PainelComercial["propostasAcao"] = [];
   let aguardando = 0;
@@ -401,6 +436,13 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
         hoje: emAberto.filter((p) => sit.get(p.id) === "hoje").length,
         semAcao: emAberto.filter((p) => sit.get(p.id) === "sem_acao").length,
       },
+      previsao: {
+        ponderado: emAberto.reduce((a, p) => a + pondDe(p), 0),
+        valor: soma(emAberto.filter((p) => tempOp.get(p.id)!.temperatura)),
+        comTemperatura: emAberto.filter((p) => tempOp.get(p.id)!.temperatura).length,
+        semTemperatura: emAberto.filter((p) => !tempOp.get(p.id)!.temperatura).length,
+        manuais: emAberto.filter((p) => !tempOp.get(p.id)!.automatica).length,
+      },
       propostas: { aguardando, vencidas: contaTipo("vencida"), vencem7: contaTipo("vence"), aceitas: contaTipo("aceita") },
       pipeline: {
         valor: soma(emAberto), abertas: emAberto.length, semValor: emAberto.filter((p) => !(valorDe(p) > 0)).length,
@@ -419,6 +461,8 @@ export function montarComercial(d: DadosComercial, f: FiltrosDashboard, hoje: st
     followupsAtrasados: followupsAtrasados.slice(0, 30),
     followupsPorResponsavel,
     propostasAcao: propostasAcao.slice(0, 40),
+    previsaoTemperatura,
+    previsaoMes,
     projetosFollowup: { total: historico.length, comProjeto: comProjetoHist, semProjeto: historico.length - comProjetoHist, itens: historico.slice(0, 100) },
     renovacoes: renovacoes.slice(0, 30),
     inativos: inativos.slice(0, 30),

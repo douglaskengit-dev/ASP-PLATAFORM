@@ -15,7 +15,7 @@ import FormularioOrgao from "@/app/components/FormularioOrgao";
 import OportunidadeModal from "@/app/components/crm/OportunidadeModal";
 import CampoTitulo from "@/app/components/crm/CampoTitulo";
 import { dataCurta, iniciais, moeda, type Oportunidade, type Orgao, type Procedimento, type Usuario } from "@/app/components/crm/tipos";
-import { MOTIVOS_PERDA, ORIGENS, PERFIS_CRM, situacaoProximaAcao } from "@/lib/validacao/crm";
+import { infoTemperatura, MOTIVOS_PERDA, ORIGENS, PERFIS_CRM, situacaoProximaAcao, temperaturaDe, valorPonderado } from "@/lib/validacao/crm";
 import type { EtapaFluxo } from "@/lib/processos/etapas";
 import s from "@/app/components/crm/crm.module.css";
 
@@ -127,7 +127,9 @@ function FollowupConteudo() {
   }, [procedimentos, ops]);
 
   const abertas = ops.filter((o) => o.resultado === "aberta");
+  const tempDe = (o: Oportunidade) => temperaturaDe({ temperatura: o.temperatura, etapa: o.etapa, propostaSituacao: o.proposta_situacao });
   const resumo = {
+    ponderado: abertas.reduce((a, o) => a + (valorPonderado(o.valor, tempDe(o).temperatura) || 0), 0),
     abertas: abertas.length,
     valorAberto: abertas.reduce((a, o) => a + (o.valor || 0), 0),
     atrasadas: abertas.filter((o) => situacaoProximaAcao(o, hoje) === "atrasada").length,
@@ -176,6 +178,10 @@ function FollowupConteudo() {
         <button type="button" className={s.resumoCard} onClick={() => setFAcao(fAcao === "sem_acao" ? "" : "sem_acao")} aria-pressed={fAcao === "sem_acao"}>
           <span className={s.resumoNum}>{resumo.semAcao}</span><span className="detalhe">Sem próxima ação</span>
         </button>
+        <div className={s.resumoCard} title="Soma de valor × probabilidade da temperatura (Frio 15%, Morno 50%, Quente 85%) das oportunidades em aberto">
+          <span className={s.resumoNum}>{moeda(resumo.ponderado)}</span>
+          <span className="detalhe">Previsão ponderada</span>
+        </div>
         <div className={s.resumoCard}>
           <span className={s.resumoNum}>{resumo.ganhas90.length}</span>
           <span className="detalhe">Ganhas em 90 dias · {moeda(resumo.ganhas90.reduce((a, o) => a + (o.valor || 0), 0))}</span>
@@ -264,6 +270,7 @@ function FollowupConteudo() {
                   {lista.map((o) => {
                     const sit = situacaoProximaAcao(o, hoje);
                     const resp = nomeDe(o.responsavel_id);
+                    const temp = o.resultado === "aberta" ? tempDe(o) : null;
                     return (
                       <button type="button" key={o.id} className={`${s.card} ${arrastando === o.id ? s.cardArrastando : ""}`}
                         draggable onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; setArrastando(o.id); }}
@@ -273,6 +280,12 @@ function FollowupConteudo() {
                         <span className={s.cardCliente}>{o.orgao?.razao_social || "Sem cliente"}</span>
                         <span className={s.cardRodape}>
                           <span className={s.cardValor}>{o.valor != null ? moeda(o.valor) : ""}</span>
+                          {temp?.temperatura && (
+                            <span className={`${s.temp} ${s["temp_" + temp.temperatura]}`}
+                              title={`${infoTemperatura(temp.temperatura).rotulo} · ${Math.round(infoTemperatura(temp.temperatura).pct * 100)}%${temp.automatica ? " (automática)" : ""}`}>
+                              {infoTemperatura(temp.temperatura).icone} {infoTemperatura(temp.temperatura).rotulo}
+                            </span>
+                          )}
                           {resp && <span className={s.avatar} title={`Responsável: ${resp}`}>{iniciais(resp)}</span>}
                         </span>
                         {o.resultado === "aberta" ? (
